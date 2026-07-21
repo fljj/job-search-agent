@@ -105,7 +105,7 @@
 
 ### `GET /api/v1/jobs`
 
-查询参数：`strategy_id`、`grade`、`eligibility`、`effective_job_status`、`work_mode`、`page`、`page_size`、`sort`。
+查询参数：`strategy_id`、`grade`、`eligibility`、`effective_job_status`、`hard_rejected`、`work_mode`、`page`、`page_size`。评分结果类筛选必须与 `strategy_id` 一起使用。
 
 当指定 `strategy_id` 时，返回该策略的最新评分摘要。
 

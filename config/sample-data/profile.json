@@ -1,0 +1,18 @@
+{
+  "name": "示例候选人",
+  "total_years": 13,
+  "management_years": 5,
+  "has_architecture_experience": true,
+  "has_core_system_experience": true,
+  "skills": [
+    { "name": "Java", "years": 13, "source": "resume", "is_core": true },
+    { "name": "Spring Boot", "years": 8, "source": "resume", "is_core": true },
+    { "name": "MySQL", "years": 10, "source": "resume", "is_core": true },
+    { "name": "Redis", "years": 8, "source": "resume", "is_core": false },
+    { "name": "Kafka", "years": 6, "source": "resume", "is_core": false }
+  ],
+  "industry_experiences": [
+    { "industry_code": "互联网", "years": 10, "source": "resume" },
+    { "industry_code": "金融科技", "years": 3, "source": "resume" }
+  ]
+}

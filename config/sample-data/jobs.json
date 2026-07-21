@@ -1,0 +1,24 @@
+[
+  {
+    "external_job_id": "mock-remote-001",
+    "title": "高级Java后端工程师",
+    "company_name": "示例科技",
+    "industry": "互联网",
+    "location": "北京",
+    "work_mode": "REMOTE",
+    "salary_text": "40K-45K·14薪",
+    "description": "5年以上Java经验，要求Spring Boot、MySQL、Redis，Kafka优先。",
+    "source_status": "OPEN"
+  },
+  {
+    "external_job_id": "mock-onsite-001",
+    "title": "Java后端工程师",
+    "company_name": "北京示例公司",
+    "industry": "企业软件",
+    "location": "北京",
+    "work_mode": "ONSITE",
+    "salary_text": "20K-25K",
+    "description": "要求Java、Spring Boot和MySQL经验。",
+    "source_status": "OPEN"
+  }
+]

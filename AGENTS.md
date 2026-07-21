@@ -50,7 +50,7 @@
 
 ### 4.1 后端
 
-- Python 3.12
+- Python 3.13
 - FastAPI
 - Pydantic v2
 - SQLAlchemy 2

@@ -1,0 +1,67 @@
+from decimal import Decimal
+
+import pytest
+
+from packages.job_parser.models import SalaryRange, SeniorityLevel, WorkMode
+from packages.scoring.hard_filters import evaluate_hard_filters
+from packages.scoring.models import ScoringContext
+
+
+def codes(context: ScoringContext) -> set[str]:
+    return {item.rule_code for item in evaluate_hard_filters(context)}
+
+
+def test_matching_job_has_no_rejection(context: ScoringContext) -> None:
+    assert codes(context) == set()
+
+
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    [
+        ({"title": "Android开发工程师"}, "TITLE_EXCLUDED"),
+        ({"work_mode": WorkMode.ONSITE, "location": "北京"}, "ONSITE_LOCATION_NOT_ALLOWED"),
+        ({"work_mode": WorkMode.HYBRID, "location": "上海"}, "HYBRID_LOCATION_NOT_ALLOWED"),
+        ({"industry": "教育培训"}, "INDUSTRY_EXCLUDED"),
+        ({"company_name": "黑名单公司有限公司"}, "COMPANY_BLACKLISTED"),
+    ],
+)
+def test_job_field_rejections(context: ScoringContext, change: dict[str, object], expected: str) -> None:
+    changed = context.model_copy(update={"job": context.job.model_copy(update=change)})
+    assert expected in codes(changed)
+
+
+def test_disabled_work_mode(context: ScoringContext) -> None:
+    rules = [rule.model_copy(update={"enabled": False}) if rule.work_mode == WorkMode.REMOTE else rule
+             for rule in context.strategy.work_mode_rules]
+    changed = context.model_copy(update={"strategy": context.strategy.model_copy(update={"work_mode_rules": rules})})
+    assert "WORK_MODE_DISABLED" in codes(changed)
+
+
+def test_missing_core_skill(context: ScoringContext) -> None:
+    candidate = context.candidate.model_copy(update={"skills": []})
+    assert "REQUIRED_CORE_SKILL_MISSING" in codes(context.model_copy(update={"candidate": candidate}))
+
+
+def test_salary_below_minimum(context: ScoringContext) -> None:
+    parsed = context.parsed_job.model_copy(update={"salary": SalaryRange(
+        minimum_monthly_k=Decimal(20), maximum_monthly_k=Decimal(30), is_pre_tax=True)})
+    assert "SALARY_BELOW_MINIMUM" in codes(context.model_copy(update={"parsed_job": parsed}))
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        ({"outsourcing_detected": True}, "OUTSOURCING_NOT_ACCEPTED"),
+        ({"headhunter_detected": True}, "HEADHUNTER_NOT_ACCEPTED"),
+        ({"internship_detected": True}, "INTERNSHIP_POSITION"),
+        ({"seniority_level": SeniorityLevel.JUNIOR}, "JUNIOR_POSITION"),
+    ],
+)
+def test_parsed_rejections(context: ScoringContext, changes: dict[str, object], expected: str) -> None:
+    parsed = context.parsed_job.model_copy(update=changes)
+    assert expected in codes(context.model_copy(update={"parsed_job": parsed}))
+
+
+def test_unknown_salary_does_not_hard_reject(context: ScoringContext) -> None:
+    parsed = context.parsed_job.model_copy(update={"salary": None})
+    assert "SALARY_BELOW_MINIMUM" not in codes(context.model_copy(update={"parsed_job": parsed}))

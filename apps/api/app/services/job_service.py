@@ -1,0 +1,209 @@
+import hashlib
+import json
+from typing import Any
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
+
+from adapters.llm.fake import FakeLlmJobParser
+from apps.api.app.models import entities as db
+from apps.api.app.schemas.job import (
+    JobImportPayload,
+    JobImportResponse,
+    JobResponse,
+    ParsedJobResponse,
+)
+from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
+from packages.job_parser.models import JobInput, ParsedJob
+from packages.job_parser.service import JobParserService
+
+
+def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse:
+    ensure_default_user(session)
+    content_hash = _content_hash(payload)
+    filters: list[Any] = [db.Job.content_hash == content_hash]
+    if payload.external_job_id:
+        filters.append(db.Job.external_job_id == payload.external_job_id)
+    existing = session.scalar(select(db.Job).where(
+        db.Job.user_id == DEFAULT_USER_ID,
+        db.Job.source == payload.source,
+        or_(*filters),
+    ))
+    if existing:
+        return JobImportResponse(result="DUPLICATE", job=_response(existing))
+    job = db.Job(
+        user_id=DEFAULT_USER_ID, content_hash=content_hash,
+        raw_data=payload.model_dump(mode="json"),
+        **payload.model_dump(exclude={"published_at", "work_mode", "source_status"}),
+        published_at=payload.published_at, work_mode=payload.work_mode.value,
+        source_status=payload.source_status.value,
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    return JobImportResponse(result="CREATED", job=_response(job))
+
+
+def list_jobs(
+    session: Session,
+    page: int,
+    page_size: int,
+    strategy_id: object | None = None,
+    grade: str | None = None,
+    eligibility: str | None = None,
+    effective_job_status: str | None = None,
+    work_mode: str | None = None,
+    hard_rejected: bool | None = None,
+) -> tuple[list[JobResponse], int]:
+    query = select(db.Job).where(db.Job.user_id == DEFAULT_USER_ID)
+    if work_mode:
+        query = query.where(db.Job.work_mode == work_mode)
+    jobs = session.scalars(query.order_by(db.Job.created_at.desc())).all()
+    items: list[JobResponse] = []
+    for job in jobs:
+        latest_score = None
+        if strategy_id is not None:
+            latest_score = session.scalar(
+                select(db.JobScore)
+                .where(db.JobScore.job_id == job.id, db.JobScore.strategy_id == strategy_id)
+                .order_by(db.JobScore.created_at.desc())
+                .limit(1)
+            )
+            if latest_score is None:
+                continue
+            if grade and latest_score.grade != grade:
+                continue
+            if eligibility and latest_score.eligibility != eligibility:
+                continue
+            if effective_job_status and latest_score.effective_job_status != effective_job_status:
+                continue
+            if hard_rejected is not None and latest_score.hard_rejected != hard_rejected:
+                continue
+        elif any((grade, eligibility, effective_job_status, hard_rejected is not None)):
+            raise ValueError("评分结果筛选必须同时提供 strategy_id")
+        summary = None if latest_score is None else {
+            "id": str(latest_score.id), "total_score": latest_score.total_score,
+            "grade": latest_score.grade, "eligibility": latest_score.eligibility,
+            "hard_rejected": latest_score.hard_rejected,
+            "effective_job_status": latest_score.effective_job_status,
+        }
+        items.append(_response(job, summary))
+    total = len(items)
+    start = (page - 1) * page_size
+    return items[start:start + page_size], total
+
+
+def get_job(session: Session, job_id: object) -> JobResponse:
+    job = _get_job_entity(session, job_id)
+    return _response(job)
+
+
+def parse_job(session: Session, job_id: object, mode: str) -> ParsedJobResponse:
+    job = _get_job_entity(session, job_id)
+    parser = JobParserService(FakeLlmJobParser().parse)
+    parsed = parser.parse(_domain_job(job), mode)
+    record = db.ParsedJobDetail(
+        job_id=job.id, parser_type=parsed.parser_type, parser_version=parsed.parser_version,
+        required_skills=parsed.required_skills, preferred_skills=parsed.preferred_skills,
+        years_required=parsed.years_required, management_required=parsed.management_required,
+        architecture_required=parsed.architecture_required,
+        seniority_level=parsed.seniority_level.value, responsibilities=parsed.responsibilities,
+        salary_normalized=parsed.salary.model_dump(mode="json") if parsed.salary else None,
+        flags={"outsourcing_detected": parsed.outsourcing_detected,
+               "headhunter_detected": parsed.headhunter_detected,
+               "internship_detected": parsed.internship_detected},
+        confidence=parsed.confidence, warnings=parsed.warnings,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return _parsed_response(record)
+
+
+def get_parsed_entity(session: Session, parsed_id: object) -> db.ParsedJobDetail:
+    record = session.get(db.ParsedJobDetail, parsed_id)
+    if record is None:
+        raise ResourceNotFoundError("解析记录不存在")
+    job = _get_job_entity(session, record.job_id)
+    if job.user_id != DEFAULT_USER_ID:
+        raise ResourceNotFoundError("解析记录不存在")
+    return record
+
+
+def list_parsed_details(
+    session: Session, job_id: object, page: int, page_size: int
+) -> tuple[list[ParsedJobResponse], int]:
+    job = _get_job_entity(session, job_id)
+    query = select(db.ParsedJobDetail).where(db.ParsedJobDetail.job_id == job.id)
+    total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = session.scalars(
+        query.order_by(db.ParsedJobDetail.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return [_parsed_response(row) for row in rows], total
+
+
+def get_parsed_detail(session: Session, job_id: object, parsed_id: object) -> ParsedJobResponse:
+    job = _get_job_entity(session, job_id)
+    record = get_parsed_entity(session, parsed_id)
+    if record.job_id != job.id:
+        raise ResourceNotFoundError("解析记录不存在")
+    return _parsed_response(record)
+
+
+def to_parsed_domain(record: db.ParsedJobDetail) -> ParsedJob:
+    flags = record.flags or {}
+    return ParsedJob(
+        required_skills=record.required_skills, preferred_skills=record.preferred_skills,
+        years_required=record.years_required, management_required=record.management_required,
+        architecture_required=record.architecture_required, seniority_level=record.seniority_level,
+        responsibilities=record.responsibilities, salary=record.salary_normalized,
+        outsourcing_detected=flags.get("outsourcing_detected", False),
+        headhunter_detected=flags.get("headhunter_detected", False),
+        internship_detected=flags.get("internship_detected", False), confidence=record.confidence,
+        warnings=record.warnings, parser_type=record.parser_type, parser_version=record.parser_version,
+    )
+
+
+def get_job_entity(session: Session, job_id: object) -> db.Job:
+    return _get_job_entity(session, job_id)
+
+
+def to_job_domain(job: db.Job) -> JobInput:
+    return _domain_job(job)
+
+
+def _get_job_entity(session: Session, job_id: object) -> db.Job:
+    job = session.get(db.Job, job_id)
+    if job is None or job.user_id != DEFAULT_USER_ID:
+        raise ResourceNotFoundError("职位不存在")
+    return job
+
+
+def _domain_job(job: db.Job) -> JobInput:
+    return JobInput(
+        external_job_id=job.external_job_id, title=job.title, company_name=job.company_name,
+        industry=job.industry, location=job.location, work_mode=job.work_mode,
+        salary_text=job.salary_text, description=job.description, published_at=job.published_at,
+        source_status=job.source_status, source=job.source,
+    )
+
+
+def _response(job: db.Job, latest_score: dict[str, object] | None = None) -> JobResponse:
+    return JobResponse(
+        id=job.id,
+        content_hash=job.content_hash,
+        latest_score=latest_score,
+        **_domain_job(job).model_dump(),
+    )
+
+
+def _parsed_response(record: db.ParsedJobDetail) -> ParsedJobResponse:
+    return ParsedJobResponse(id=record.id, job_id=record.job_id, **to_parsed_domain(record).model_dump())
+
+
+def _content_hash(payload: JobImportPayload) -> str:
+    stable = payload.model_dump(mode="json", exclude={"external_job_id", "published_at"})
+    return hashlib.sha256(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode()).hexdigest()

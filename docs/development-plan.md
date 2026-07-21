@@ -12,7 +12,7 @@
 
 ### 范围
 
-- 初始化 Python 3.12、FastAPI、Pydantic v2、SQLAlchemy 2、PostgreSQL、Alembic 和 pytest 后端工程。
+- 初始化 Python 3.13、FastAPI、Pydantic v2、SQLAlchemy 2、PostgreSQL、Alembic 和 pytest 后端工程。
 - 初始化 React、TypeScript 和 Ant Design 前端工程。
 - 建立候选人评分资料。
 - 创建、查看、编辑、启用和停用多套求职策略。
@@ -181,4 +181,6 @@
 
 ## 9. 当前里程碑
 
-当前待实施里程碑为第一阶段。第一阶段默认口径已记录在 `product-requirements.md` 和 `scoring-rules.md`；实施时若发现会改变数据模型、评分结果或验收标准的新歧义，应先记录影响并请求确认。
+第一阶段已完成可运行实现，包括候选人资料、策略聚合编辑、模拟 JD 导入与解析、硬性排除、100 分评分、历史记录、幂等去重和基础前端操作页。实现不连接真实招聘网站、日历或真实大模型。
+
+进入第二阶段前，应以独立 PostgreSQL 测试库通过 API 集成测试和 Alembic 升降级验证，并保持后端 Lint/类型检查以及前端 Lint/测试/生产构建通过。
