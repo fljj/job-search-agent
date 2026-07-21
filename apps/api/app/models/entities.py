@@ -280,3 +280,100 @@ class JobRejection(Base):
     evidence: Mapped[dict[str, object]] = mapped_column(JSONB)
     sort_order: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeItem(TimestampMixin, Base):
+    __tablename__ = "knowledge_items"
+    __table_args__ = (UniqueConstraint("user_id", "category", "normalized_key"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    category: Mapped[str] = mapped_column(String(40))
+    key: Mapped[str] = mapped_column(String(150))
+    normalized_key: Mapped[str] = mapped_column(String(150))
+    fact: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(100))
+    allowed_for_auto_reply: Mapped[bool] = mapped_column(Boolean, default=False)
+    sensitivity: Mapped[str] = mapped_column(String(20), default="NORMAL")
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Resume(TimestampMixin, Base):
+    __tablename__ = "resumes"
+    __table_args__ = (UniqueConstraint("user_id", "platform", "attachment_name"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    platform: Mapped[str] = mapped_column(String(30))
+    attachment_name: Mapped[str] = mapped_column(String(255))
+    target_directions: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Conversation(TimestampMixin, Base):
+    __tablename__ = "conversations"
+    __table_args__ = (UniqueConstraint("user_id", "platform", "external_conversation_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    platform: Mapped[str] = mapped_column(String(30), default="MOCK")
+    external_conversation_id: Mapped[str] = mapped_column(String(200))
+    recruiter_name: Mapped[str] = mapped_column(String(100))
+    state: Mapped[str] = mapped_column(String(30), default="NEW")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    __table_args__ = (UniqueConstraint("conversation_id", "external_message_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"))
+    external_message_id: Mapped[str] = mapped_column(String(200))
+    direction: Mapped[str] = mapped_column(String(20))
+    content: Mapped[str] = mapped_column(Text)
+    intents: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(30), default="RECEIVED")
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GeneratedDraft(Base):
+    __tablename__ = "generated_drafts"
+    __table_args__ = (UniqueConstraint("input_fingerprint"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), nullable=True)
+    job_score_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("job_scores.id", ondelete="CASCADE"), nullable=True)
+    draft_type: Mapped[str] = mapped_column(String(30))
+    content: Mapped[str] = mapped_column(Text)
+    intents: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    fact_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2))
+    risk_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    input_fingerprint: Mapped[str] = mapped_column(String(64))
+    generator_version: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PolicyDecision(Base):
+    __tablename__ = "policy_decisions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generated_drafts.id", ondelete="CASCADE"))
+    action_type: Mapped[str] = mapped_column(String(30))
+    decision: Mapped[str] = mapped_column(String(30))
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    policy_version: Mapped[str] = mapped_column(String(50))
+    input_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ConfirmationTask(TimestampMixin, Base):
+    __tablename__ = "confirmation_tasks"
+    __table_args__ = (UniqueConstraint("decision_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    decision_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("policy_decisions.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(30), default="PENDING_APPROVAL")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

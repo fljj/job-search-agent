@@ -1,5 +1,6 @@
 import os
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -128,3 +129,54 @@ def test_complete_first_phase_api_flow(client: TestClient) -> None:
         "candidate_profile_id": profile_id,
     })
     assert batch_score.json()["data"]["items"][0]["result"] == "SCORED"
+
+    knowledge = client.post("/api/v1/knowledge-items", json={
+        "category": "TECH_STACK", "key": "Java",
+        "fact": "拥有 13 年 Java 后端开发经验", "source": "用户确认",
+        "allowed_for_auto_reply": True, "sensitivity": "NORMAL",
+        "verified_at": datetime.now(UTC).isoformat(),
+    })
+    assert knowledge.status_code == 200
+    assert client.get("/api/v1/knowledge-items").json()["data"]["total"] == 1
+
+    resume = client.post("/api/v1/resumes", json={
+        "platform": "MOCK", "attachment_name": "Java后端简历.pdf",
+        "target_directions": ["Java后端"], "is_available": True,
+    })
+    assert resume.status_code == 200
+    selected_resume = client.get(f"/api/v1/resumes/select?job_id={job_id}")
+    assert selected_resume.json()["data"]["attachment_name"] == "Java后端简历.pdf"
+
+    greeting = client.post("/api/v1/drafts/greeting", json={
+        "job_score_id": first_score.json()["data"]["id"],
+    })
+    assert greeting.status_code == 200
+    assert greeting.json()["data"]["decision"] == "ALLOW_AUTO"
+    assert "13 年" in greeting.json()["data"]["content"]
+
+    conversation = client.post("/api/v1/conversations", json={
+        "job_id": job_id, "external_conversation_id": "integration-conversation-1",
+        "recruiter_name": "集成测试招聘人", "platform": "MOCK",
+    })
+    conversation_id = conversation.json()["data"]["id"]
+    technical_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
+        "external_message_id": "message-1", "content": "请介绍 Java 技术栈经验",
+        "received_at": datetime.now(UTC).isoformat(),
+    })
+    message_id = technical_message.json()["data"]["id"]
+    reply = client.post("/api/v1/drafts/reply", json={"message_id": message_id})
+    duplicate_reply = client.post("/api/v1/drafts/reply", json={"message_id": message_id})
+    assert reply.json()["data"]["decision"] == "ALLOW_AUTO"
+    assert duplicate_reply.json()["data"]["id"] == reply.json()["data"]["id"]
+
+    time_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
+        "external_message_id": "message-2", "content": "周二几点可以电话面试？",
+        "received_at": datetime.now(UTC).isoformat(),
+    })
+    time_reply = client.post("/api/v1/drafts/reply", json={
+        "message_id": time_message.json()["data"]["id"],
+    })
+    assert time_reply.json()["data"]["decision"] == "REQUIRE_CONFIRMATION"
+    assert time_reply.json()["data"]["confirmation_task_id"] is not None
+    tasks = client.get("/api/v1/confirmation-tasks")
+    assert len(tasks.json()["data"]["items"]) == 1

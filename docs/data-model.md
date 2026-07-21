@@ -164,11 +164,23 @@ users
 
 数据库建议使用字符串列和检查约束，避免 PostgreSQL 原生枚举升级复杂度。
 
-## 5. 后续阶段实体与状态
+## 5. 第二阶段数据表
 
-后续阶段按需增加：`conversations`、`messages`、`generated_replies`、`resumes`、`resume_send_records`、`action_queue`、`action_attempts`、`policy_decisions`、`audit_events`、`platform_sessions`、`interview_requests`、`calendar_checks`、`calendar_events`。
+- `knowledge_items`：候选人事实、来源、敏感度、自动引用权限、验证和有效时间；`(user_id, category, normalized_key)` 唯一。
+- `resumes`：平台内附件名、适用方向和可用状态；`(user_id, platform, attachment_name)` 唯一。
+- `conversations`：模拟平台对话与职位归属；`(user_id, platform, external_conversation_id)` 唯一。
+- `messages`：原始消息、方向、多意图和状态；`(conversation_id, external_message_id)` 唯一。
+- `generated_drafts`：招呼或回复草稿、事实引用、置信度、风险和生成器版本；`input_fingerprint` 唯一。
+- `policy_decisions`：动作类型、权限结果、原因码、策略版本和输入快照。
+- `confirmation_tasks`：第二阶段只保存 `PENDING_APPROVAL` 确认数据，不提供执行转移；`decision_id` 唯一。
 
-### 5.1 动作状态
+第二阶段幂等：模拟消息使用外部消息 ID，草稿使用消息/评分、知识版本和生成器版本生成指纹。
+
+## 6. 后续阶段实体与状态
+
+后续阶段按需增加：`resume_send_records`、`action_queue`、`action_attempts`、`audit_events`、`platform_sessions`、`interview_requests`、`calendar_checks`、`calendar_events`。
+
+### 6.1 动作状态
 
 ```text
 DRAFT
@@ -184,7 +196,7 @@ SUPERSEDED
 OUTCOME_UNKNOWN
 ```
 
-### 5.2 平台会话状态
+### 6.2 平台会话状态
 
 ```text
 SESSION_READY
@@ -194,7 +206,7 @@ SESSION_TARGET_MISMATCH
 SESSION_PAUSED
 ```
 
-### 5.3 对话和消息状态
+### 6.3 对话和消息状态
 
 对话状态：`NEW/ACTIVE/WAITING_RECRUITER/WAITING_USER/SCHEDULING/SCHEDULE_CONFIRMED/ENDED`。
 
@@ -202,7 +214,7 @@ SESSION_PAUSED
 
 对话状态不能替代单条消息或动作状态。
 
-## 6. 幂等设计
+## 7. 幂等设计
 
 ### 6.1 第一阶段
 
@@ -220,7 +232,7 @@ SESSION_PAUSED
 - `OUTCOME_UNKNOWN` 只能对账，不能直接重试；
 - 每次重试写入新的 `action_attempts`，不得覆盖历史尝试。
 
-## 7. 审计设计
+## 8. 审计设计
 
 `audit_events` 后续采用追加写，至少保存：
 

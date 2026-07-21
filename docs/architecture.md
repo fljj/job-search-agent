@@ -83,7 +83,18 @@ job-search-agent/
 └── docker-compose.yml
 ```
 
-`conversation_agent`、`resume_selector`、`browser_worker`、`scheduling` 和真实平台适配器仅在对应阶段创建。
+`conversation_agent`、`knowledge_base` 和 `resume_selector` 已在第二阶段实现。`browser_worker`、`scheduling` 和真实平台适配器仅在对应后续阶段创建。
+
+第二阶段新增目录：
+
+```text
+packages/
+├── knowledge_base/      # 带来源和敏感度的事实检索
+├── conversation_agent/ # 意图、草稿、置信度和权限决策
+└── resume_selector/    # 按职位方向选择可用附件元数据
+config/
+└── conversation-policy.json
+```
 
 ## 3. 模块职责
 
@@ -246,3 +257,13 @@ Repositories → SQLAlchemy Models
 - 解析记录和评分记录采用新增版本，不覆盖历史记录；
 - 外部浏览器调用不能包在长数据库事务中；动作先原子占用，外部执行后再持久化结果；
 - 外部结果不明确时保存 `OUTCOME_UNKNOWN`，由对账流程处理。
+
+## 9. 第二阶段草稿流程
+
+```text
+模拟消息 → 确定性多意图识别 → 只读检索当前有效知识项
+→ 生成事实受限草稿 → 计算置信度和风险
+→ policy decision → 必要时创建 PENDING_APPROVAL 确认任务
+```
+
+本阶段流程在决策和确认数据处终止，不依赖或调用 `browser_worker`。

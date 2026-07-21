@@ -1,23 +1,21 @@
-"""创建第一阶段数据表。
+"""创建第二阶段知识库和对话草稿表。
 
-Revision ID: 20260721_0001
-Revises: None
+Revision ID: 20260721_0002
+Revises: 20260721_0001
 """
 from alembic import op
 
 from apps.api.app.core.database import Base
 from apps.api.app.models import entities  # noqa: F401
 
-revision = "20260721_0001"
-down_revision = None
+revision = "20260721_0002"
+down_revision = "20260721_0001"
 branch_labels = None
 depends_on = None
 
 TABLE_NAMES = (
-    "users", "candidate_profiles", "candidate_skills", "candidate_industry_experiences",
-    "job_strategies", "job_title_rules", "work_mode_rules", "work_mode_locations",
-    "salary_rules", "salary_score_bands", "industry_rules", "company_blacklists",
-    "jobs", "parsed_job_details", "job_scores", "job_score_details", "job_rejections",
+    "knowledge_items", "resumes", "conversations", "messages",
+    "generated_drafts", "policy_decisions", "confirmation_tasks",
 )
 
 

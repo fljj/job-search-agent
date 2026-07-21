@@ -205,11 +205,35 @@
 - 后续外部写操作必须要求 `Idempotency-Key` 请求头，并在数据库建立唯一约束；
 - 幂等响应应返回原资源和原执行状态，不得重新执行外部写操作。
 
-## 10. 第一阶段明确不提供的 API
+## 10. 第二阶段 API
 
-- 对话、消息和回复生成 API；
-- 简历上传、选择和发送 API；
-- 确认队列和动作执行 API；
+### 知识库
+
+- `POST /api/v1/knowledge-items`：新增知识项，包含 `category/key/fact/source/allowed_for_auto_reply/sensitivity/verified_at/valid_until`。
+- `PUT /api/v1/knowledge-items/{item_id}`：携带 `version` 完整替换，版本不一致返回 409。
+- `GET /api/v1/knowledge-items`：分页返回知识项。
+
+### 附件简历元数据
+
+- `POST /api/v1/resumes`：登记平台内已存在的附件名和适用方向，不上传文件。
+- `PUT /api/v1/resumes/{resume_id}`：携带 `version` 更新可用状态和适用方向。
+- `GET /api/v1/resumes`：分页返回简历元数据。
+- `GET /api/v1/resumes/select?job_id=...`：按职位名称返回可用的候选附件，不产生发送动作。
+
+### 模拟对话和草稿
+
+- `POST /api/v1/conversations`：为已导入职位创建幂等模拟对话。
+- `POST /api/v1/conversations/{conversation_id}/messages`：幂等导入模拟招聘方消息并识别多意图。
+- `POST /api/v1/drafts/reply`：请求包含 `message_id`，返回草稿、事实 ID、置信度、风险、决策和确认任务 ID。
+- `POST /api/v1/drafts/greeting`：请求包含 `job_score_id`，仅基于 JD 与已验证知识生成个性化招呼草稿。
+- `GET /api/v1/confirmation-tasks`：查看当前生成的待确认决策数据；本阶段不允许执行或审批。
+
+草稿接口按输入、知识版本和生成器版本幂等。第二阶段不提供“批准后发送”或其他执行 API。
+
+## 11. 当前明确不提供的 API
+
+- 简历文件上传和发送 API；
+- 确认任务的批准、修改发送和动作执行 API；
 - 浏览器会话和平台操作 API；
 - 日历、电话和面试 API；
 - 真实大模型供应商配置 API。
