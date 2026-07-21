@@ -230,11 +230,22 @@
 
 草稿接口按输入、知识版本和生成器版本幂等。第二阶段不提供“批准后发送”或其他执行 API。
 
-## 11. 当前明确不提供的 API
+## 11. 第三阶段浏览器只读 API
+
+- `POST /api/v1/browser/read-current`：连接用户手动启动的本机 CDP 会话，读取当前聚焦页面。
+- `GET /api/v1/browser/sessions`：查看 BOSS/脉脉最后只读检查状态和原因码。
+
+`read-current` 请求包含 `platform`、`cdp_url`，并可选包含 `job_id/expected_company/expected_job_title/expected_recruiter`。读取对话页时 `job_id` 必填。
+
+只允许本机 `localhost/127.0.0.1/::1` HTTP(S) CDP 端点且 URL 不得包含凭证。返回会话状态、页面类型、原因码、导入资源 ID、证据 ID 和重复标记。
+
+未登录、验证页、页面结构变化或目标不一致时只保存失败证据，不导入职位或消息。
+
+## 12. 当前明确不提供的 API
 
 - 简历文件上传和发送 API；
 - 确认任务的批准、修改发送和动作执行 API；
-- 浏览器会话和平台操作 API；
+- 浏览器点击、输入、上传、发送或验证码处理 API；
 - 日历、电话和面试 API；
 - 真实大模型供应商配置 API。
 

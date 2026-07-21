@@ -4,3 +4,7 @@ class ResourceNotFoundError(Exception):
 
 class VersionConflictError(Exception):
     pass
+
+
+class DependencyUnavailableError(Exception):
+    pass

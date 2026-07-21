@@ -1,0 +1,45 @@
+{
+  "version": "2026-07-21-v1",
+  "platforms": {
+    "BOSS": {
+      "allowed_hosts": ["www.zhipin.com", "m.zhipin.com"],
+      "login_marker": "[data-testid='user-avatar'], .nav-figure",
+      "verification_marker": ".geetest_panel, .verify-box, [class*='captcha']",
+      "job_root": "[data-testid='job-detail'], .job-detail-box",
+      "job_id": "[data-job-id]",
+      "job_title": "[data-testid='job-title'], .job-name",
+      "company": "[data-testid='company-name'], .company-name",
+      "industry": "[data-testid='company-industry'], .company-info a",
+      "location": "[data-testid='job-location'], .location-address",
+      "work_mode": "[data-testid='work-mode'], .job-address",
+      "salary": "[data-testid='salary'], .salary",
+      "description": "[data-testid='job-description'], .job-sec-text",
+      "conversation_root": "[data-testid='chat-panel'], .chat-conversation",
+      "conversation_id": "[data-conversation-id]",
+      "recruiter": "[data-testid='recruiter-name'], .chat-name",
+      "message_items": "[data-testid='message-item'], .message-item",
+      "message_id_attribute": "data-message-id",
+      "message_content": "[data-testid='message-content'], .message-content"
+    },
+    "MAIMAI": {
+      "allowed_hosts": ["maimai.cn", "www.maimai.cn"],
+      "login_marker": "[data-testid='user-avatar'], .user-avatar",
+      "verification_marker": ".verify-container, [class*='captcha']",
+      "job_root": "[data-testid='job-detail'], .job-detail",
+      "job_id": "[data-job-id]",
+      "job_title": "[data-testid='job-title'], .job-title",
+      "company": "[data-testid='company-name'], .company-name",
+      "industry": "[data-testid='company-industry'], .industry",
+      "location": "[data-testid='job-location'], .job-location",
+      "work_mode": "[data-testid='work-mode'], .work-mode",
+      "salary": "[data-testid='salary'], .salary",
+      "description": "[data-testid='job-description'], .job-description",
+      "conversation_root": "[data-testid='chat-panel'], .chat-panel",
+      "conversation_id": "[data-conversation-id]",
+      "recruiter": "[data-testid='recruiter-name'], .recruiter-name",
+      "message_items": "[data-testid='message-item'], .message-item",
+      "message_id_attribute": "data-message-id",
+      "message_content": "[data-testid='message-content'], .message-content"
+    }
+  }
+}

@@ -377,3 +377,44 @@ class ConfirmationTask(TimestampMixin, Base):
     decision_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("policy_decisions.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(30), default="PENDING_APPROVAL")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlatformSession(TimestampMixin, Base):
+    __tablename__ = "platform_sessions"
+    __table_args__ = (UniqueConstraint("user_id", "platform"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    platform: Mapped[str] = mapped_column(String(30))
+    cdp_endpoint: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(40))
+    last_reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BrowserReadRun(Base):
+    __tablename__ = "browser_read_runs"
+    __table_args__ = (UniqueConstraint("input_fingerprint"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    platform_session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("platform_sessions.id", ondelete="CASCADE"))
+    platform: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(40))
+    page_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    input_fingerprint: Mapped[str] = mapped_column(String(64))
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    imported_job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
+    imported_conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
+    imported_message_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PageEvidence(Base):
+    __tablename__ = "page_evidence"
+    __table_args__ = (UniqueConstraint("browser_read_run_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    browser_read_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("browser_read_runs.id", ondelete="CASCADE"))
+    page_url: Mapped[str] = mapped_column(Text)
+    page_title: Mapped[str] = mapped_column(String(500))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    selector_version: Mapped[str] = mapped_column(String(50))
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

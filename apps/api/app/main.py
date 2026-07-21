@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from apps.api.app.api.v1 import (
+    browser,
     conversations,
     jobs,
     knowledge,
@@ -14,7 +15,11 @@ from apps.api.app.api.v1 import (
     strategies,
 )
 from apps.api.app.core.config import get_settings
-from apps.api.app.services.errors import ResourceNotFoundError, VersionConflictError
+from apps.api.app.services.errors import (
+    DependencyUnavailableError,
+    ResourceNotFoundError,
+    VersionConflictError,
+)
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -22,7 +27,7 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 for router in (profiles.router, strategies.router, jobs.router, scores.router,
-               knowledge.router, resumes.router, conversations.router):
+               knowledge.router, resumes.router, conversations.router, browser.router):
     app.include_router(router, prefix="/api/v1")
 
 
@@ -45,6 +50,11 @@ def version_conflict(_: Request, exc: VersionConflictError) -> JSONResponse:
 @app.exception_handler(ValueError)
 def invalid_request(_: Request, exc: ValueError) -> JSONResponse:
     return _error("INVALID_REQUEST", str(exc), 400)
+
+
+@app.exception_handler(DependencyUnavailableError)
+def dependency_unavailable(_: Request, exc: DependencyUnavailableError) -> JSONResponse:
+    return _error("DEPENDENCY_UNAVAILABLE", str(exc), 503)
 
 
 @app.get("/health")

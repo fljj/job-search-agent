@@ -1,11 +1,12 @@
 # job-search-agent
 
-半自动求职 Agent。当前实现前两个阶段：职位策略与评分，以及候选人知识库、简历元数据、模拟消息分析、招呼语/回复草稿和人工确认决策。不连接真实招聘网站。
+半自动求职 Agent。当前实现前三个阶段：职位策略与评分、知识库与沟通草稿，以及 BOSS 直聘/脉脉的本机浏览器只读接入。不执行任何网站写操作。
 
 ## 技术栈
 
 - Python 3.13、FastAPI、Pydantic v2、SQLAlchemy 2、Alembic、PostgreSQL
 - React、TypeScript、Ant Design、Vite
+- Playwright（连接用户手动登录的本机 Chromium CDP 会话）
 - pytest、Ruff、mypy、Vitest
 
 ## 本地启动
@@ -58,6 +59,17 @@ npm run dev
 8. `POST /api/v1/resumes` 登记网站内附件简历元数据。
 9. `POST /api/v1/conversations` 和消息接口创建模拟对话。
 10. `POST /api/v1/drafts/reply` 或 `/drafts/greeting` 生成草稿及权限决策。
+11. `POST /api/v1/browser/read-current` 只读解析当前 BOSS/脉脉页面并幂等导入。
+
+### 本机浏览器只读接入
+
+由用户使用独立 Chromium/Chrome 配置目录手动启动调试端口并登录招聘平台，例如：
+
+```bash
+open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=/tmp/job-agent-browser-profile
+```
+
+然后手动打开职位详情或对话页，在前端“招聘网站只读”页执行读取。只允许 `localhost/127.0.0.1/::1` CDP 端点，不保存账号、密码或 Cookie。
 
 前端提供候选人资料编辑、策略创建/编辑、模拟 JD 导入、解析、评分和结果明细查看。
 
@@ -91,8 +103,8 @@ PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQ
 
 ## 当前范围限制
 
-- 不连接 BOSS 直聘或脉脉。
-- 只处理模拟招聘消息，不读取或发送真实消息。
+- BOSS 直聘和脉脉只允许用户主动触发的当前页读取，不做后台扫描。
+- 可读取真实职位和对话页，但不发送消息。
 - 只管理简历元数据和候选选择，不上传或发送简历。
 - 不接入日历。
 - 不调用真实大模型；`FAKE_LLM` 仅用于验证适配器边界。

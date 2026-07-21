@@ -1,0 +1,115 @@
+from dataclasses import dataclass, field
+
+import pytest
+
+from adapters.browser.playwright_reader import validate_local_cdp_url
+from apps.api.app.core.browser_config import get_browser_selectors
+from packages.browser_worker.extractor import extract_current_page
+from packages.browser_worker.models import PageType, Platform, SessionStatus
+
+
+@dataclass
+class FakeElement:
+    texts: dict[str, str] = field(default_factory=dict)
+    attributes: dict[tuple[str, str], str] = field(default_factory=dict)
+
+    def text(self, selector: str) -> str | None:
+        return self.texts.get(selector)
+
+    def attribute(self, selector: str, name: str) -> str | None:
+        return self.attributes.get((selector, name))
+
+
+@dataclass
+class FakePage(FakeElement):
+    url: str = "https://www.zhipin.com/job_detail/abc"
+    title: str = "职位详情"
+    visible: set[str] = field(default_factory=set)
+    element_lists: dict[str, list[FakeElement]] = field(default_factory=dict)
+
+    def exists(self, selector: str) -> bool:
+        return selector in self.visible
+
+    def elements(self, selector: str) -> list[FakeElement]:
+        return self.element_lists.get(selector, [])
+
+
+def job_page(platform: Platform) -> tuple[FakePage, object]:
+    config = get_browser_selectors()
+    selectors = config.platforms[platform.value]
+    host = "www.zhipin.com" if platform is Platform.BOSS else "maimai.cn"
+    page = FakePage(url=f"https://{host}/job/abc")
+    page.visible = {selectors.login_marker, selectors.job_root}
+    page.texts = {
+        selectors.job_title: "高级Java后端工程师",
+        selectors.company: "示例科技",
+        selectors.industry: "互联网",
+        selectors.location: "北京",
+        selectors.work_mode: "支持远程",
+        selectors.salary: "35K-45K",
+        selectors.description: "要求 Java 和 Spring Boot 经验",
+    }
+    page.attributes = {(selectors.job_id, "data-job-id"): "job-abc"}
+    return page, selectors
+
+
+@pytest.mark.parametrize("platform", [Platform.BOSS, Platform.MAIMAI])
+def test_extracts_supported_platform_job_fixture(platform: Platform) -> None:
+    page, selectors = job_page(platform)
+    result = extract_current_page(page, platform, selectors, "v1")
+    assert result.status is SessionStatus.SESSION_READY
+    assert result.page_type is PageType.JOB
+    assert result.job and result.job.work_mode == "REMOTE"
+
+
+def test_extracts_conversation_messages() -> None:
+    config = get_browser_selectors()
+    selectors = config.platforms["BOSS"]
+    page = FakePage(url="https://www.zhipin.com/web/geek/chat")
+    page.visible = {selectors.login_marker, selectors.conversation_root}
+    page.texts = {selectors.recruiter: "张HR"}
+    page.attributes = {(selectors.conversation_id, "data-conversation-id"): "chat-1"}
+    page.element_lists = {selectors.message_items: [FakeElement(
+        texts={selectors.message_content: "请发一份简历"},
+        attributes={("", selectors.message_id_attribute): "message-1"},
+    )]}
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+    assert result.page_type is PageType.CONVERSATION
+    assert result.conversation and result.conversation.messages[0].external_message_id == "message-1"
+
+
+@pytest.mark.parametrize(("visible_extra", "expected", "reason"), [
+    ("verification", SessionStatus.SESSION_AUTH_REQUIRED, "VERIFICATION_REQUIRED"),
+    ("no_login", SessionStatus.SESSION_AUTH_REQUIRED, "LOGIN_REQUIRED"),
+    ("unknown_page", SessionStatus.SESSION_PAGE_CHANGED, "SUPPORTED_PAGE_ROOT_NOT_FOUND"),
+])
+def test_stops_on_unsafe_or_changed_page(
+    visible_extra: str, expected: SessionStatus, reason: str
+) -> None:
+    config = get_browser_selectors()
+    selectors = config.platforms["BOSS"]
+    page = FakePage()
+    if visible_extra == "verification":
+        page.visible = {selectors.login_marker, selectors.verification_marker}
+    elif visible_extra == "unknown_page":
+        page.visible = {selectors.login_marker}
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+    assert result.status is expected
+    assert result.reason_codes == [reason]
+    assert result.job is None and result.conversation is None
+
+
+def test_stops_when_expected_target_does_not_match() -> None:
+    page, selectors = job_page(Platform.BOSS)
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1",
+                                  expected_company="另一家公司")
+    assert result.status is SessionStatus.SESSION_TARGET_MISMATCH
+    assert result.reason_codes == ["JOB_TARGET_MISMATCH"]
+
+
+def test_cdp_endpoint_must_be_local_and_without_credentials() -> None:
+    validate_local_cdp_url("http://127.0.0.1:9222")
+    with pytest.raises(ValueError):
+        validate_local_cdp_url("https://example.com:9222")
+    with pytest.raises(ValueError):
+        validate_local_cdp_url("http://user:secret@localhost:9222")

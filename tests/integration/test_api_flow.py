@@ -10,6 +10,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from apps.api.app.core.database import Base, get_session
 from apps.api.app.main import app
 from apps.api.app.models import entities  # noqa: F401
+from apps.api.app.schemas.browser import BrowserReadRequest
+from apps.api.app.services.browser_service import persist_read_result
+from packages.browser_worker.models import (
+    BrowserConversation,
+    BrowserJob,
+    BrowserMessage,
+    PageType,
+    Platform,
+    ReadResult,
+    SessionStatus,
+)
 
 
 @pytest.fixture
@@ -180,3 +191,50 @@ def test_complete_first_phase_api_flow(client: TestClient) -> None:
     assert time_reply.json()["data"]["confirmation_task_id"] is not None
     tasks = client.get("/api/v1/confirmation-tasks")
     assert len(tasks.json()["data"]["items"]) == 1
+
+
+def test_browser_read_persistence_is_idempotent(client: TestClient) -> None:
+    job_payload = {
+        "external_job_id": "browser-parent-job", "title": "Java后端工程师",
+        "company_name": "浏览器测试公司", "industry": "互联网", "location": "北京",
+        "work_mode": "REMOTE", "salary_text": "35K-45K", "description": "Java 岗位",
+        "source_status": "OPEN",
+    }
+    parent_job_id = client.post("/api/v1/jobs/import", json=job_payload).json()["data"]["job"]["id"]
+    request = BrowserReadRequest(platform="BOSS", cdp_url="http://127.0.0.1:9222")
+    job_result = ReadResult(
+        platform=Platform.BOSS, status=SessionStatus.SESSION_READY, page_type=PageType.JOB,
+        page_url="https://www.zhipin.com/job/readonly?token=secret", page_title="职位页",
+        content_hash="a" * 64, selector_version="fixture-v1",
+        job=BrowserJob(external_job_id="boss-job-1", title="高级Java后端",
+                       company_name="BOSS测试公司", industry="互联网", location="北京",
+                       work_mode="REMOTE", salary_text="40K-50K", description="Java 岗位描述"),
+    )
+    session_override = app.dependency_overrides[get_session]
+    session_dependency = session_override()
+    session = next(session_dependency)
+    try:
+        first = persist_read_result(session, request, job_result)
+        duplicate = persist_read_result(session, request, job_result)
+        assert first.imported_job_id is not None
+        assert duplicate.id == first.id and duplicate.duplicate
+
+        conversation_result = ReadResult(
+            platform=Platform.BOSS, status=SessionStatus.SESSION_READY,
+            page_type=PageType.CONVERSATION,
+            page_url="https://www.zhipin.com/chat?token=secret", page_title="对话页",
+            content_hash="b" * 64, selector_version="fixture-v1",
+            conversation=BrowserConversation(
+                external_conversation_id="boss-chat-1", recruiter_name="张HR",
+                messages=[BrowserMessage(external_message_id="boss-message-1",
+                                         content="请发简历", received_at=datetime.now(UTC))],
+            ),
+        )
+        conversation_request = BrowserReadRequest(
+            platform="BOSS", cdp_url="http://127.0.0.1:9222", job_id=parent_job_id,
+        )
+        imported = persist_read_result(session, conversation_request, conversation_result)
+        assert imported.imported_conversation_id is not None
+        assert len(imported.imported_message_ids) == 1
+    finally:
+        session.close()

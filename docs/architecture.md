@@ -83,7 +83,7 @@ job-search-agent/
 └── docker-compose.yml
 ```
 
-`conversation_agent`、`knowledge_base` 和 `resume_selector` 已在第二阶段实现。`browser_worker`、`scheduling` 和真实平台适配器仅在对应后续阶段创建。
+`conversation_agent`、`knowledge_base` 和 `resume_selector` 已在第二阶段实现。`browser_worker` 及 BOSS/脉脉只读适配器已在第三阶段实现；`scheduling` 和平台写操作适配器仍属后续阶段。
 
 第二阶段新增目录：
 
@@ -267,3 +267,17 @@ Repositories → SQLAlchemy Models
 ```
 
 本阶段流程在决策和确认数据处终止，不依赖或调用 `browser_worker`。
+
+## 10. 第三阶段只读浏览器流程
+
+```text
+用户手动登录并聚焦目标页
+→ API 校验本机 CDP 端点
+→ 适配器校验平台域名、登录/验证状态和页面根节点
+→ 只读提取并通过 Pydantic 校验
+→ 可选核对公司、职位或招聘人
+→ 按来源 ID/内容指纹幂等导入
+→ 保存读取状态和受控证据元数据
+```
+
+`adapters/browser` 仅实现定位、可见性、文本、属性和页面焦点读取。其公开边界不包含 `click/fill/type/upload`。选择器失效或目标不匹配时只记录失败状态，不进入业务导入。

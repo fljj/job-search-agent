@@ -176,11 +176,19 @@ users
 
 第二阶段幂等：模拟消息使用外部消息 ID，草稿使用消息/评分、知识版本和生成器版本生成指纹。
 
-## 6. 后续阶段实体与状态
+## 6. 第三阶段数据表
 
-后续阶段按需增加：`resume_send_records`、`action_queue`、`action_attempts`、`audit_events`、`platform_sessions`、`interview_requests`、`calendar_checks`、`calendar_events`。
+- `platform_sessions`：用户和平台唯一，仅保存无凭证的本机 CDP 端点、会话状态、原因码和最后检查时间。
+- `browser_read_runs`：追加保存平台、状态、页面类型、原因码、导入对象 ID 及输入指纹；`input_fingerprint` 唯一。
+- `page_evidence`：每次读取记录唯一，保存已去除 query/fragment 的 URL、页面标题、内容哈希、选择器版本和捕获时间；不保存 Cookie、Token 或完整 HTML。
 
-### 6.1 动作状态
+第三阶段重复读取使用“平台 + 状态 + 页面类型 + 内容哈希 + 原因码”生成指纹。职位、对话和消息同时受已有来源唯一约束保护。
+
+## 7. 后续阶段实体与状态
+
+后续阶段按需增加：`resume_send_records`、`action_queue`、`action_attempts`、`audit_events`、`interview_requests`、`calendar_checks`、`calendar_events`。
+
+### 7.1 动作状态
 
 ```text
 DRAFT
@@ -196,7 +204,7 @@ SUPERSEDED
 OUTCOME_UNKNOWN
 ```
 
-### 6.2 平台会话状态
+### 7.2 平台会话状态
 
 ```text
 SESSION_READY
@@ -206,7 +214,7 @@ SESSION_TARGET_MISMATCH
 SESSION_PAUSED
 ```
 
-### 6.3 对话和消息状态
+### 7.3 对话和消息状态
 
 对话状态：`NEW/ACTIVE/WAITING_RECRUITER/WAITING_USER/SCHEDULING/SCHEDULE_CONFIRMED/ENDED`。
 
@@ -214,7 +222,7 @@ SESSION_PAUSED
 
 对话状态不能替代单条消息或动作状态。
 
-## 7. 幂等设计
+## 8. 幂等设计
 
 ### 6.1 第一阶段
 
@@ -232,7 +240,7 @@ SESSION_PAUSED
 - `OUTCOME_UNKNOWN` 只能对账，不能直接重试；
 - 每次重试写入新的 `action_attempts`，不得覆盖历史尝试。
 
-## 8. 审计设计
+## 9. 审计设计
 
 `audit_events` 后续采用追加写，至少保存：
 
