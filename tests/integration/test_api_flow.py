@@ -298,6 +298,59 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     )
     assert rejected.json()["data"]["status"] == "CANCELLED"
 
+    unavailable_schedule = client.post("/api/v1/scheduling/analyze", json={
+        "message_id": time_message.json()["data"]["id"], "calendar_available": False,
+    })
+    assert unavailable_schedule.json()["data"]["calendar_status"] == "UNAVAILABLE"
+    assert unavailable_schedule.json()["data"]["status"] == "PENDING_APPROVAL"
+
+    explicit_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
+        "external_message_id": "message-schedule-explicit",
+        "content": "2026-07-24 10:00 可以电话沟通吗，北京时间",
+        "received_at": datetime.now(UTC).isoformat(),
+    }).json()["data"]
+    schedule = client.post("/api/v1/scheduling/analyze", json={
+        "message_id": explicit_message["id"], "calendar_available": True,
+    }).json()["data"]
+    assert schedule["calendar_status"] == "AVAILABLE"
+    approved_schedule = client.post(f"/api/v1/scheduling/requests/{schedule['id']}/approve", json={
+        "reply_content": schedule["suggested_reply"], "create_calendar_event": True,
+    })
+    assert approved_schedule.json()["data"]["status"] == "APPROVED"
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.PlaywrightActionExecutor.execute",
+        lambda *_: ExecutionResult(outcome=ExecutionOutcome.SUCCEEDED, evidence_hash="d" * 64),
+    )
+    sent_schedule = client.post(f"/api/v1/scheduling/requests/{schedule['id']}/execute", json={
+        "cdp_url": "http://127.0.0.1:9222",
+    })
+    assert sent_schedule.json()["data"]["status"] == "SUCCEEDED"
+
+    changed_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
+        "external_message_id": "message-schedule-changed",
+        "content": "2026-07-24 15:00 可以视频面试吗，北京时间",
+        "received_at": datetime.now(UTC).isoformat(),
+    }).json()["data"]
+    changed_schedule = client.post("/api/v1/scheduling/analyze", json={
+        "message_id": changed_message["id"], "calendar_available": True,
+    }).json()["data"]
+    client.post(f"/api/v1/scheduling/requests/{changed_schedule['id']}/approve", json={
+        "reply_content": changed_schedule["suggested_reply"], "create_calendar_event": False,
+    })
+    client.post("/api/v1/scheduling/calendar-events", json={
+        "external_event_id": "new-conflict", "title": "新增忙碌",
+        "start_at": "2026-07-24T14:45:00+08:00", "end_at": "2026-07-24T16:30:00+08:00",
+        "availability": "BUSY",
+    })
+    blocked_schedule = client.post(
+        f"/api/v1/scheduling/requests/{changed_schedule['id']}/execute",
+        json={"cdp_url": "http://127.0.0.1:9222"},
+    )
+    assert blocked_schedule.status_code == 400
+    changed_item = next(item for item in client.get("/api/v1/scheduling/requests").json()["data"]["items"]
+                        if item["id"] == changed_schedule["id"])
+    assert changed_item["status"] == "PENDING_APPROVAL"
+
 
 def test_browser_read_persistence_is_idempotent(client: TestClient) -> None:
     job_payload = {

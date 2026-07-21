@@ -6,6 +6,7 @@ import { ActionPage } from './pages/ActionPage'
 import { AutomationPage } from './pages/AutomationPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { StrategyPage } from './pages/StrategyPage'
+import { SchedulingPage } from './pages/SchedulingPage'
 
 export default function App() {
   return <Layout style={{ minHeight: '100vh' }}><Layout.Header><Typography.Title level={3} style={{ color: 'white', margin: 16 }}>半自动求职 Agent</Typography.Title></Layout.Header>
@@ -17,5 +18,6 @@ export default function App() {
       { key: 'browser', label: '招聘网站只读', children: <BrowserPage /> },
       { key: 'actions', label: '人工确认与发送', children: <ActionPage /> },
       { key: 'automation', label: '安全自动化', children: <AutomationPage /> },
+      { key: 'scheduling', label: '电话与面试安排', children: <SchedulingPage /> },
     ]} /></Layout.Content></Layout>
 }

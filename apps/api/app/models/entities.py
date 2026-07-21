@@ -512,3 +512,71 @@ class AuditEvent(Base):
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
     correlation_id: Mapped[str] = mapped_column(String(100))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SchedulingPreference(TimestampMixin, Base):
+    __tablename__ = "scheduling_preferences"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    settings: Mapped[dict[str, object]] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class CalendarEvent(TimestampMixin, Base):
+    __tablename__ = "calendar_events"
+    __table_args__ = (UniqueConstraint("user_id", "provider", "external_event_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    provider: Mapped[str] = mapped_column(String(30), default="MOCK")
+    external_event_id: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String(200))
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    availability: Mapped[str] = mapped_column(String(30), default="BUSY")
+    source: Mapped[str] = mapped_column(String(30), default="IMPORTED")
+
+
+class InterviewRequest(TimestampMixin, Base):
+    __tablename__ = "interview_requests"
+    __table_args__ = (UniqueConstraint("message_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"))
+    message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"))
+    event_type: Mapped[str] = mapped_column(String(40))
+    source_text: Mapped[str] = mapped_column(Text)
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    timezone: Mapped[str] = mapped_column(String(80))
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    parse_confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2))
+    risk_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(30), default="PENDING_APPROVAL")
+    candidate_slots: Mapped[list[dict[str, object]]] = mapped_column(JSONB, default=list)
+
+
+class CalendarCheck(Base):
+    __tablename__ = "calendar_checks"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    interview_request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_requests.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(30))
+    snapshot_version: Mapped[str] = mapped_column(String(64))
+    conflicts: Mapped[list[dict[str, object]]] = mapped_column(JSONB, default=list)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleConfirmation(TimestampMixin, Base):
+    __tablename__ = "schedule_confirmations"
+    __table_args__ = (UniqueConstraint("interview_request_id"), UniqueConstraint("idempotency_key"))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    interview_request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_requests.id", ondelete="CASCADE"))
+    calendar_check_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("calendar_checks.id"))
+    status: Mapped[str] = mapped_column(String(30), default="PENDING_APPROVAL")
+    selected_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    selected_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reply_content: Mapped[str] = mapped_column(Text)
+    create_calendar_event: Mapped[bool] = mapped_column(Boolean, default=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200))
+    action_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("action_queue.id"), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

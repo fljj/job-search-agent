@@ -201,9 +201,17 @@ users
 - `action_queue.strategy_id`：保存自动动作采用的策略范围。
 - 自动动作不创建人工批准，因此 `confirmation_task_id` 可空；人工动作仍必须关联确认任务。
 
+### 8.2 第六阶段数据表
+
+- `scheduling_preferences`：用户时区、工作时间、午休、默认时长、缓冲、通勤和快照有效期配置；用户唯一并使用版本并发控制。
+- `calendar_events`：本地假日历的忙闲事件和用户单独授权创建的面试事件；`(user_id, provider, external_event_id)` 唯一。
+- `interview_requests`：原始消息、解析事件、时间、时区、置信度、风险和候选时间；`message_id` 唯一。
+- `calendar_checks`：检查状态、快照版本、检查时间和受控冲突摘要，历史检查追加保存。
+- `schedule_confirmations`：具体回复、选定时间、独立日历写入授权、有效期和发送动作；排期请求及幂等键唯一。
+
 后续阶段按需增加：`interview_requests`、`calendar_checks`、`calendar_events`。
 
-### 8.2 动作状态
+### 8.3 动作状态
 
 ```text
 DRAFT
@@ -219,7 +227,7 @@ SUPERSEDED
 OUTCOME_UNKNOWN
 ```
 
-### 8.3 平台会话状态
+### 8.4 平台会话状态
 
 ```text
 SESSION_READY
@@ -229,7 +237,7 @@ SESSION_TARGET_MISMATCH
 SESSION_PAUSED
 ```
 
-### 8.4 对话和消息状态
+### 8.5 对话和消息状态
 
 对话状态：`NEW/ACTIVE/WAITING_RECRUITER/WAITING_USER/SCHEDULING/SCHEDULE_CONFIRMED/ENDED`。
 

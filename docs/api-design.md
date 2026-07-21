@@ -261,12 +261,23 @@
 
 `dispatch` 返回 `decision`、`reason_codes`，允许执行时同时返回 `action_id` 和 `action_status`。调用方不能直接指定决策、分数、置信度或资格状态，这些数据全部由服务端读取。自动化设置默认关闭；平台和策略配置存在时只能收紧全局设置。
 
-## 14. 当前明确不提供的 API
+## 14. 第六阶段排期 API
+
+- `GET/PUT /api/v1/scheduling/settings`：读取或按版本更新时区、工作时间、缓冲、默认时长、通勤和有效期配置。
+- `POST /api/v1/scheduling/calendar-events`：导入本地假日历忙闲事件；重复外部 ID 返回原事件。
+- `POST /api/v1/scheduling/analyze`：按招聘方消息创建幂等排期请求，解析邀请、检查日历并生成确认回复。
+- `GET /api/v1/scheduling/requests`：返回时间确认卡片、冲突状态、候选时间、风险和建议回复。
+- `POST /api/v1/scheduling/requests/{id}/approve`：批准或修改具体时间回复，可独立授权发送成功后创建日历事件。
+- `POST /api/v1/scheduling/requests/{id}/execute`：验证批准状态、任务有效期和日历快照后发送；新冲突退回待确认。
+
+`calendar_available=false` 只用于当前本地假适配器模拟供应商不可用，此时必须返回 `UNAVAILABLE`，不得声称日历空闲。批准接口不直接发送；执行接口仍复用浏览器目标复核和动作幂等保护。
+
+## 15. 当前明确不提供的 API
 
 - 简历文件上传 API；
 - 未经人工确认的消息或简历发送 API；
 - 验证码、反检测或任意页面操作 API；
-- 日历、电话和面试 API；
+- 真实 Google、Outlook 或其他外部日历供应商 API；
 - 真实大模型供应商配置 API。
 
 这些接口只能在对应开发阶段、状态和权限模型完成后增加。
