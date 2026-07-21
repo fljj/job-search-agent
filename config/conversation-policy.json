@@ -1,4 +1,5 @@
 {
+  "confirmation_ttl_hours": 24,
   "auto_reply_min_confidence": 0.90,
   "confirmation_min_confidence": 0.75,
   "missing_fact_reply": "这部分信息我需要确认一下，稍后回复您。",

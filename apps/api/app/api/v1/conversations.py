@@ -16,7 +16,6 @@ from apps.api.app.services.conversation_service import (
     create_greeting_draft,
     create_reply_draft,
     import_message,
-    list_confirmation_tasks,
 )
 
 router = APIRouter(tags=["conversations"])
@@ -41,8 +40,3 @@ def reply(payload: ReplyRequest, session: Session = Depends(get_session)) -> dic
 @router.post("/drafts/greeting")
 def greeting(payload: GreetingRequest, session: Session = Depends(get_session)) -> dict[str, object]:
     return response(create_greeting_draft(session, payload.job_score_id))
-
-
-@router.get("/confirmation-tasks")
-def confirmation_tasks(session: Session = Depends(get_session)) -> dict[str, object]:
-    return response({"items": list_confirmation_tasks(session)})

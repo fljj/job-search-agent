@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from apps.api.app.api.v1 import (
+    actions,
     browser,
     conversations,
     jobs,
@@ -27,7 +28,8 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 for router in (profiles.router, strategies.router, jobs.router, scores.router,
-               knowledge.router, resumes.router, conversations.router, browser.router):
+               knowledge.router, resumes.router, conversations.router, browser.router,
+               actions.router):
     app.include_router(router, prefix="/api/v1")
 
 

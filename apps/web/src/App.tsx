@@ -2,6 +2,7 @@ import { Layout, Tabs, Typography } from 'antd'
 import { JobPage } from './pages/JobPage'
 import { ConversationPage } from './pages/ConversationPage'
 import { BrowserPage } from './pages/BrowserPage'
+import { ActionPage } from './pages/ActionPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { StrategyPage } from './pages/StrategyPage'
 
@@ -13,5 +14,6 @@ export default function App() {
       { key: 'jobs', label: '模拟 JD 与职位', children: <JobPage /> },
       { key: 'conversation', label: '知识库与模拟沟通', children: <ConversationPage /> },
       { key: 'browser', label: '招聘网站只读', children: <BrowserPage /> },
+      { key: 'actions', label: '人工确认与发送', children: <ActionPage /> },
     ]} /></Layout.Content></Layout>
 }

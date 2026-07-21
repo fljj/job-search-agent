@@ -1,0 +1,20 @@
+import pytest
+
+from packages.policy_engine.content_check import validate_edited_content
+from packages.policy_engine.state_machine import ActionStatus, require_transition
+
+
+def test_only_approved_action_can_start_execution() -> None:
+    require_transition("APPROVED", ActionStatus.EXECUTING)
+    with pytest.raises(ValueError):
+        require_transition("PENDING_APPROVAL", ActionStatus.EXECUTING)
+
+
+def test_outcome_unknown_is_terminal() -> None:
+    with pytest.raises(ValueError):
+        require_transition("OUTCOME_UNKNOWN", ActionStatus.APPROVED)
+
+
+def test_edited_sensitive_content_is_rejected() -> None:
+    assert validate_edited_content("我的身份证号是 123") == ["SENSITIVE_OR_PROHIBITED"]
+    assert validate_edited_content("我有 8 年 Java 经验") == []

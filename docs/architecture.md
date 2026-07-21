@@ -280,4 +280,18 @@ Repositories → SQLAlchemy Models
 → 保存读取状态和受控证据元数据
 ```
 
-`adapters/browser` 仅实现定位、可见性、文本、属性和页面焦点读取。其公开边界不包含 `click/fill/type/upload`。选择器失效或目标不匹配时只记录失败状态，不进入业务导入。
+`playwright_reader` 仅实现定位、可见性、文本、属性和页面焦点读取，不包含 `click/fill/type/upload`。第四阶段的有限写操作单独位于 `playwright_actions`，只接收已批准命令。选择器失效或目标不匹配时只记录失败状态。
+
+## 11. 第四阶段人工执行流程
+
+```text
+草稿/附件候选 → PENDING_APPROVAL
+→ 用户拒绝：CANCELLED
+→ 用户修改：敏感复检 → 旧任务 SUPERSEDED → 新任务 PENDING_APPROVAL
+→ 用户批准：APPROVED
+→ 单独执行请求原子占用：EXECUTING
+→ 页面、公司、职位、招聘人、对话、内容/附件复核
+→ SUCCEEDED / FAILED_RETRYABLE / FAILED_FINAL / OUTCOME_UNKNOWN
+```
+
+`policy_engine` 控制状态转换和权限；`action_service` 原子占用并持久化尝试/审计；`playwright_actions` 只执行已批准命令，不自行判断是否应该发送。

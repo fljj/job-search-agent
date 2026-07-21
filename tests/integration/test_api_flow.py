@@ -12,6 +12,7 @@ from apps.api.app.main import app
 from apps.api.app.models import entities  # noqa: F401
 from apps.api.app.schemas.browser import BrowserReadRequest
 from apps.api.app.services.browser_service import persist_read_result
+from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
 from packages.browser_worker.models import (
     BrowserConversation,
     BrowserJob,
@@ -46,7 +47,7 @@ def client() -> Iterator[TestClient]:
         test_engine.dispose()
 
 
-def test_complete_first_phase_api_flow(client: TestClient) -> None:
+def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     profile_response = client.put("/api/v1/profile", json={
         "name": "集成测试候选人", "total_years": 13, "management_years": 5,
         "has_architecture_experience": True, "has_core_system_experience": True,
@@ -190,7 +191,74 @@ def test_complete_first_phase_api_flow(client: TestClient) -> None:
     assert time_reply.json()["data"]["decision"] == "REQUIRE_CONFIRMATION"
     assert time_reply.json()["data"]["confirmation_task_id"] is not None
     tasks = client.get("/api/v1/confirmation-tasks")
-    assert len(tasks.json()["data"]["items"]) == 1
+    assert len(tasks.json()["data"]["items"]) >= 3
+
+    reply_task_id = reply.json()["data"]["confirmation_task_id"]
+    approval = client.post(
+        f"/api/v1/confirmation-tasks/{reply_task_id}/approve",
+        json={"conversation_id": conversation_id},
+        headers={"Idempotency-Key": "integration-reply-action"},
+    )
+    duplicate_approval = client.post(
+        f"/api/v1/confirmation-tasks/{reply_task_id}/approve",
+        json={"conversation_id": conversation_id},
+        headers={"Idempotency-Key": "integration-reply-action"},
+    )
+    assert approval.status_code == 200
+    assert duplicate_approval.json()["data"]["id"] == approval.json()["data"]["id"]
+    duplicate_content = client.post(
+        f"/api/v1/confirmation-tasks/{reply_task_id}/approve",
+        json={"conversation_id": conversation_id},
+        headers={"Idempotency-Key": "integration-reply-action-other-key"},
+    )
+    assert duplicate_content.status_code == 400
+
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.PlaywrightActionExecutor.execute",
+        lambda *_: ExecutionResult(outcome=ExecutionOutcome.SUCCEEDED, evidence_hash="c" * 64),
+    )
+    executed = client.post(
+        f"/api/v1/actions/{approval.json()['data']['id']}/execute",
+        json={"cdp_url": "http://127.0.0.1:9222"},
+    )
+    assert executed.json()["data"]["status"] == "SUCCEEDED"
+
+    greeting_task_id = greeting.json()["data"]["confirmation_task_id"]
+    reused_key = client.post(
+        f"/api/v1/confirmation-tasks/{greeting_task_id}/approve",
+        json={"conversation_id": conversation_id},
+        headers={"Idempotency-Key": "integration-reply-action"},
+    )
+    assert reused_key.status_code == 400
+    greeting_action = client.post(
+        f"/api/v1/confirmation-tasks/{greeting_task_id}/approve",
+        json={"conversation_id": conversation_id},
+        headers={"Idempotency-Key": "integration-greeting-action"},
+    ).json()["data"]
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.PlaywrightActionExecutor.execute",
+        lambda *_: ExecutionResult(
+            outcome=ExecutionOutcome.OUTCOME_UNKNOWN, error_code="RESULT_NOT_OBSERVED"
+        ),
+    )
+    unknown = client.post(
+        f"/api/v1/actions/{greeting_action['id']}/execute",
+        json={"cdp_url": "http://127.0.0.1:9222"},
+    )
+    assert unknown.json()["data"]["status"] == "OUTCOME_UNKNOWN"
+    assert client.post(f"/api/v1/actions/{greeting_action['id']}/retry").status_code == 400
+
+    time_task_id = time_reply.json()["data"]["confirmation_task_id"]
+    unsafe_edit = client.post(f"/api/v1/confirmation-tasks/{time_task_id}/modify",
+                              json={"content": "我的身份证号是 123"})
+    assert unsafe_edit.status_code == 400
+    safe_edit = client.post(f"/api/v1/confirmation-tasks/{time_task_id}/modify",
+                            json={"content": "这个时间我需要确认后再回复您。"})
+    assert safe_edit.status_code == 200
+    rejected = client.post(
+        f"/api/v1/confirmation-tasks/{safe_edit.json()['data']['id']}/reject"
+    )
+    assert rejected.json()["data"]["status"] == "CANCELLED"
 
 
 def test_browser_read_persistence_is_idempotent(client: TestClient) -> None:

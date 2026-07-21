@@ -20,6 +20,13 @@ class PlatformSelectors(BaseModel):
     message_items: str
     message_id_attribute: str
     message_content: str
+    message_composer: str
+    message_send_button: str
+    sent_message_items: str
+    resume_trigger: str
+    resume_items: str
+    resume_confirm_button: str
+    sent_resume_items: str
 
 
 class BrowserSelectorsConfig(BaseModel):

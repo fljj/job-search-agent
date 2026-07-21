@@ -19,7 +19,14 @@
       "recruiter": "[data-testid='recruiter-name'], .chat-name",
       "message_items": "[data-testid='message-item'], .message-item",
       "message_id_attribute": "data-message-id",
-      "message_content": "[data-testid='message-content'], .message-content"
+      "message_content": "[data-testid='message-content'], .message-content",
+      "message_composer": "[data-testid='message-composer'], textarea.chat-input",
+      "message_send_button": "[data-testid='send-message'], .send-message",
+      "sent_message_items": "[data-testid='message-item'][data-direction='outbound'], .message-item.outbound",
+      "resume_trigger": "[data-testid='send-resume'], .send-resume",
+      "resume_items": "[data-testid='resume-item'], .resume-item",
+      "resume_confirm_button": "[data-testid='confirm-send-resume'], .confirm-send-resume",
+      "sent_resume_items": "[data-testid='sent-resume'], .message-item.resume"
     },
     "MAIMAI": {
       "allowed_hosts": ["maimai.cn", "www.maimai.cn"],
@@ -39,7 +46,14 @@
       "recruiter": "[data-testid='recruiter-name'], .recruiter-name",
       "message_items": "[data-testid='message-item'], .message-item",
       "message_id_attribute": "data-message-id",
-      "message_content": "[data-testid='message-content'], .message-content"
+      "message_content": "[data-testid='message-content'], .message-content",
+      "message_composer": "[data-testid='message-composer'], textarea.chat-input",
+      "message_send_button": "[data-testid='send-message'], .send-message",
+      "sent_message_items": "[data-testid='message-item'][data-direction='outbound'], .message-item.outbound",
+      "resume_trigger": "[data-testid='send-resume'], .send-resume",
+      "resume_items": "[data-testid='resume-item'], .resume-item",
+      "resume_confirm_button": "[data-testid='confirm-send-resume'], .confirm-send-resume",
+      "sent_resume_items": "[data-testid='sent-resume'], .message-item.resume"
     }
   }
 }

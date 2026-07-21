@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -137,8 +138,13 @@ def _persist_draft(
     )
     session.add(decision)
     session.flush()
-    if decision.decision == "REQUIRE_CONFIRMATION":
-        session.add(db.ConfirmationTask(user_id=DEFAULT_USER_ID, decision_id=decision.id))
+    if decision.decision != "DENY":
+        policy = get_conversation_policy()
+        session.add(db.ConfirmationTask(
+            user_id=DEFAULT_USER_ID,
+            decision_id=decision.id,
+            expires_at=datetime.now(UTC) + timedelta(hours=policy.confirmation_ttl_hours),
+        ))
     session.commit()
     session.refresh(draft)
     return _draft_response(session, draft)

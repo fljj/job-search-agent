@@ -184,11 +184,18 @@ users
 
 第三阶段重复读取使用“平台 + 状态 + 页面类型 + 内容哈希 + 原因码”生成指纹。职位、对话和消息同时受已有来源唯一约束保护。
 
-## 7. 后续阶段实体与状态
+## 7. 第四阶段数据表
 
-后续阶段按需增加：`resume_send_records`、`action_queue`、`action_attempts`、`audit_events`、`interview_requests`、`calendar_checks`、`calendar_events`。
+- `action_queue`：确认任务、对话、草稿/简历、目标快照、状态、时间、幂等键和发送指纹；`confirmation_task_id`、`idempotency_key` 和 `send_fingerprint` 唯一。
+- `action_attempts`：每次外部执行的状态、错误、外部引用和证据哈希；`(action_id, attempt_number)` 唯一。
+- `resume_send_records`：已成功发送附件记录；`(conversation_id, resume_id)` 唯一。
+- `audit_events`：追加保存行为者、事件、实体、前后状态、原因码和关联 ID，不保存 Cookie、Token 或完敏感内容。
 
-### 7.1 动作状态
+## 8. 后续阶段实体与状态
+
+后续阶段按需增加：`interview_requests`、`calendar_checks`、`calendar_events`。
+
+### 8.1 动作状态
 
 ```text
 DRAFT
@@ -204,7 +211,7 @@ SUPERSEDED
 OUTCOME_UNKNOWN
 ```
 
-### 7.2 平台会话状态
+### 8.2 平台会话状态
 
 ```text
 SESSION_READY
@@ -214,7 +221,7 @@ SESSION_TARGET_MISMATCH
 SESSION_PAUSED
 ```
 
-### 7.3 对话和消息状态
+### 8.3 对话和消息状态
 
 对话状态：`NEW/ACTIVE/WAITING_RECRUITER/WAITING_USER/SCHEDULING/SCHEDULE_CONFIRMED/ENDED`。
 
@@ -222,7 +229,7 @@ SESSION_PAUSED
 
 对话状态不能替代单条消息或动作状态。
 
-## 8. 幂等设计
+## 9. 幂等设计
 
 ### 6.1 第一阶段
 
@@ -234,13 +241,14 @@ SESSION_PAUSED
 ### 6.2 后续写操作
 
 - `action_queue.idempotency_key` 唯一；
+- `action_queue.send_fingerprint` 按对话、动作类型、内容或简历生成，防止更换幂等键重复发送；
 - `messages(platform, platform_message_id)` 唯一；
 - `resume_send_records(conversation_id, resume_id)` 唯一；
 - 只有原子条件更新成功将动作转为 `EXECUTING` 的执行者可以调用外部平台；
 - `OUTCOME_UNKNOWN` 只能对账，不能直接重试；
 - 每次重试写入新的 `action_attempts`，不得覆盖历史尝试。
 
-## 9. 审计设计
+## 10. 审计设计
 
 `audit_events` 后续采用追加写，至少保存：
 

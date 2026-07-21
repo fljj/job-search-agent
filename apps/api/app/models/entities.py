@@ -418,3 +418,75 @@ class PageEvidence(Base):
     content_hash: Mapped[str] = mapped_column(String(64))
     selector_version: Mapped[str] = mapped_column(String(50))
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ActionQueue(TimestampMixin, Base):
+    __tablename__ = "action_queue"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key"),
+        UniqueConstraint("confirmation_task_id"),
+        UniqueConstraint("send_fingerprint"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    confirmation_task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("confirmation_tasks.id"))
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id"))
+    draft_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generated_drafts.id"), nullable=True)
+    resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("resumes.id"), nullable=True)
+    action_type: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30))
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    platform: Mapped[str] = mapped_column(String(30))
+    target_company: Mapped[str] = mapped_column(String(200))
+    target_job_title: Mapped[str] = mapped_column(String(200))
+    target_recruiter: Mapped[str] = mapped_column(String(100))
+    target_conversation_key: Mapped[str] = mapped_column(String(200))
+    attachment_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255))
+    send_fingerprint: Mapped[str] = mapped_column(String(64))
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class ActionAttempt(Base):
+    __tablename__ = "action_attempts"
+    __table_args__ = (UniqueConstraint("action_id", "attempt_number"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("action_queue.id", ondelete="CASCADE"))
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(30))
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    external_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    evidence_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ResumeSendRecord(Base):
+    __tablename__ = "resume_send_records"
+    __table_args__ = (UniqueConstraint("conversation_id", "resume_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id"))
+    resume_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resumes.id"))
+    action_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("action_queue.id"))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    external_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    actor_type: Mapped[str] = mapped_column(String(30))
+    event_type: Mapped[str] = mapped_column(String(60))
+    entity_type: Mapped[str] = mapped_column(String(40))
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    before_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    after_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    correlation_id: Mapped[str] = mapped_column(String(100))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

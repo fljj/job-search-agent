@@ -40,6 +40,7 @@ class DraftResult(BaseModel):
 
 
 class ConversationPolicyConfig(BaseModel):
+    confirmation_ttl_hours: int = Field(default=24, ge=1, le=168)
     auto_reply_min_confidence: float = Field(default=0.90, ge=0, le=1)
     confirmation_min_confidence: float = Field(default=0.75, ge=0, le=1)
     missing_fact_reply: str = "这部分信息我需要确认一下，稍后回复您。"

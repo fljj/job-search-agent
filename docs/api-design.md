@@ -241,11 +241,23 @@
 
 未登录、验证页、页面结构变化或目标不一致时只保存失败证据，不导入职位或消息。
 
-## 12. 当前明确不提供的 API
+## 12. 第四阶段人工确认与执行 API
 
-- 简历文件上传和发送 API；
-- 确认任务的批准、修改发送和动作执行 API；
-- 浏览器点击、输入、上传、发送或验证码处理 API；
+- `GET /api/v1/confirmation-tasks`：返回草稿、动作类型、状态、原因码、置信度和过期时间。
+- `POST /api/v1/confirmation-tasks/resume`：为对话中的已登记附件创建发送确认。
+- `POST /api/v1/confirmation-tasks/{id}/approve`：必须携带 `Idempotency-Key`，仅生成 `APPROVED` 动作，不立即发送。
+- `POST /api/v1/confirmation-tasks/{id}/modify`：敏感检查后废弃旧任务，创建新的 `PENDING_APPROVAL` 任务。
+- `POST /api/v1/confirmation-tasks/{id}/reject`：将未批准任务终止为 `CANCELLED`。
+- `POST /api/v1/actions/{id}/execute`：原子占用已批准动作，执行前重新复核页面目标并发送。
+- `POST /api/v1/actions/{id}/retry`：仅允许用户将 `FAILED_RETRYABLE` 重新批准；`OUTCOME_UNKNOWN` 不可重试。
+
+确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。幂等键只能绑定一个确认任务；相同对话中的相同发送动作即使更换幂等键也会被拒绝。
+
+## 13. 当前明确不提供的 API
+
+- 简历文件上传 API；
+- 未经人工确认的消息或简历发送 API；
+- 验证码、反检测或任意页面操作 API；
 - 日历、电话和面试 API；
 - 真实大模型供应商配置 API。
 
