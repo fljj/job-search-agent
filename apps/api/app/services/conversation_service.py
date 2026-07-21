@@ -151,7 +151,9 @@ def _persist_draft(
 
 
 def _draft_response(session: Session, draft: db.GeneratedDraft) -> DraftResponse:
-    decision = session.scalar(select(db.PolicyDecision).where(db.PolicyDecision.draft_id == draft.id))
+    decision = session.scalar(select(db.PolicyDecision).where(
+        db.PolicyDecision.draft_id == draft.id
+    ).order_by(db.PolicyDecision.created_at.asc()).limit(1))
     if decision is None:
         raise RuntimeError("草稿缺少策略决策")
     task = session.scalar(select(db.ConfirmationTask).where(db.ConfirmationTask.decision_id == decision.id))

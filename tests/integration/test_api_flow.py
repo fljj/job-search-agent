@@ -181,6 +181,44 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     assert reply.json()["data"]["decision"] == "ALLOW_AUTO"
     assert duplicate_reply.json()["data"]["id"] == reply.json()["data"]["id"]
 
+    automation_setting = {
+        "scope_type": "GLOBAL", "scope_key": "GLOBAL", "enabled": False,
+        "paused": False, "auto_greet_enabled": True, "auto_greet_min_score": 70,
+        "auto_reply_enabled": True, "auto_reply_min_confidence": 0.9,
+        "auto_resume_enabled": True, "auto_resume_min_score": 70,
+        "hourly_limit": 10, "daily_limit": 50,
+    }
+    saved_setting = client.put("/api/v1/automation/settings", json=automation_setting)
+    assert saved_setting.status_code == 200
+    assert client.get("/api/v1/automation/settings").json()["data"]["items"][0]["enabled"] is False
+    denied_auto = client.post("/api/v1/automation/dispatch", json={
+        "action_type": "REPLY", "conversation_id": conversation_id,
+        "draft_id": reply.json()["data"]["id"], "cdp_url": "http://127.0.0.1:9222",
+    })
+    assert denied_auto.json()["data"]["decision"] == "DENY"
+    automation_setting["enabled"] = True
+    assert client.put("/api/v1/automation/settings", json=automation_setting).status_code == 200
+    auto_conversation = client.post("/api/v1/conversations", json={
+        "job_id": job_id, "external_conversation_id": "integration-auto-conversation",
+        "recruiter_name": "自动化测试招聘人", "platform": "MOCK",
+    }).json()["data"]
+    auto_message = client.post(
+        f"/api/v1/conversations/{auto_conversation['id']}/messages",
+        json={"external_message_id": "auto-message-1", "content": "请介绍 Java 技术栈经验",
+              "received_at": datetime.now(UTC).isoformat()},
+    ).json()["data"]
+    auto_draft = client.post("/api/v1/drafts/reply", json={"message_id": auto_message["id"]}).json()["data"]
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.PlaywrightActionExecutor.execute",
+        lambda *_: ExecutionResult(outcome=ExecutionOutcome.SUCCEEDED, evidence_hash="a" * 64),
+    )
+    auto_sent = client.post("/api/v1/automation/dispatch", json={
+        "action_type": "REPLY", "conversation_id": auto_conversation["id"],
+        "draft_id": auto_draft["id"], "cdp_url": "http://127.0.0.1:9222",
+    })
+    assert auto_sent.json()["data"]["decision"] == "ALLOW_AUTO"
+    assert auto_sent.json()["data"]["action_status"] == "SUCCEEDED"
+
     time_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
         "external_message_id": "message-2", "content": "周二几点可以电话面试？",
         "received_at": datetime.now(UTC).isoformat(),

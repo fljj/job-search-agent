@@ -295,3 +295,18 @@ Repositories → SQLAlchemy Models
 ```
 
 `policy_engine` 控制状态转换和权限；`action_service` 原子占用并持久化尝试/审计；`playwright_actions` 只执行已批准命令，不自行判断是否应该发送。
+
+## 12. 第五阶段安全自动化流程
+
+```text
+草稿或简历候选
+→ 合并全局、平台、策略配置（只允许逐级收紧）
+→ 检查资格、状态、分数/置信度、敏感意图、事实、附件和重复记录
+→ 检查平台小时/每日限额
+→ DENY / REQUIRE_CONFIRMATION：记录策略决策，不执行
+→ ALLOW_AUTO：创建 authorization_source=AUTO 的唯一动作
+→ 复用第四阶段原子占用和浏览器执行前复核
+→ 异常或身份不一致：停止动作并暂停对应平台
+```
+
+自动化服务负责授权和调度，`playwright_actions` 仍只接收已经授权的单个命令。配置不能绕过硬性排除、敏感/具体时间确认、事实真实性、页面身份复核和 `OUTCOME_UNKNOWN` 禁止重试等不变量。

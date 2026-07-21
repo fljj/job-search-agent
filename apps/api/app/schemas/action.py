@@ -22,7 +22,7 @@ class ExecuteRequest(BaseModel):
 
 class ActionResponse(BaseModel):
     id: UUID
-    confirmation_task_id: UUID
+    confirmation_task_id: UUID | None
     action_type: str
     status: str
     conversation_id: UUID

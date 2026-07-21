@@ -429,7 +429,10 @@ class ActionQueue(TimestampMixin, Base):
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    confirmation_task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("confirmation_tasks.id"))
+    confirmation_task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("confirmation_tasks.id"), nullable=True)
+    policy_decision_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("policy_decisions.id"), nullable=True)
+    strategy_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("job_strategies.id"), nullable=True)
+    authorization_source: Mapped[str] = mapped_column(String(20), default="MANUAL")
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id"))
     draft_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generated_drafts.id"), nullable=True)
     resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("resumes.id"), nullable=True)
@@ -449,6 +452,25 @@ class ActionQueue(TimestampMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class AutomationSetting(TimestampMixin, Base):
+    __tablename__ = "automation_settings"
+    __table_args__ = (UniqueConstraint("user_id", "scope_type", "scope_key"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    scope_type: Mapped[str] = mapped_column(String(20))
+    scope_key: Mapped[str] = mapped_column(String(100))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_greet_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_greet_min_score: Mapped[int] = mapped_column(Integer, default=70)
+    auto_reply_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_reply_min_confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0.90"))
+    auto_resume_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_resume_min_score: Mapped[int] = mapped_column(Integer, default=70)
+    hourly_limit: Mapped[int] = mapped_column(Integer, default=10)
+    daily_limit: Mapped[int] = mapped_column(Integer, default=50)
 
 
 class ActionAttempt(Base):

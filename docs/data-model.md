@@ -193,9 +193,17 @@ users
 
 ## 8. 后续阶段实体与状态
 
+### 8.1 第五阶段数据表和字段
+
+- `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；`(user_id, scope_type, scope_key)` 唯一。
+- `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
+- `action_queue.policy_decision_id`：自动动作直接关联确定性策略决策。
+- `action_queue.strategy_id`：保存自动动作采用的策略范围。
+- 自动动作不创建人工批准，因此 `confirmation_task_id` 可空；人工动作仍必须关联确认任务。
+
 后续阶段按需增加：`interview_requests`、`calendar_checks`、`calendar_events`。
 
-### 8.1 动作状态
+### 8.2 动作状态
 
 ```text
 DRAFT
@@ -211,7 +219,7 @@ SUPERSEDED
 OUTCOME_UNKNOWN
 ```
 
-### 8.2 平台会话状态
+### 8.3 平台会话状态
 
 ```text
 SESSION_READY
@@ -221,7 +229,7 @@ SESSION_TARGET_MISMATCH
 SESSION_PAUSED
 ```
 
-### 8.3 对话和消息状态
+### 8.4 对话和消息状态
 
 对话状态：`NEW/ACTIVE/WAITING_RECRUITER/WAITING_USER/SCHEDULING/SCHEDULE_CONFIRMED/ENDED`。
 

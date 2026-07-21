@@ -253,7 +253,15 @@
 
 确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。幂等键只能绑定一个确认任务；相同对话中的相同发送动作即使更换幂等键也会被拒绝。
 
-## 13. 当前明确不提供的 API
+## 13. 第五阶段安全自动化 API
+
+- `GET /api/v1/automation/settings`：查看全局、平台和策略范围配置。
+- `PUT /api/v1/automation/settings`：按 `(scope_type, scope_key)` 幂等创建或更新自动化配置。
+- `POST /api/v1/automation/dispatch`：对指定草稿、对话和可选网站内简历执行确定性决策；只有 `ALLOW_AUTO` 才立即复用安全执行链路。
+
+`dispatch` 返回 `decision`、`reason_codes`，允许执行时同时返回 `action_id` 和 `action_status`。调用方不能直接指定决策、分数、置信度或资格状态，这些数据全部由服务端读取。自动化设置默认关闭；平台和策略配置存在时只能收紧全局设置。
+
+## 14. 当前明确不提供的 API
 
 - 简历文件上传 API；
 - 未经人工确认的消息或简历发送 API；
