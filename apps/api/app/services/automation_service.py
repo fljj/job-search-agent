@@ -9,6 +9,10 @@ from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AutomationDispatchRequest, AutomationSettingPayload
 from apps.api.app.services.action_service import execute_action
 from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.rollout_service import (
+    enforce_rollout_health,
+    evaluate_rollout_action,
+)
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.browser_worker.actions import ActionExecutor
 from packages.policy_engine.automation import (
@@ -135,6 +139,13 @@ def dispatch(
         hourly_count=counts[0], daily_count=counts[1],
     )
     decision, reasons = evaluate_automation(context, rules)
+    if decision is AutomationDecision.ALLOW_AUTO:
+        rollout_allowed, rollout_reasons = evaluate_rollout_action(
+            session, conversation.platform, payload.action_type, rules.daily_limit
+        )
+        if not rollout_allowed:
+            decision = AutomationDecision.DENY
+            reasons = rollout_reasons
     policy = db.PolicyDecision(
         user_id=DEFAULT_USER_ID, draft_id=draft.id, action_type=payload.action_type,
         decision=decision.value, reason_codes=reasons, policy_version=POLICY_VERSION,
@@ -159,6 +170,7 @@ def dispatch(
     result = execute_action(session, action.id, payload.cdp_url, executor)
     if result.status in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
         _pause_platform(session, conversation.platform, result.failure_code or result.status)
+    enforce_rollout_health(session, conversation.platform)
     return {"decision": decision.value, "reason_codes": reasons,
             "action_id": result.id, "action_status": result.status,
             "failure_code": result.failure_code}
@@ -211,6 +223,13 @@ def dispatch_proactive_greeting(
     if missing:
         decision = AutomationDecision.DENY
         reasons = missing
+    if decision is AutomationDecision.ALLOW_AUTO:
+        rollout_allowed, rollout_reasons = evaluate_rollout_action(
+            session, "BOSS", "GREETING", rules.daily_limit
+        )
+        if not rollout_allowed:
+            decision = AutomationDecision.DENY
+            reasons = rollout_reasons
     policy = db.PolicyDecision(
         user_id=DEFAULT_USER_ID,
         draft_id=draft.id,
@@ -269,6 +288,7 @@ def dispatch_proactive_greeting(
     result = execute_action(session, action.id, cdp_url, executor)
     if result.status in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
         _pause_platform(session, "BOSS", result.failure_code or result.status)
+    enforce_rollout_health(session, "BOSS")
     return {
         "decision": decision.value,
         "reason_codes": reasons,

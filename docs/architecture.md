@@ -118,6 +118,8 @@ config/
 - 编排事务和领域模块；
 - 处理策略版本冲突、批量导入和评分持久化；
 - `agent_service` 使用 PostgreSQL 短租约编排单次轮询、暂停、恢复和熔断；不在 API 请求内启动常驻线程；
+- `rollout_service` 在真实写操作和职位扫描前执行六级灰度门禁，计算零容忍安全指标，
+  校验逐日人工升级，并在指标失败时自动回退或暂停；
 - 不直接解析页面或实现维度评分公式。
 
 ### 3.3 Repository 层
@@ -375,6 +377,11 @@ BOSS 真实职位页在 Playwright 通过 CDP 附加时可能触发平台重定�
 ```
 
 `policy_engine` 控制状态转换和权限；`action_service` 原子占用并持久化尝试/审计；`playwright_actions` 只执行已批准命令，不自行判断是否应该发送。
+
+第十三阶段在既有权限判断之后、创建真实动作之前增加供应商无关的 `rollout` 规则。
+依赖方向为 `automation_service/job worker → rollout_service → policy_engine.rollout`。
+浏览器适配器不知道当前灰度级别，也不能提升限额；它只执行已同时通过自动化策略与
+灰度门禁的命令。职位扫描在 Worker 进入页面适配器前检查灰度，一级不会读取职位列表。
 
 ## 12. 第五阶段安全自动化流程
 

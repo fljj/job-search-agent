@@ -32,6 +32,10 @@ from apps.api.app.services.operations_service import (
     stop_worker,
     worker_preflight,
 )
+from apps.api.app.services.rollout_service import (
+    allows_rollout_job_scan,
+    enforce_rollout_health,
+)
 from packages.audit.redaction import install_redacting_filter
 from packages.browser_worker.actions import ActionExecutor
 from packages.browser_worker.models import Platform
@@ -115,7 +119,11 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     rules = _effective_rules(
                         session, run.platform, run.strategy_id
                     )
-                    if rules.job_scan_enabled and not rules.emergency_stop:
+                    if (
+                        rules.job_scan_enabled
+                        and not rules.emergency_stop
+                        and allows_rollout_job_scan(session, run.platform)
+                    ):
                         raw_job_cursor = (run.cursor or {}).get("job_discovery")
                         job_cursor = (
                             raw_job_cursor
@@ -180,6 +188,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
 def maintenance_once(cdp_url: str) -> None:
     with SessionLocal() as session:
         process_reconciliation_queue(session, cdp_url)
+        enforce_rollout_health(session, "BOSS")
         apply_retention(session)
 
 

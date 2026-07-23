@@ -328,6 +328,21 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 - `GET /api/v1/automation/operations/discrepancies`：检查内部来源和状态差异。
 - `POST /api/v1/automation/operations/audit/run`：对近期成功动作执行只读平台抽查。
 
+第十三阶段灰度 API：
+
+- `GET /api/v1/automation/rollouts`：列出平台灰度级别、状态、升级等待时间和安全指标。
+- `PUT /api/v1/automation/rollouts`：幂等初始化或更新 BOSS 灰度限额；首次固定为暂停的
+  一级，不允许通过请求跳级。
+- `GET /api/v1/automation/rollouts/{platform}`：读取单个平台灰度状态。
+- `POST /api/v1/automation/rollouts/{platform}/transition`：请求包含
+  `action=ACTIVATE/PAUSE/ADVANCE/ROLLBACK` 和 `expected_version`。
+
+`ADVANCE` 只允许活动状态、当前级别满一个配置工作日、全部安全指标为零且严格升级
+一级；否则返回 `INVALID_REQUEST`。版本不一致返回 `VERSION_CONFLICT`。真实平台没有
+灰度配置、灰度暂停、当前级别未开放动作或达到灰度日限额时，动作决策返回 `DENY`，
+原因码分别为 `ROLLOUT_NOT_CONFIGURED`、`ROLLOUT_PAUSED`、
+`ROLLOUT_ACTION_NOT_ENABLED` 或 `ROLLOUT_DAILY_LIMIT_REACHED`。
+
 ## 14. 第六阶段排期 API
 
 - `GET/PUT /api/v1/scheduling/settings`：读取或按版本更新时区、工作时间、缓冲、默认时长、通勤和有效期配置。
