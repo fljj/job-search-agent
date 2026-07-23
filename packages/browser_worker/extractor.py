@@ -44,7 +44,7 @@ def _extract_job(
     expected_company: str | None, expected_job_title: str | None,
 ) -> ReadResult:
     title = page.text(selectors.job_title)
-    company = page.text(selectors.company)
+    company = _normalize_company_name(page.text(selectors.company))
     description = page.text(selectors.description)
     if not title or not company or not description:
         return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
@@ -122,3 +122,9 @@ def _normalize_work_mode(value: str | None) -> str:
     if any(word in lowered for word in ("现场", "onsite", "坐班")):
         return "ONSITE"
     return "UNKNOWN"
+
+
+def _normalize_company_name(value: str | None) -> str | None:
+    if value and value.startswith("公司名称"):
+        return value.removeprefix("公司名称").strip()
+    return value

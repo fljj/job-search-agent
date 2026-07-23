@@ -62,6 +62,13 @@ def test_extracts_supported_platform_job_fixture(platform: Platform) -> None:
     assert result.job and result.job.work_mode == "REMOTE"
 
 
+def test_normalizes_boss_company_accessibility_prefix() -> None:
+    page, selectors = job_page(Platform.BOSS)
+    page.texts[selectors.company] = "公司名称示例科技"
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+    assert result.job and result.job.company_name == "示例科技"
+
+
 def test_extracts_conversation_messages() -> None:
     config = get_browser_selectors()
     selectors = config.platforms["BOSS"]

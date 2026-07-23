@@ -223,11 +223,11 @@ def _current_cdp_target(cdp_url: str, allowed_hosts: list[str]) -> dict[str, str
     ]
     if not pages:
         raise ValueError("未找到当前平台页面，请在专用浏览器中打开目标页")
-    for target in reversed(pages):
+    for target in pages:
         try:
             with RawCdpPageReader(target["webSocketDebuggerUrl"]) as page:
                 if page._evaluate("document.hasFocus()"):
                     return cast(dict[str, str], target)
         except (OSError, TimeoutError, ValueError):
             continue
-    return cast(dict[str, str], pages[-1])
+    return cast(dict[str, str], pages[0])
