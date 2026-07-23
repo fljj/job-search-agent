@@ -62,7 +62,7 @@ class PlaywrightActionExecutor:
             )
         if command.action_type == "GREETING":
             return self._execute_greeting_over_raw_cdp(cdp_url, command)
-        if command.action_type in {"REPLY", "LOW_SCORE_DECLINE"}:
+        if command.action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
             return self._execute_reply_over_raw_cdp(cdp_url, command)
         try:
             with sync_playwright() as playwright:
@@ -278,7 +278,11 @@ class PlaywrightActionExecutor:
                 accept=command.action_type.endswith("ACCEPT"),
                 rules=get_recommendation_rules(),
             )
-        if command.action_type not in {"REPLY", "LOW_SCORE_DECLINE"}:
+        if command.action_type not in {
+            "REPLY",
+            "LOW_SCORE_DECLINE",
+            "MISMATCH_DECLINE",
+        }:
             return ExecutionResult(
                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                 error_code="RECONCILIATION_NOT_SUPPORTED",

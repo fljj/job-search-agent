@@ -22,6 +22,7 @@ def test_job_scan_starts_at_second_level(level: int, expected: bool) -> None:
         (2, "GREETING", 0),
         (3, "REPLY", 5),
         (3, "LOW_SCORE_DECLINE", 5),
+        (3, "MISMATCH_DECLINE", 5),
         (3, "GREETING", 0),
         (4, "GREETING", 3),
         (4, "RESUME", 0),

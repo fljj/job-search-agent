@@ -66,14 +66,30 @@ def test_reply_requires_original_allow_but_not_model_confidence() -> None:
     assert evaluate_automation(reply.model_copy(update={"original_decision": "DENY"}), rules())[0] is AutomationDecision.DENY
 
 
-def test_resume_requires_explicit_request_available_attachment_and_a_grade() -> None:
+def test_inbound_resume_ignores_score_but_requires_request_attachment_and_match() -> None:
     resume = context(
-        action_type="RESUME", score=60, grade="B",
+        action_type="RESUME", score=0, grade="UNKNOWN",
         explicit_resume_request=True, resume_available=True,
+        qualification_status="ROUGH_MATCH",
     )
     assert evaluate_automation(resume, rules())[0] is AutomationDecision.ALLOW_AUTO
     assert evaluate_automation(resume.model_copy(update={"explicit_resume_request": False}), rules())[0] is AutomationDecision.DENY
     assert evaluate_automation(resume.model_copy(update={"resume_already_sent": True}), rules())[0] is AutomationDecision.DENY
+    assert evaluate_automation(
+        resume.model_copy(update={"qualification_status": "MISMATCH"}), rules()
+    )[0] is AutomationDecision.DENY
+
+
+def test_mismatch_decline_requires_mismatch_evidence() -> None:
+    decline = context(
+        action_type="MISMATCH_DECLINE",
+        original_decision="ALLOW_AUTO",
+        qualification_status="MISMATCH",
+    )
+    assert evaluate_automation(decline, rules())[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(
+        decline.model_copy(update={"qualification_status": "ROUGH_MATCH"}), rules()
+    )[0] is AutomationDecision.DENY
 
 
 def test_switch_pause_and_rate_limits_stop_automation() -> None:

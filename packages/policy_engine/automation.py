@@ -46,6 +46,7 @@ class AutomationContext(BaseModel):
     explicit_resume_request: bool = False
     resume_available: bool = False
     resume_already_sent: bool = False
+    qualification_status: str = "UNKNOWN"
     whitelisted_c: bool = False
     hourly_count: int = 0
     daily_count: int = 0
@@ -75,26 +76,32 @@ def evaluate_automation(
         if not rules.low_score_decline_enabled:
             return AutomationDecision.DENY, ["LOW_SCORE_DECLINE_DISABLED"]
         return AutomationDecision.ALLOW_AUTO, ["LOW_SCORE_DECLINE_POLICY_MATCHED"]
-    if not context.eligible or not context.job_open:
-        return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
-    if context.grade == "C":
-        return AutomationDecision.DENY, ["C_GRADE_NO_AUTO"]
-
     if context.action_type == "GREETING":
+        if not context.eligible or not context.job_open:
+            return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
+        if context.grade == "C":
+            return AutomationDecision.DENY, ["C_GRADE_NO_AUTO"]
         if not rules.auto_greet_enabled:
             return AutomationDecision.DENY, ["AUTO_GREETING_DISABLED"]
         if context.score < rules.auto_greet_min_score:
             return AutomationDecision.DENY, ["GREETING_SCORE_BELOW_THRESHOLD"]
         return AutomationDecision.ALLOW_AUTO, ["GREETING_POLICY_MATCHED"]
 
-    if context.action_type == "REPLY":
+    if context.action_type in {"REPLY", "MISMATCH_DECLINE"}:
         if "INTERVIEW_TIME" in context.intents:
             return AutomationDecision.REQUIRE_CONFIRMATION, ["SPECIFIC_TIME_REQUIRES_CONFIRMATION"]
         if context.original_decision != "ALLOW_AUTO":
             return AutomationDecision.DENY, ["REPLY_NOT_AUTHORIZED"]
         if not rules.auto_reply_enabled:
             return AutomationDecision.DENY, ["AUTO_REPLY_DISABLED"]
-        return AutomationDecision.ALLOW_AUTO, ["REPLY_POLICY_MATCHED"]
+        if (
+            context.action_type == "MISMATCH_DECLINE"
+            and context.qualification_status != "MISMATCH"
+        ):
+            return AutomationDecision.DENY, ["MISMATCH_NOT_ESTABLISHED"]
+        return AutomationDecision.ALLOW_AUTO, [
+            f"{context.action_type}_POLICY_MATCHED"
+        ]
 
     if context.action_type == "RESUME":
         if context.resume_already_sent:
@@ -103,7 +110,9 @@ def evaluate_automation(
             return AutomationDecision.DENY, ["RESUME_NOT_EXPLICITLY_REQUESTED"]
         if not context.resume_available:
             return AutomationDecision.DENY, ["RESUME_NOT_AVAILABLE"]
-        if not rules.auto_resume_enabled or context.score < rules.auto_resume_min_score:
-            return AutomationDecision.DENY, ["RESUME_SCORE_OR_SWITCH"]
-        return AutomationDecision.ALLOW_AUTO, ["RESUME_POLICY_MATCHED"]
+        if context.qualification_status == "MISMATCH":
+            return AutomationDecision.DENY, ["QUALIFICATION_MISMATCH"]
+        if not rules.auto_resume_enabled:
+            return AutomationDecision.DENY, ["AUTO_RESUME_DISABLED"]
+        return AutomationDecision.ALLOW_AUTO, ["INBOUND_RESUME_POLICY_MATCHED"]
     return AutomationDecision.DENY, ["UNSUPPORTED_ACTION"]

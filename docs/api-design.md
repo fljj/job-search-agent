@@ -319,7 +319,8 @@ API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回
 - `GET /api/v1/conversations/{id}/qualification`：返回成熟度、已知/缺失字段、明确冲突和
   最近判断证据；
 - `POST /api/v1/conversations/{id}/qualification/evaluate`：根据新增消息和岗位信息
-  幂等更新成熟度，客户端不能直接指定结果；
+  幂等更新成熟度，客户端不能直接指定结果。实现使用
+  `qualification_status/evidence/message_ids/version` 返回当前快照；
 - 电话沟通动作要求 `ROUGH_MATCH` 或 `FULL_MATCH`；面试动作只允许 `FULL_MATCH`；
   两者涉及具体时间时仍必须进入排期确认 API。
 

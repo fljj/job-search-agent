@@ -16,6 +16,7 @@ from apps.api.app.schemas.scheduling import (
 )
 from apps.api.app.services.action_service import execute_action
 from apps.api.app.services.errors import ResourceNotFoundError, VersionConflictError
+from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.policy_engine.state_machine import ActionStatus
 from packages.scheduling.calendar import CalendarGateway, CalendarProviderUnavailable
@@ -23,6 +24,7 @@ from packages.scheduling.engine import check_calendar, parse_invitation, suggest
 from packages.scheduling.models import (
     CalendarBusySlot,
     CalendarStatus,
+    EventType,
     ParsedInvitation,
     SchedulingConfig,
 )
@@ -85,6 +87,16 @@ def analyze_invitation(session: Session, message_id: UUID,
     _supersede_generic_time_confirmations(session, message.id)
     config = _config(session)
     parsed = parse_invitation(message.content, message.received_at, config)
+    qualification, _ = refresh_qualification(
+        session, conversation, message=message
+    )
+    if parsed.event_type is EventType.PHONE_CALL:
+        if qualification.value not in {"ROUGH_MATCH", "FULL_MATCH"}:
+            session.commit()
+            raise ValueError("电话沟通前必须至少达到大致匹配")
+    elif qualification.value != "FULL_MATCH":
+        session.commit()
+        raise ValueError("面试前必须完整了解岗位并达到完全匹配")
     slots = _busy_slots(session)
     if gateway:
         try:

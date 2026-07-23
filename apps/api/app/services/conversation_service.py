@@ -23,6 +23,7 @@ from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.job_service import get_job_entity, get_parsed_entity
 from apps.api.app.services.knowledge_service import get_knowledge_entities
 from apps.api.app.services.llm_service import record_llm_invocation
+from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.conversation_agent.intents import classify_intents
@@ -60,7 +61,8 @@ GENERATOR_VERSION = "conversation-llm-v4"
 
 def create_conversation(session: Session, payload: ConversationPayload) -> dict[str, object]:
     ensure_default_user(session)
-    get_job_entity(session, payload.job_id)
+    if payload.job_id is not None:
+        get_job_entity(session, payload.job_id)
     existing = session.scalar(select(db.Conversation).where(
         db.Conversation.user_id == DEFAULT_USER_ID,
         db.Conversation.platform == payload.platform,
@@ -99,6 +101,8 @@ def import_message(session: Session, conversation_id: object, payload: MessagePa
     message = db.Message(conversation_id=conversation.id, direction="INBOUND",
                          intents=[intent.value for intent in intents], **payload.model_dump())
     session.add(message)
+    session.flush()
+    refresh_qualification(session, conversation, message=message)
     session.commit()
     session.refresh(message)
     return _message_response(message)
@@ -139,6 +143,9 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
                 "platform": conversation.platform,
                 "recruiter_name": conversation.recruiter_name,
                 "state": conversation.state,
+                "qualification_status": conversation.qualification_status,
+                "qualification_evidence": conversation.qualification_evidence,
+                "qualification_version": conversation.qualification_version,
                 "company_name": job.company_name if job else None,
                 "job_title": job.title if job else None,
                 "strategy_id": conversation.strategy_id,
@@ -167,38 +174,74 @@ def create_reply_draft(
         raise ValueError("消息已被同一会话中的后续消息聚合")
     conversation = _get_conversation(session, message.conversation_id)
     llm_provider = provider or build_llm_provider(get_settings())
-    score = _bind_current_score(session, conversation, llm_provider)
-    draft_type = "LOW_SCORE_DECLINE" if score.total_score < 60 else "REPLY"
-    blocked = score.hard_rejected or score.effective_job_status != "OPEN"
-    fingerprint = _fingerprint(
-        draft_type,
-        conversation.id if draft_type == "LOW_SCORE_DECLINE" else message.id,
-        score.input_fingerprint,
-        _knowledge_versions(session),
+    qualification, qualification_evidence = refresh_qualification(
+        session, conversation, message=message
     )
-    if draft_type == "LOW_SCORE_DECLINE":
-        prior_decline = session.scalar(
+    if qualification.value in {"UNKNOWN", "MISMATCH"}:
+        draft_type = (
+            "MISMATCH_DECLINE"
+            if qualification.value == "MISMATCH"
+            else "REPLY"
+        )
+        fingerprint = _fingerprint(
+            draft_type,
+            conversation.id if draft_type == "MISMATCH_DECLINE" else message.id,
+            conversation.qualification_version,
+            _knowledge_versions(session),
+        )
+        existing = session.scalar(
             select(db.GeneratedDraft).where(
-                db.GeneratedDraft.conversation_id == conversation.id,
-                db.GeneratedDraft.draft_type == "LOW_SCORE_DECLINE",
+                db.GeneratedDraft.input_fingerprint == fingerprint
             )
         )
-        if prior_decline:
-            return _draft_response(session, prior_decline)
+        if existing:
+            return _draft_response(session, existing)
+        if draft_type == "MISMATCH_DECLINE":
+            prior_decline = session.scalar(
+                select(db.GeneratedDraft).where(
+                    db.GeneratedDraft.conversation_id == conversation.id,
+                    db.GeneratedDraft.draft_type == "MISMATCH_DECLINE",
+                )
+            )
+            if prior_decline:
+                return _draft_response(session, prior_decline)
+            result = build_low_score_decline(qualification_evidence)
+            result.decision = Decision.ALLOW_AUTO
+            result.reason_codes = ["MISMATCH_DECLINE_ALLOWED"]
+            message.status = "MISMATCH_DECLINED"
+        else:
+            result = DraftResult(
+                content="感谢联系。方便介绍一下岗位方向、工作地点、工作模式和大致薪资范围吗？",
+                intents=[Intent.JOB_DETAIL],
+                confidence=1,
+                risk_codes=["JOB_CONTEXT_INCOMPLETE"],
+                decision=Decision.ALLOW_AUTO,
+                reason_codes=["SAFE_JOB_CLARIFICATION"],
+            )
+        return _persist_draft(
+            session,
+            result,
+            fingerprint,
+            draft_type,
+            conversation.id,
+            message.id,
+            None,
+        )
+    score = _bind_current_score(session, conversation, llm_provider)
+    draft_type = "REPLY"
+    blocked = False
+    fingerprint = _fingerprint(
+        draft_type,
+        conversation.id if draft_type == "MISMATCH_DECLINE" else message.id,
+        score.input_fingerprint,
+        conversation.qualification_version,
+        _knowledge_versions(session),
+    )
     existing = session.scalar(select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint))
     if existing:
         return _draft_response(session, existing)
-    if draft_type == "LOW_SCORE_DECLINE":
-        result = build_low_score_decline(
-            [item.rule_code for item in score.rejections] + score.action_blockers
-        )
-        message.status = "LOW_SCORE_DECLINED"
-    elif blocked:
-        result = build_low_score_decline(
-            [item.rule_code for item in score.rejections] + score.action_blockers
-        )
-        result.decision = Decision.DENY
-        result.reason_codes = ["JOB_NOT_ELIGIBLE_OR_OPEN"]
+    if blocked:
+        raise RuntimeError("资格状态与草稿类型不一致")
     else:
         job = get_job_entity(session, conversation.job_id)
         parsed = get_parsed_entity(session, score.parsed_job_detail_id)
@@ -360,7 +403,14 @@ def create_resume_draft(
         raise ResourceNotFoundError("消息不存在")
     conversation = _get_conversation(session, message.conversation_id)
     llm_provider = provider or build_llm_provider(get_settings())
-    score = _bind_current_score(session, conversation, llm_provider)
+    qualification, qualification_evidence = refresh_qualification(
+        session, conversation, message=message
+    )
+    score = (
+        session.get(db.JobScore, conversation.latest_job_score_id)
+        if conversation.latest_job_score_id
+        else None
+    )
     messages = session.scalars(
         select(db.Message)
         .where(
@@ -393,7 +443,11 @@ def create_resume_draft(
             db.Resume.is_available.is_(True),
         )
     ).all()
-    job = get_job_entity(session, conversation.job_id)
+    job = (
+        get_job_entity(session, conversation.job_id)
+        if conversation.job_id
+        else None
+    )
     selected = select_resume(
         [
             ResumeCandidate(
@@ -404,7 +458,7 @@ def create_resume_draft(
             )
             for item in resumes
         ],
-        job.title,
+        job.title if job else message.content,
     )
     duplicate = bool(
         selected
@@ -416,9 +470,7 @@ def create_resume_draft(
         )
     )
     allowed = (
-        score.total_score >= 60
-        and not score.hard_rejected
-        and score.effective_job_status == "OPEN"
+        qualification.value != "MISMATCH"
         and evidence_valid
         and (evaluation.resume_requested or evaluation.positive_feedback)
         and selected is not None
@@ -441,7 +493,11 @@ def create_resume_draft(
         confidence=float(evaluation.confidence),
         risk_codes=[] if allowed else ["RESUME_SEND_CONDITIONS_NOT_MET"],
         decision=Decision.ALLOW_AUTO if allowed else Decision.DENY,
-        reason_codes=["RESUME_SEND_ALLOWED"] if allowed else ["RESUME_SEND_DENIED"],
+        reason_codes=(
+            ["INBOUND_RESUME_REQUEST_ALLOWED"]
+            if allowed
+            else ["RESUME_SEND_DENIED", *qualification_evidence]
+        ),
     )
     return _persist_draft(
         session,
@@ -450,7 +506,7 @@ def create_resume_draft(
         "RESUME",
         conversation.id,
         message.id,
-        score.id,
+        score.id if score else None,
         resume_id=selected.id if selected else None,
     )
 
@@ -861,6 +917,9 @@ def _conversation_response(conversation: db.Conversation) -> dict[str, object]:
     return {"id": conversation.id, "job_id": conversation.job_id,
             "strategy_id": conversation.strategy_id,
             "latest_job_score_id": conversation.latest_job_score_id,
+            "qualification_status": conversation.qualification_status,
+            "qualification_evidence": conversation.qualification_evidence,
+            "qualification_version": conversation.qualification_version,
             "platform": conversation.platform,
             "external_conversation_id": conversation.external_conversation_id,
             "recruiter_name": conversation.recruiter_name, "state": conversation.state}

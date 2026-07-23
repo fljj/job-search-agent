@@ -32,7 +32,7 @@ def action_limit(
     greeting_daily_limit: int,
     formal_daily_limit: int,
 ) -> int:
-    if action_type in {"REPLY", "LOW_SCORE_DECLINE"}:
+    if action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
         if level < RolloutLevel.LIMITED_REPLY:
             return 0
         return formal_daily_limit if level >= RolloutLevel.FORMAL_LIMITS else reply_daily_limit

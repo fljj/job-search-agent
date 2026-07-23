@@ -101,10 +101,34 @@ def dispatch(
     if draft.conversation_id and draft.conversation_id != conversation.id:
         raise ValueError("草稿与对话不匹配")
     job = session.get(db.Job, conversation.job_id)
-    if job is None:
+    scoreless_inbound = (
+        draft.job_score_id is None
+        and payload.action_type in {"REPLY", "RESUME", "MISMATCH_DECLINE"}
+    )
+    if job is None and not scoreless_inbound:
         raise ResourceNotFoundError("职位不存在")
-    score = _score_for_draft(session, draft, job.id)
-    rules = _effective_rules(session, conversation.platform, score.strategy_id)
+    inbound_action = (
+        payload.action_type in {"RESUME", "MISMATCH_DECLINE"}
+        or scoreless_inbound
+    )
+    if inbound_action:
+        score = (
+            session.get(db.JobScore, conversation.latest_job_score_id)
+            if conversation.latest_job_score_id
+            else None
+        )
+    else:
+        if job is None:
+            raise RuntimeError("评分动作缺少职位")
+        score = _score_for_draft(session, draft, job.id)
+    strategy_id = (
+        score.strategy_id
+        if score
+        else conversation.strategy_id
+    )
+    if strategy_id is None:
+        raise ValueError("入站动作缺少绑定策略")
+    rules = _effective_rules(session, conversation.platform, strategy_id)
     original = session.scalar(
         select(db.PolicyDecision).where(db.PolicyDecision.draft_id == draft.id)
         .order_by(db.PolicyDecision.created_at.asc())
@@ -115,17 +139,21 @@ def dispatch(
     counts = _rate_counts(session, conversation.platform)
     context = AutomationContext(
         action_type=payload.action_type,
-        score=score.total_score,
-        grade=score.grade,
+        score=score.total_score if score else 0,
+        grade=score.grade if score else "UNKNOWN",
         eligible=(
-            not score.hard_rejected
+            conversation.qualification_status != "MISMATCH"
+            or payload.action_type == "MISMATCH_DECLINE"
+        ) if inbound_action else (
+            score is not None
+            and not score.hard_rejected
             and score.eligibility == "ELIGIBLE"
             and (
                 payload.action_type != "GREETING"
                 or score.automation_eligible
             )
         ),
-        job_open=score.effective_job_status == "OPEN",
+        job_open=(score.effective_job_status == "OPEN") if score else True,
         confidence=float(draft.confidence),
         original_decision=original.decision,
         intents=draft.intents,
@@ -136,6 +164,7 @@ def dispatch(
             db.ResumeSendRecord.conversation_id == conversation.id,
             db.ResumeSendRecord.resume_id == resume.id,
         ))),
+        qualification_status=conversation.qualification_status,
         hourly_count=counts[0], daily_count=counts[1],
     )
     decision, reasons = evaluate_automation(context, rules)
@@ -158,7 +187,15 @@ def dispatch(
         session.commit()
         return {"decision": decision.value, "reason_codes": reasons}
     action = _create_auto_action(
-        session, conversation, job, score, draft, policy, resume, agent_run_id
+        session,
+        conversation,
+        job,
+        score,
+        strategy_id,
+        draft,
+        policy,
+        resume,
+        agent_run_id,
     )
     pending_task = session.scalar(select(db.ConfirmationTask).where(
         db.ConfirmationTask.decision_id == original.id,
@@ -424,8 +461,9 @@ def _rate_counts(session: Session, platform: str) -> tuple[int, int]:
     return count(now - timedelta(hours=1)), count(now - timedelta(days=1))
 
 
-def _create_auto_action(session: Session, conversation: db.Conversation, job: db.Job,
-                        score: db.JobScore, draft: db.GeneratedDraft,
+def _create_auto_action(session: Session, conversation: db.Conversation, job: db.Job | None,
+                        score: db.JobScore | None, strategy_id: UUID,
+                        draft: db.GeneratedDraft,
                         policy: db.PolicyDecision, resume: db.Resume | None,
                         agent_run_id: UUID | None = None) -> db.ActionQueue:
     fingerprint = hashlib.sha256(
@@ -436,12 +474,28 @@ def _create_auto_action(session: Session, conversation: db.Conversation, job: db
         return existing
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID, confirmation_task_id=None, policy_decision_id=policy.id,
-        strategy_id=score.strategy_id, authorization_source="AUTO",
+        strategy_id=strategy_id, authorization_source="AUTO",
+        authorization_basis=(
+            "INBOUND_EXPLICIT_RESUME_REQUEST"
+            if policy.action_type == "RESUME"
+            else (
+                "QUALIFICATION_MISMATCH"
+                if policy.action_type == "MISMATCH_DECLINE"
+                else "AUTOMATION_POLICY"
+            )
+        ),
+        qualification_snapshot={
+            "status": conversation.qualification_status,
+            "evidence": conversation.qualification_evidence,
+            "version": conversation.qualification_version,
+        },
+        evidence_message_ids=conversation.qualification_message_ids,
         agent_run_id=agent_run_id,
         conversation_id=conversation.id, draft_id=draft.id, resume_id=resume.id if resume else None,
         action_type=policy.action_type, status=ActionStatus.APPROVED.value,
         content=None if resume else draft.content, platform=conversation.platform,
-        target_company=job.company_name, target_job_title=job.title,
+        target_company=job.company_name if job else "未知公司",
+        target_job_title=job.title if job else "未知岗位",
         target_recruiter=conversation.recruiter_name,
         target_conversation_key=conversation.external_conversation_id,
         attachment_name=resume.attachment_name if resume else None,

@@ -38,7 +38,7 @@ class ResumeResponse(ResumePayload):
 
 
 class ConversationPayload(BaseModel):
-    job_id: UUID
+    job_id: UUID | None = None
     external_conversation_id: str = Field(min_length=1, max_length=200)
     recruiter_name: str = Field(min_length=1, max_length=100)
     platform: str = "MOCK"

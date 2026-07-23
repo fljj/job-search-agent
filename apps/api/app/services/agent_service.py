@@ -325,7 +325,12 @@ def _pending_drafts(
         if len(result) >= limit:
             break
         score = session.get(db.JobScore, draft.job_score_id) if draft.job_score_id else None
-        if score is None or score.strategy_id != run.strategy_id:
+        if score is not None and score.strategy_id != run.strategy_id:
+            continue
+        if (
+            score is None
+            and draft.draft_type not in {"REPLY", "RESUME", "MISMATCH_DECLINE"}
+        ):
             continue
         decision = session.scalar(
             select(db.PolicyDecision)
@@ -338,6 +343,8 @@ def _pending_drafts(
             continue
         conversation = session.get(db.Conversation, draft.conversation_id)
         if conversation is None:
+            continue
+        if conversation.strategy_id != run.strategy_id:
             continue
         raw_resume_id = decision.input_snapshot.get("resume_id")
         resume_id = UUID(str(raw_resume_id)) if raw_resume_id else None

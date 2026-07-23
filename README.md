@@ -147,6 +147,13 @@ open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=/tm
 - `POST /api/v1/platform-recommendations/{id}/dispatch`
 - `POST /api/v1/platform-recommendations/{id}/reconcile`
 
+招聘方入站消息不再以 60 分作为回复或首次明确索要简历的门槛。对话维护
+`UNKNOWN/ROUGH_MATCH/FULL_MATCH/MISMATCH` 资格成熟度：未知岗位先自动澄清，大致
+匹配可推进电话沟通，完整匹配才可推进面试，明确冲突只发送一次礼貌婉拒。电话和面试
+的具体时间仍必须由用户确认。资格状态可通过
+`GET /api/v1/conversations/{id}/qualification` 查询，并可通过服务端受控的
+`POST /api/v1/conversations/{id}/qualification/evaluate` 重新评估。
+
 BOSS 职位详情只有在页面存在可见且可用的沟通入口时才记录为 `OPEN`；无法确认
 开放状态时保持 `UNKNOWN` 并禁止自动沟通。招呼语可以引用候选人资料中已确认的
 工作年限、管理经历和技能事实。
@@ -222,8 +229,8 @@ python scripts/reset_gray_data.py --confirm-database job_agent --execute
   Apple 目标写入日历不存在或系统权限未授予时安全降级为不可用。
 - 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。
 - 自动招呼最低分配置不得低于80，自动简历最低分配置不得低于60。
-- 阶段十四仍需完成至少 20 条真实脉脉推荐的小流量灰度；普通真人入站消息的跨平台
-  资格成熟度流程属于阶段十五。
+- 阶段十四仍需完成至少 20 条真实脉脉推荐的小流量灰度；阶段十五入站资格流程仍需
+  完成真实 BOSS/脉脉消息灰度和耐久验收。
 - 策略可配置最高 79 分的猎头岗位分数封顶，使猎头岗位可接收回复但不主动招呼。
 - 智谱 GLM-5.2 已接入职位解析、评分、招呼、入站回复和简历反馈判断。首次真实招呼必须先创建
   人工确认任务，批准后再单独执行；执行前会复核职位、公司、招聘人、开放状态和

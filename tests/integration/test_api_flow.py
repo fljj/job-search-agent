@@ -362,7 +362,7 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     ).json()["data"]
     low_decline = client.post("/api/v1/drafts/reply", json={"message_id": low_message["id"]})
     repeated_decline = client.post("/api/v1/drafts/reply", json={"message_id": low_message["id"]})
-    assert low_decline.json()["data"]["draft_type"] == "LOW_SCORE_DECLINE"
+    assert low_decline.json()["data"]["draft_type"] == "MISMATCH_DECLINE"
     assert low_decline.json()["data"]["decision"] == "ALLOW_AUTO"
     assert "黑名单" not in low_decline.json()["data"]["content"]
     assert repeated_decline.json()["data"]["id"] == low_decline.json()["data"]["id"]

@@ -359,7 +359,9 @@ class Conversation(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("user_id", "platform", "external_conversation_id"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+    )
     strategy_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_strategies.id", ondelete="SET NULL"), nullable=True
     )
@@ -370,6 +372,18 @@ class Conversation(TimestampMixin, Base):
     external_conversation_id: Mapped[str] = mapped_column(String(200))
     recruiter_name: Mapped[str] = mapped_column(String(100))
     state: Mapped[str] = mapped_column(String(30), default="NEW")
+    qualification_status: Mapped[str] = mapped_column(
+        String(20), default="UNKNOWN", server_default="UNKNOWN"
+    )
+    qualification_evidence: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
+    qualification_message_ids: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
+    qualification_version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1"
+    )
     processing_lease_owner: Mapped[str | None] = mapped_column(
         String(100), nullable=True
     )
@@ -493,6 +507,15 @@ class ActionQueue(TimestampMixin, Base):
         ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
     )
     authorization_source: Mapped[str] = mapped_column(String(20), default="MANUAL")
+    authorization_basis: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
+    qualification_snapshot: Mapped[dict[str, object]] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
+    evidence_message_ids: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
     )

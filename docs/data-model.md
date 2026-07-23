@@ -180,7 +180,7 @@ users
 - `knowledge_items`：候选人事实、来源、敏感度、自动引用权限、验证和有效时间；`(user_id, category, normalized_key)` 唯一。
 - `resumes`：平台内附件名、适用方向和可用状态；`(user_id, platform, attachment_name)` 唯一。
 - `conversations`：平台对话、可选职位归属、`strategy_id`、可选
-  `latest_job_score_id`、`qualification_stage`、资格原因码和状态；
+  `latest_job_score_id`、`qualification_status`、资格证据、证据消息 ID、资格版本和状态；
   `(user_id, platform, external_conversation_id)` 唯一。策略、职位绑定和资格成熟度变化
   必须记录审计。
 - `messages`：原始消息、方向、多意图和状态；`(conversation_id, external_message_id)` 唯一。
@@ -190,7 +190,7 @@ users
 
 第二阶段幂等：模拟消息使用外部消息 ID，草稿使用消息/评分、知识版本和生成器版本生成指纹。
 
-`qualification_stage`：
+`qualification_status`：
 
 - `UNKNOWN`：岗位信息不足；
 - `ROUGH_MATCH`：大体符合，可以推进电话沟通；

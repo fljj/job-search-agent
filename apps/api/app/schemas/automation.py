@@ -12,7 +12,9 @@ class AutomationSettingPayload(AutomationRules):
 
 
 class AutomationDispatchRequest(BaseModel):
-    action_type: Literal["GREETING", "REPLY", "RESUME", "LOW_SCORE_DECLINE"]
+    action_type: Literal[
+        "GREETING", "REPLY", "RESUME", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"
+    ]
     conversation_id: UUID
     draft_id: UUID
     resume_id: UUID | None = None
