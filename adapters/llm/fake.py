@@ -31,6 +31,17 @@ class FakeLlmJobParser:
 class FakeLlmProvider:
     """完全离线的确定性测试替身。"""
 
+    @property
+    def provider_name(self) -> str:
+        return "FAKE"
+
+    @property
+    def model_name(self) -> str:
+        return "fake"
+
+    def prompt_version(self, purpose: str) -> str:
+        return f"{purpose.replace('_', '-')}-fake-v1"
+
     def parse_job(self, request: JobInput) -> LlmResult[ParsedJob]:
         return self._result(FakeLlmJobParser().parse(request), "job-parse-fake-v1")
 
@@ -42,7 +53,7 @@ class FakeLlmProvider:
                 score=detail.score,
                 max_score=detail.max_score,
                 reason=detail.explanation,
-                evidence_refs=[],
+                evidence_refs=[_fake_evidence_ref(detail.dimension)],
             )
             for detail in legacy.details
         ]
@@ -50,8 +61,8 @@ class FakeLlmProvider:
             JobScoreOutput(
                 dimensions=dimensions,
                 total_score=legacy.total_score,
-                match_reasons=legacy.match_reasons,
-                risk_notes=legacy.risk_notes,
+                match_reasons=legacy.match_reasons[:5],
+                risk_notes=legacy.risk_notes[:5],
                 recommends_proactive_contact=legacy.total_score >= 80,
                 contact_reason="FAKE_PROVIDER_TEST_RESULT",
             ),
@@ -119,3 +130,15 @@ class FakeLlmProvider:
                 latency_ms=0,
             ),
         )
+
+
+def _fake_evidence_ref(dimension: str) -> str:
+    return {
+        "title": "job.title",
+        "skills": "candidate.skills",
+        "experience": "candidate.total_years",
+        "location": "job.work_mode",
+        "salary": "job.salary_text",
+        "industry": "job.industry",
+        "management": "candidate.management_years",
+    }[dimension]

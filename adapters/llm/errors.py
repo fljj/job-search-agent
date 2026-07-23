@@ -1,6 +1,10 @@
 class LlmProviderError(Exception):
     code = "LLM_PROVIDER_ERROR"
 
+    def __init__(self, message: str, *, attempt_number: int = 1) -> None:
+        super().__init__(message)
+        self.attempt_number = attempt_number
+
 
 class LlmConfigurationError(LlmProviderError):
     code = "LLM_NOT_CONFIGURED"

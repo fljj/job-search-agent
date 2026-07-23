@@ -154,6 +154,7 @@ class ScoreDetail(BaseModel):
     max_score: Decimal
     rule_code: str
     explanation: str
+    evidence_refs: list[str] = Field(default_factory=list)
     matched_facts: dict[str, object] = Field(default_factory=dict)
 
 

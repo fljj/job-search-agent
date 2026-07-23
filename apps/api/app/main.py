@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from adapters.llm.errors import LlmProviderError
 from apps.api.app.api.v1 import (
     actions,
     automation,
@@ -59,6 +60,11 @@ def invalid_request(_: Request, exc: ValueError) -> JSONResponse:
 @app.exception_handler(DependencyUnavailableError)
 def dependency_unavailable(_: Request, exc: DependencyUnavailableError) -> JSONResponse:
     return _error("DEPENDENCY_UNAVAILABLE", str(exc), 503)
+
+
+@app.exception_handler(LlmProviderError)
+def llm_unavailable(_: Request, exc: LlmProviderError) -> JSONResponse:
+    return _error(exc.code, str(exc), 503)
 
 
 @app.get("/health")

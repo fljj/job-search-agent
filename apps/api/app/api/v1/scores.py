@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
+from adapters.llm.errors import LlmProviderError
 from apps.api.app.api.v1.helpers import response
 from apps.api.app.core.database import get_session
 from apps.api.app.schemas.score import BatchScoreRequest, ScoreRequest
@@ -28,7 +29,7 @@ def score_batch(
                 ),
             )
             items.append({"job_id": job_id, "result": "SCORED", "score": result})
-        except (ValueError, ResourceNotFoundError) as exc:
+        except (ValueError, ResourceNotFoundError, LlmProviderError) as exc:
             session.rollback()
             items.append({"job_id": job_id, "result": "FAILED", "error": str(exc)})
     return response({"items": items})
@@ -38,6 +39,23 @@ def score_batch(
 def score(job_id: UUID, payload: ScoreRequest,
           session: Session = Depends(get_session)) -> dict[str, object]:
     return response(create_score(session, job_id, payload))
+
+
+@router.post("/jobs/{job_id}/scores/re-evaluate")
+def reassess(
+    job_id: UUID,
+    payload: ScoreRequest,
+    idempotency_key: str = Header(min_length=1, max_length=200, alias="Idempotency-Key"),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(
+        create_score(
+            session,
+            job_id,
+            payload,
+            reassessment_key=idempotency_key,
+        )
+    )
 
 
 @router.get("/scores/{score_id}")

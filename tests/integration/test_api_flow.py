@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from adapters.llm.fake import FakeLlmProvider
 from apps.api.app.core.database import Base, get_session
 from apps.api.app.main import app
 from apps.api.app.models import entities  # noqa: F401
@@ -48,6 +49,10 @@ def client() -> Iterator[TestClient]:
 
 
 def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "apps.api.app.services.score_service.build_llm_provider",
+        lambda _: FakeLlmProvider(),
+    )
     profile_response = client.put("/api/v1/profile", json={
         "name": "集成测试候选人", "total_years": 13, "management_years": 5,
         "has_architecture_experience": True, "has_core_system_experience": True,
@@ -131,14 +136,26 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
                      "parsed_job_detail_id": parsed_id}
     first_score = client.post(f"/api/v1/jobs/{job_id}/scores", json=score_payload)
     duplicate_score = client.post(f"/api/v1/jobs/{job_id}/scores", json=score_payload)
-    assert first_score.status_code == 200
+    assert first_score.status_code == 200, first_score.text
     assert first_score.json()["data"]["grade"] == "A"
     assert first_score.json()["data"]["eligibility"] == "ELIGIBLE"
-    assert first_score.json()["data"]["scoring_version"].startswith("legacy:")
-    assert first_score.json()["data"]["automation_eligible"] is False
+    assert first_score.json()["data"]["scoring_version"].startswith("llm:")
+    assert first_score.json()["data"]["llm_invocation_id"] is not None
     assert duplicate_score.json()["data"]["id"] == first_score.json()["data"]["id"]
+    reassessed = client.post(
+        f"/api/v1/jobs/{job_id}/scores/re-evaluate",
+        json=score_payload,
+        headers={"Idempotency-Key": "integration-score-reassess"},
+    )
+    duplicate_reassessment = client.post(
+        f"/api/v1/jobs/{job_id}/scores/re-evaluate",
+        json=score_payload,
+        headers={"Idempotency-Key": "integration-score-reassess"},
+    )
+    assert reassessed.json()["data"]["id"] != first_score.json()["data"]["id"]
+    assert duplicate_reassessment.json()["data"]["id"] == reassessed.json()["data"]["id"]
     score_history = client.get(f"/api/v1/jobs/{job_id}/scores?strategy_id={strategy_id}")
-    assert score_history.json()["data"]["total"] == 1
+    assert score_history.json()["data"]["total"] == 2
     batch_score = client.post("/api/v1/jobs/scores/batch", json={
         "job_ids": [job_id], "strategy_id": strategy_id,
         "candidate_profile_id": profile_id,
@@ -219,8 +236,7 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "action_type": "REPLY", "conversation_id": auto_conversation["id"],
         "draft_id": auto_draft["id"], "cdp_url": "http://127.0.0.1:9222",
     })
-    assert auto_sent.json()["data"]["decision"] == "DENY"
-    assert auto_sent.json()["data"]["reason_codes"] == ["JOB_NOT_ELIGIBLE_OR_OPEN"]
+    assert auto_sent.json()["data"]["decision"] == "ALLOW_AUTO"
 
     time_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
         "external_message_id": "message-2", "content": "周二几点可以电话面试？",

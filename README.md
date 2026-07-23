@@ -61,8 +61,8 @@ npm run dev
 1. `PUT /api/v1/profile` 保存候选人评分资料。
 2. `POST /api/v1/strategies` 创建完整求职策略。
 3. `POST /api/v1/jobs/import` 或 `/import/batch` 导入模拟 JD。
-4. `POST /api/v1/jobs/{job_id}/parse` 生成结构化解析记录。
-5. `POST /api/v1/jobs/{job_id}/scores` 计算并保存评分。
+4. `POST /api/v1/jobs/{job_id}/parse` 使用 `LLM` 模式生成模型结构化解析记录；`RULE` 仅保留为离线兼容模式。
+5. `POST /api/v1/jobs/{job_id}/scores` 执行“确定性硬排除 + LLM 七维评分 + 程序校验”并保存结果；`/scores/re-evaluate` 配合 `Idempotency-Key` 显式重新评估。
 6. `GET /api/v1/scores/{score_id}` 查看维度明细、排除原因和风险。
 7. `POST /api/v1/knowledge-items` 录入有来源、敏感度和自动引用权限的事实。
 8. `POST /api/v1/resumes` 登记网站内附件简历元数据。
@@ -119,8 +119,8 @@ PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQ
 - 只有人工确认且执行前复核通过的动作才能发送；没有自动发送。
 - 简历仅能从已登记且平台页面中唯一匹配的附件中选择，不上传本地文件。
 - 不接入日历。
-- 当前评分仍是标记为 `legacy` 的旧规则评分，不能授权新的自动动作。
+- 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。
 - 自动招呼最低分配置不得低于80，自动简历最低分配置不得低于60。
-- 已提供千问 OpenAI 兼容适配器，但尚未接入职位评分和对话业务链路；只有手动冒烟命令会调用真实模型。
+- 千问已接入职位解析和评分链路；对话回复仍使用旧实现，待第四阶段切换。
 
 完整设计见 `docs/`。

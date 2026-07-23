@@ -151,6 +151,9 @@
 }
 ```
 
+`parsed_job_detail_id` 可省略，服务端优先复用职位最新解析记录；不存在解析记录时调用当前
+LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
+
 响应包含：
 
 - `total_score`、`grade`；

@@ -5,7 +5,10 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from adapters.llm.errors import LlmProviderError
 from adapters.llm.fake import FakeLlmJobParser
+from apps.api.app.core.config import get_settings
+from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.job import (
     JobImportPayload,
@@ -14,9 +17,12 @@ from apps.api.app.schemas.job import (
     ParsedJobResponse,
 )
 from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.job_parser.models import JobInput, ParsedJob
 from packages.job_parser.service import JobParserService
+from packages.llm.models import LlmCallMetadata
+from packages.llm.ports import LlmProvider
 
 
 def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse:
@@ -99,10 +105,57 @@ def get_job(session: Session, job_id: object) -> JobResponse:
     return _response(job)
 
 
-def parse_job(session: Session, job_id: object, mode: str) -> ParsedJobResponse:
+def parse_job(
+    session: Session,
+    job_id: object,
+    mode: str,
+    *,
+    provider: LlmProvider | None = None,
+) -> ParsedJobResponse:
     job = _get_job_entity(session, job_id)
-    parser = JobParserService(FakeLlmJobParser().parse)
-    parsed = parser.parse(_domain_job(job), mode)
+    domain_job = _domain_job(job)
+    normalized_mode = mode.upper()
+    if normalized_mode == "RULE":
+        parser = JobParserService(FakeLlmJobParser().parse)
+        parsed = parser.parse(domain_job, "RULE")
+    elif normalized_mode == "LLM":
+        llm_provider = provider or build_llm_provider(get_settings())
+        try:
+            llm_result = llm_provider.parse_job(domain_job)
+        except LlmProviderError as exc:
+            record_llm_invocation(
+                session,
+                user_id=DEFAULT_USER_ID,
+                purpose="JOB_PARSE",
+                input_hash=job.content_hash,
+                status="FAILED",
+                metadata=LlmCallMetadata(
+                    provider=llm_provider.provider_name,
+                    model=llm_provider.model_name,
+                    prompt_version=llm_provider.prompt_version("parse_job"),
+                    latency_ms=0,
+                    attempt_number=exc.attempt_number,
+                ),
+                failure_code=exc.code,
+            )
+            session.commit()
+            raise
+        parsed = llm_result.data.model_copy(
+            update={
+                "parser_type": "LLM",
+                "parser_version": llm_result.metadata.prompt_version,
+            }
+        )
+        record_llm_invocation(
+            session,
+            user_id=DEFAULT_USER_ID,
+            purpose="JOB_PARSE",
+            input_hash=job.content_hash,
+            status="SUCCEEDED",
+            metadata=llm_result.metadata,
+        )
+    else:
+        raise ValueError("解析模式只支持 RULE 或 LLM")
     record = db.ParsedJobDetail(
         job_id=job.id, parser_type=parsed.parser_type, parser_version=parsed.parser_version,
         required_skills=parsed.required_skills, preferred_skills=parsed.preferred_skills,
