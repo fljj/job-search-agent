@@ -1,7 +1,11 @@
+import json
+from typing import Any, cast
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
-from playwright.sync_api import Browser, Locator, Page, sync_playwright
+from playwright.sync_api import Browser, Locator, Page
 from playwright.sync_api import Error as PlaywrightError
+from websockets.sync.client import ClientConnection, connect
 
 from packages.browser_worker.config import BrowserSelectorsConfig
 from packages.browser_worker.extractor import extract_current_page
@@ -62,6 +66,111 @@ class PlaywrightPageReader(PlaywrightElementReader, PageReader):
         return [PlaywrightElementReader(locator.nth(index)) for index in range(locator.count())]
 
 
+class RawCdpElementReader(ElementReader):
+    def __init__(self, page: "RawCdpPageReader", root_selector: str, index: int) -> None:
+        self.page = page
+        self.root_selector = root_selector
+        self.index = index
+
+    def text(self, selector: str) -> str | None:
+        return self.page._element_value(self.root_selector, self.index, selector, "textContent")
+
+    def attribute(self, selector: str, name: str) -> str | None:
+        return self.page._element_value(self.root_selector, self.index, selector, "attribute", name)
+
+
+class RawCdpPageReader(PageReader):
+    """通过原生 CDP 只读查询 DOM，断开时不会接管或关闭浏览器标签页。"""
+
+    def __init__(self, websocket_url: str) -> None:
+        self.connection: ClientConnection = connect(websocket_url, open_timeout=3)
+        self.message_id = 0
+
+    def __enter__(self) -> "RawCdpPageReader":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.connection.close()
+
+    @property
+    def url(self) -> str:
+        return str(self._evaluate("location.href"))
+
+    @property
+    def title(self) -> str:
+        return str(self._evaluate("document.title"))
+
+    def text(self, selector: str) -> str | None:
+        expression = (
+            "(() => { const element = document.querySelector("
+            f"{json.dumps(selector)}); return element?.textContent?.trim() || null; }})()"
+        )
+        value = self._evaluate(expression)
+        return str(value) if value is not None else None
+
+    def attribute(self, selector: str, name: str) -> str | None:
+        expression = (
+            "(() => { const element = document.querySelector("
+            f"{json.dumps(selector)}); return element?.getAttribute({json.dumps(name)}) || null; }})()"
+        )
+        value = self._evaluate(expression)
+        return str(value) if value is not None else None
+
+    def exists(self, selector: str) -> bool:
+        expression = (
+            "(() => Array.from(document.querySelectorAll("
+            f"{json.dumps(selector)})).some(element => "
+            "element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden'))()"
+        )
+        return bool(self._evaluate(expression))
+
+    def elements(self, selector: str) -> list[ElementReader]:
+        count = int(self._evaluate(
+            f"document.querySelectorAll({json.dumps(selector)}).length"
+        ))
+        return [RawCdpElementReader(self, selector, index) for index in range(count)]
+
+    def _element_value(
+        self, root_selector: str, index: int, selector: str, operation: str,
+        attribute_name: str | None = None,
+    ) -> str | None:
+        child = (
+            f"root.querySelector({json.dumps(selector)})"
+            if selector
+            else "root"
+        )
+        result = (
+            "target?.textContent?.trim() || null"
+            if operation == "textContent"
+            else f"target?.getAttribute({json.dumps(attribute_name)}) || null"
+        )
+        expression = (
+            "(() => { const root = document.querySelectorAll("
+            f"{json.dumps(root_selector)})[{index}]; if (!root) return null; "
+            f"const target = {child}; return {result}; }})()"
+        )
+        value = self._evaluate(expression)
+        return str(value) if value is not None else None
+
+    def _evaluate(self, expression: str) -> Any:
+        self.message_id += 1
+        self.connection.send(json.dumps({
+            "id": self.message_id,
+            "method": "Runtime.evaluate",
+            "params": {"expression": expression, "returnByValue": True},
+        }))
+        while True:
+            response = json.loads(self.connection.recv(timeout=3))
+            if response.get("id") != self.message_id:
+                continue
+            if "error" in response:
+                raise ValueError("CDP 页面读取失败")
+            result = response.get("result", {}).get("result", {})
+            if result.get("subtype") == "error":
+                raise ValueError("CDP 页面脚本执行失败")
+            return result.get("value")
+
+
 class PlaywrightReadOnlyAdapter:
     def __init__(self, platform: Platform, config: BrowserSelectorsConfig) -> None:
         self.platform = platform
@@ -72,10 +181,9 @@ class PlaywrightReadOnlyAdapter:
         expected_job_title: str | None = None, expected_recruiter: str | None = None,
     ) -> ReadResult:
         validate_local_cdp_url(cdp_url)
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.connect_over_cdp(cdp_url)
-            page = _current_page(browser)
-            return extract_current_page(PlaywrightPageReader(page), self.platform,
+        target = _current_cdp_target(cdp_url, self.config.platforms[self.platform.value].allowed_hosts)
+        with RawCdpPageReader(target["webSocketDebuggerUrl"]) as page:
+            return extract_current_page(page, self.platform,
                                         self.config.platforms[self.platform.value],
                                         self.config.version, expected_company,
                                         expected_job_title, expected_recruiter)
@@ -102,3 +210,24 @@ def _current_page(browser: Browser) -> Page:
         except PlaywrightError:
             continue
     return pages[-1]
+
+
+def _current_cdp_target(cdp_url: str, allowed_hosts: list[str]) -> dict[str, str]:
+    with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+        targets = json.loads(response.read())
+    pages = [
+        target for target in targets
+        if target.get("type") == "page"
+        and target.get("webSocketDebuggerUrl")
+        and urlparse(target.get("url", "")).hostname in allowed_hosts
+    ]
+    if not pages:
+        raise ValueError("未找到当前平台页面，请在专用浏览器中打开目标页")
+    for target in reversed(pages):
+        try:
+            with RawCdpPageReader(target["webSocketDebuggerUrl"]) as page:
+                if page._evaluate("document.hasFocus()"):
+                    return cast(dict[str, str], target)
+        except (OSError, TimeoutError, ValueError):
+            continue
+    return cast(dict[str, str], pages[-1])

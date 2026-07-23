@@ -22,7 +22,9 @@ export function ProfilePage() {
       setVersion(profile.version)
       form.setFieldsValue({ ...profile, skills_json: JSON.stringify(profile.skills, null, 2),
         industries_json: JSON.stringify(profile.industry_experiences, null, 2) })
-    }).catch(() => { /* 尚未创建资料时保持空表单 */ })
+    }).catch((error: unknown) => {
+      message.error(error instanceof Error ? `候选人资料加载失败：${error.message}` : '候选人资料加载失败')
+    })
   }, [form])
   const save = async (values: Record<string, unknown>) => {
     const saved = await api<Profile>('/profile', { method: 'PUT', body: JSON.stringify({
