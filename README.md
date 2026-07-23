@@ -67,7 +67,7 @@ npm run dev
 7. `POST /api/v1/knowledge-items` 录入有来源、敏感度和自动引用权限的事实。
 8. `POST /api/v1/resumes` 登记网站内附件简历元数据。
 9. `POST /api/v1/conversations` 和消息接口创建模拟对话。
-10. `POST /api/v1/drafts/reply` 或 `/drafts/greeting` 生成草稿及权限决策。
+10. `POST /api/v1/drafts/reply`、`/drafts/greeting` 或 `/drafts/resume` 生成 LLM 事实受限草稿及权限决策；只有具体时间创建确认任务。
 11. `POST /api/v1/browser/read-current` 只读解析当前 BOSS/脉脉页面并幂等导入。
 12. 在“人工确认与发送”页批准、修改或拒绝任务，再单独执行已批准动作。
 13. 在“安全自动化”页按全局、平台或策略配置开关与阈值，通过 `/api/v1/automation/dispatch` 执行服务端授权。
@@ -121,6 +121,6 @@ PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQ
 - 不接入日历。
 - 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。
 - 自动招呼最低分配置不得低于80，自动简历最低分配置不得低于60。
-- 千问已接入职位解析和评分链路；对话回复仍使用旧实现，待第四阶段切换。
+- 千问已接入职位解析、评分、招呼、入站回复和简历反馈判断；真实平台写操作仍不会由本阶段直接执行。
 
 完整设计见 `docs/`。

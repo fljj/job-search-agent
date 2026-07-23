@@ -53,6 +53,10 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "apps.api.app.services.score_service.build_llm_provider",
         lambda _: FakeLlmProvider(),
     )
+    monkeypatch.setattr(
+        "apps.api.app.services.conversation_service.build_llm_provider",
+        lambda _: FakeLlmProvider(),
+    )
     profile_response = client.put("/api/v1/profile", json={
         "name": "集成测试候选人", "total_years": 13, "management_years": 5,
         "has_architecture_experience": True, "has_core_system_experience": True,
@@ -184,7 +188,8 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     })
     assert greeting.status_code == 200
     assert greeting.json()["data"]["decision"] == "ALLOW_AUTO"
-    assert "13 年" in greeting.json()["data"]["content"]
+    assert greeting.json()["data"]["fact_ids"]
+    assert greeting.json()["data"]["confirmation_task_id"] is None
 
     conversation = client.post("/api/v1/conversations", json={
         "job_id": job_id, "external_conversation_id": "integration-conversation-1",
@@ -200,6 +205,49 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     duplicate_reply = client.post("/api/v1/drafts/reply", json={"message_id": message_id})
     assert reply.json()["data"]["decision"] == "ALLOW_AUTO"
     assert duplicate_reply.json()["data"]["id"] == reply.json()["data"]["id"]
+    assert reply.json()["data"]["confirmation_task_id"] is None
+
+    resume_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
+        "external_message_id": "message-resume", "content": "岗位很合适，请发一份简历",
+        "received_at": datetime.now(UTC).isoformat(),
+    }).json()["data"]
+    resume_draft = client.post(
+        "/api/v1/drafts/resume", json={"message_id": resume_message["id"]}
+    )
+    assert resume_draft.json()["data"]["decision"] == "ALLOW_AUTO"
+    assert resume_draft.json()["data"]["resume_id"] == resume.json()["data"]["id"]
+    assert resume_draft.json()["data"]["confirmation_task_id"] is None
+
+    low_job = client.post("/api/v1/jobs/import", json={
+        "external_job_id": "integration-low-score",
+        "title": "线下销售",
+        "company_name": "低匹配测试公司",
+        "industry": "零售",
+        "location": "北京",
+        "work_mode": "ONSITE",
+        "description": "负责门店销售工作",
+        "source_status": "OPEN",
+    }).json()["data"]["job"]
+    low_conversation = client.post("/api/v1/conversations", json={
+        "job_id": low_job["id"],
+        "external_conversation_id": "integration-low-conversation",
+        "recruiter_name": "低匹配招聘人",
+        "platform": "MOCK",
+    }).json()["data"]
+    low_message = client.post(
+        f"/api/v1/conversations/{low_conversation['id']}/messages",
+        json={
+            "external_message_id": "low-message-1",
+            "content": "你好，是否考虑这个岗位？",
+            "received_at": datetime.now(UTC).isoformat(),
+        },
+    ).json()["data"]
+    low_decline = client.post("/api/v1/drafts/reply", json={"message_id": low_message["id"]})
+    repeated_decline = client.post("/api/v1/drafts/reply", json={"message_id": low_message["id"]})
+    assert low_decline.json()["data"]["draft_type"] == "LOW_SCORE_DECLINE"
+    assert low_decline.json()["data"]["decision"] == "ALLOW_AUTO"
+    assert "黑名单" not in low_decline.json()["data"]["content"]
+    assert repeated_decline.json()["data"]["id"] == low_decline.json()["data"]["id"]
 
     automation_setting = {
         "scope_type": "GLOBAL", "scope_key": "GLOBAL", "enabled": False,
@@ -248,62 +296,7 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     assert time_reply.json()["data"]["decision"] == "REQUIRE_CONFIRMATION"
     assert time_reply.json()["data"]["confirmation_task_id"] is not None
     tasks = client.get("/api/v1/confirmation-tasks")
-    assert len(tasks.json()["data"]["items"]) >= 3
-
-    reply_task_id = reply.json()["data"]["confirmation_task_id"]
-    approval = client.post(
-        f"/api/v1/confirmation-tasks/{reply_task_id}/approve",
-        json={"conversation_id": conversation_id},
-        headers={"Idempotency-Key": "integration-reply-action"},
-    )
-    duplicate_approval = client.post(
-        f"/api/v1/confirmation-tasks/{reply_task_id}/approve",
-        json={"conversation_id": conversation_id},
-        headers={"Idempotency-Key": "integration-reply-action"},
-    )
-    assert approval.status_code == 200
-    assert duplicate_approval.json()["data"]["id"] == approval.json()["data"]["id"]
-    duplicate_content = client.post(
-        f"/api/v1/confirmation-tasks/{reply_task_id}/approve",
-        json={"conversation_id": conversation_id},
-        headers={"Idempotency-Key": "integration-reply-action-other-key"},
-    )
-    assert duplicate_content.status_code == 400
-
-    monkeypatch.setattr(
-        "adapters.browser.playwright_actions.PlaywrightActionExecutor.execute",
-        lambda *_: ExecutionResult(outcome=ExecutionOutcome.SUCCEEDED, evidence_hash="c" * 64),
-    )
-    executed = client.post(
-        f"/api/v1/actions/{approval.json()['data']['id']}/execute",
-        json={"cdp_url": "http://127.0.0.1:9222"},
-    )
-    assert executed.json()["data"]["status"] == "SUCCEEDED"
-
-    greeting_task_id = greeting.json()["data"]["confirmation_task_id"]
-    reused_key = client.post(
-        f"/api/v1/confirmation-tasks/{greeting_task_id}/approve",
-        json={"conversation_id": conversation_id},
-        headers={"Idempotency-Key": "integration-reply-action"},
-    )
-    assert reused_key.status_code == 400
-    greeting_action = client.post(
-        f"/api/v1/confirmation-tasks/{greeting_task_id}/approve",
-        json={"conversation_id": conversation_id},
-        headers={"Idempotency-Key": "integration-greeting-action"},
-    ).json()["data"]
-    monkeypatch.setattr(
-        "adapters.browser.playwright_actions.PlaywrightActionExecutor.execute",
-        lambda *_: ExecutionResult(
-            outcome=ExecutionOutcome.OUTCOME_UNKNOWN, error_code="RESULT_NOT_OBSERVED"
-        ),
-    )
-    unknown = client.post(
-        f"/api/v1/actions/{greeting_action['id']}/execute",
-        json={"cdp_url": "http://127.0.0.1:9222"},
-    )
-    assert unknown.json()["data"]["status"] == "OUTCOME_UNKNOWN"
-    assert client.post(f"/api/v1/actions/{greeting_action['id']}/retry").status_code == 400
+    assert len(tasks.json()["data"]["items"]) == 1
 
     time_task_id = time_reply.json()["data"]["confirmation_task_id"]
     unsafe_edit = client.post(f"/api/v1/confirmation-tasks/{time_task_id}/modify",

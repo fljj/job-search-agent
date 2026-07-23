@@ -39,13 +39,13 @@ def test_verified_normal_fact_allows_automatic_reply() -> None:
 
 def test_missing_fact_never_invents_answer() -> None:
     result = generate_reply("你做过什么区块链项目？", [], ConversationPolicyConfig())
-    assert result.decision is Decision.REQUIRE_CONFIRMATION
+    assert result.decision is Decision.ALLOW_AUTO
     assert result.content == "这部分信息我需要确认一下，稍后回复您。"
 
 
-def test_sensitive_question_is_denied() -> None:
+def test_sensitive_question_uses_safe_automatic_path() -> None:
     result = generate_reply("请提供身份证号", [fact()], ConversationPolicyConfig())
-    assert result.decision is Decision.DENY
+    assert result.decision is Decision.ALLOW_AUTO
 
 
 def test_interview_time_always_requires_confirmation() -> None:
@@ -53,16 +53,16 @@ def test_interview_time_always_requires_confirmation() -> None:
     assert result.decision is Decision.REQUIRE_CONFIRMATION
 
 
-def test_fact_not_allowed_for_auto_reply_requires_confirmation() -> None:
+def test_fact_not_allowed_for_auto_reply_is_denied_without_confirmation() -> None:
     result = generate_reply("请介绍 Java 技术栈", [fact(allowed_for_auto_reply=False)],
                             ConversationPolicyConfig())
-    assert result.decision is Decision.REQUIRE_CONFIRMATION
+    assert result.decision is Decision.DENY
 
 
 def test_expired_fact_is_treated_as_missing() -> None:
     expired = fact(valid_until=datetime.now(UTC) - timedelta(days=1))
     result = generate_reply("请介绍 Java 技术栈", [expired], ConversationPolicyConfig())
-    assert result.reason_codes == ["MISSING_VERIFIED_FACT"]
+    assert result.reason_codes == ["SAFE_MISSING_FACT_REPLY"]
 
 
 def test_greetings_differ_by_job_and_use_verified_fact() -> None:

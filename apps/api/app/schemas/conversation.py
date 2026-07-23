@@ -69,6 +69,7 @@ class DraftResponse(BaseModel):
     decision: Decision
     reason_codes: list[str]
     confirmation_task_id: UUID | None = None
+    resume_id: UUID | None = None
 
 
 class GreetingRequest(BaseModel):
@@ -76,4 +77,8 @@ class GreetingRequest(BaseModel):
 
 
 class ReplyRequest(BaseModel):
+    message_id: UUID
+
+
+class ResumeDraftRequest(BaseModel):
     message_id: UUID

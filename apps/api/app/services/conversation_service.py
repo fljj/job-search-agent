@@ -1,12 +1,16 @@
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from adapters.llm.errors import LlmProviderError
+from apps.api.app.core.config import get_settings
 from apps.api.app.core.conversation_config import get_conversation_policy
+from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.conversation import (
     ConversationPayload,
@@ -14,20 +18,42 @@ from apps.api.app.schemas.conversation import (
     MessagePayload,
     MessageResponse,
 )
+from apps.api.app.schemas.score import ScoreRequest
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.job_service import get_job_entity, get_parsed_entity
 from apps.api.app.services.knowledge_service import get_knowledge_entities
+from apps.api.app.services.llm_service import record_llm_invocation
+from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
-from packages.conversation_agent.generator import (
-    GENERATOR_VERSION,
-    generate_greeting,
-    generate_reply,
-)
 from packages.conversation_agent.intents import classify_intents
-from packages.conversation_agent.models import Decision, DraftResult
+from packages.conversation_agent.llm_engine import (
+    build_llm_reply,
+    build_low_score_decline,
+    has_valid_conversation_evidence,
+)
+from packages.conversation_agent.models import Decision, DraftResult, Intent
 from packages.knowledge_base.models import KnowledgeFact
+from packages.llm.models import (
+    ConversationEvaluationRequest,
+    ConversationMessage,
+    GeneratedMessage,
+    LlmCallMetadata,
+    LlmResult,
+    MessageClassification,
+    MessageClassificationRequest,
+    TrustedFact,
+)
+from packages.llm.models import (
+    GreetingRequest as LlmGreetingRequest,
+)
+from packages.llm.models import (
+    ReplyRequest as LlmReplyRequest,
+)
+from packages.llm.ports import LlmProvider
+from packages.resume_selector.selector import ResumeCandidate, select_resume
 
 POLICY_VERSION = "conversation-policy-v1"
+GENERATOR_VERSION = "conversation-llm-v1"
 
 
 def create_conversation(session: Session, payload: ConversationPayload) -> dict[str, object]:
@@ -64,20 +90,121 @@ def import_message(session: Session, conversation_id: object, payload: MessagePa
     return _message_response(message)
 
 
-def create_reply_draft(session: Session, message_id: object) -> DraftResponse:
+def create_reply_draft(
+    session: Session,
+    message_id: object,
+    provider: LlmProvider | None = None,
+) -> DraftResponse:
     message = session.get(db.Message, message_id)
     if message is None:
         raise ResourceNotFoundError("消息不存在")
     conversation = _get_conversation(session, message.conversation_id)
-    fingerprint = _fingerprint("REPLY", message.id, message.content, _knowledge_versions(session))
+    llm_provider = provider or build_llm_provider(get_settings())
+    score = _bind_current_score(session, conversation, llm_provider)
+    draft_type = "LOW_SCORE_DECLINE" if score.total_score < 60 else "REPLY"
+    blocked = score.hard_rejected or score.effective_job_status != "OPEN"
+    fingerprint = _fingerprint(
+        draft_type,
+        conversation.id if draft_type == "LOW_SCORE_DECLINE" else message.id,
+        score.input_fingerprint,
+        _knowledge_versions(session),
+    )
+    if draft_type == "LOW_SCORE_DECLINE":
+        prior_decline = session.scalar(
+            select(db.GeneratedDraft).where(
+                db.GeneratedDraft.conversation_id == conversation.id,
+                db.GeneratedDraft.draft_type == "LOW_SCORE_DECLINE",
+            )
+        )
+        if prior_decline:
+            return _draft_response(session, prior_decline)
     existing = session.scalar(select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint))
     if existing:
         return _draft_response(session, existing)
-    result = generate_reply(message.content, _knowledge_facts(session), get_conversation_policy())
-    return _persist_draft(session, result, fingerprint, "REPLY", conversation.id, message.id, None)
+    if draft_type == "LOW_SCORE_DECLINE":
+        result = build_low_score_decline(
+            [item.rule_code for item in score.rejections] + score.action_blockers
+        )
+        message.status = "LOW_SCORE_DECLINED"
+    elif blocked:
+        result = build_low_score_decline(
+            [item.rule_code for item in score.rejections] + score.action_blockers
+        )
+        result.decision = Decision.DENY
+        result.reason_codes = ["JOB_NOT_ELIGIBLE_OR_OPEN"]
+    else:
+        facts = _knowledge_facts(session)
+        recent = session.scalars(
+            select(db.Message)
+            .where(db.Message.conversation_id == conversation.id)
+            .order_by(db.Message.received_at.desc())
+            .limit(20)
+        ).all()
+        classification = _call_llm(
+            session,
+            llm_provider,
+            "MESSAGE_CLASSIFY",
+            "classify_message",
+            _fingerprint(message.id, message.content),
+            lambda: llm_provider.classify_message(
+                MessageClassificationRequest(
+                    message=message.content,
+                    recent_messages=[item.content for item in reversed(recent)],
+                )
+            ),
+        ).data
+        message.intents = [intent.value for intent in classification.intents]
+        usable = [
+            fact
+            for fact in facts
+            if fact.id
+            and fact.allowed_for_auto_reply
+            and fact.sensitivity.value == "NORMAL"
+            and fact.is_current(datetime.now(UTC))
+        ]
+        generated: GeneratedMessage | None = None
+        if usable and not {"SENSITIVE", "INTERVIEW_TIME"}.intersection(message.intents):
+            generated = _call_llm(
+                session,
+                llm_provider,
+                "REPLY",
+                "generate_reply",
+                _fingerprint(message.id, [str(fact.id) for fact in usable]),
+                lambda: llm_provider.generate_reply(
+                    LlmReplyRequest(
+                        incoming_message=message.content,
+                        recent_messages=[item.content for item in reversed(recent)],
+                        facts=[
+                            TrustedFact(id=fact.id, content=fact.fact)
+                            for fact in usable
+                            if fact.id
+                        ],
+                    )
+                ),
+            ).data
+        result = build_llm_reply(
+            classification,
+            generated,
+            facts,
+            get_conversation_policy(),
+            now=datetime.now(UTC),
+        )
+    return _persist_draft(
+        session,
+        result,
+        fingerprint,
+        draft_type,
+        conversation.id,
+        message.id,
+        score.id,
+    )
 
 
-def create_greeting_draft(session: Session, job_score_id: object) -> DraftResponse:
+def create_greeting_draft(
+    session: Session,
+    job_score_id: object,
+    provider: LlmProvider | None = None,
+) -> DraftResponse:
     score = session.get(db.JobScore, job_score_id)
     if score is None:
         raise ResourceNotFoundError("评分不存在")
@@ -87,13 +214,155 @@ def create_greeting_draft(session: Session, job_score_id: object) -> DraftRespon
     existing = session.scalar(select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint))
     if existing:
         return _draft_response(session, existing)
-    result = generate_greeting(job.title, job.company_name, job.industry,
-                               parsed.required_skills + parsed.preferred_skills,
-                               _knowledge_facts(session), get_conversation_policy())
-    if score.hard_rejected or score.effective_job_status != "OPEN":
+    llm_provider = provider or build_llm_provider(get_settings())
+    facts = _knowledge_facts(session)
+    usable = [
+        fact
+        for fact in facts
+        if fact.id
+        and fact.allowed_for_auto_reply
+        and fact.sensitivity.value == "NORMAL"
+        and fact.is_current(datetime.now(UTC))
+    ][:5]
+    generated = _call_llm(
+        session,
+        llm_provider,
+        "GREETING",
+        "generate_greeting",
+        fingerprint,
+        lambda: llm_provider.generate_greeting(
+            LlmGreetingRequest(
+                company_name=job.company_name,
+                job_title=job.title,
+                matched_skills=(parsed.required_skills + parsed.preferred_skills)[:5],
+                facts=[
+                    TrustedFact(id=fact.id, content=fact.fact)
+                    for fact in usable
+                    if fact.id
+                ],
+            )
+        ),
+    ).data
+    result = build_llm_reply(
+        MessageClassification(intents=[Intent.JOB_DETAIL], confidence=Decimal("1")),
+        generated,
+        facts,
+        get_conversation_policy(),
+        now=datetime.now(UTC),
+    )
+    if (
+        score.hard_rejected
+        or score.effective_job_status != "OPEN"
+        or not score.automation_eligible
+    ):
         result.decision = Decision.DENY
         result.reason_codes = ["JOB_NOT_ELIGIBLE_OR_OPEN"]
     return _persist_draft(session, result, fingerprint, "GREETING", None, None, score.id)
+
+
+def create_resume_draft(
+    session: Session,
+    message_id: object,
+    provider: LlmProvider | None = None,
+) -> DraftResponse:
+    message = session.get(db.Message, message_id)
+    if message is None:
+        raise ResourceNotFoundError("消息不存在")
+    conversation = _get_conversation(session, message.conversation_id)
+    llm_provider = provider or build_llm_provider(get_settings())
+    score = _bind_current_score(session, conversation, llm_provider)
+    messages = session.scalars(
+        select(db.Message)
+        .where(
+            db.Message.conversation_id == conversation.id,
+            db.Message.direction == "INBOUND",
+        )
+        .order_by(db.Message.received_at.asc())
+    ).all()
+    evaluation = _call_llm(
+        session,
+        llm_provider,
+        "CONVERSATION_EVALUATE",
+        "evaluate_conversation",
+        _fingerprint(conversation.id, [(item.id, item.content) for item in messages]),
+        lambda: llm_provider.evaluate_conversation(
+            ConversationEvaluationRequest(
+                messages=[
+                    ConversationMessage(id=item.id, content=item.content)
+                    for item in messages
+                ]
+            )
+        ),
+    ).data
+    valid_message_ids = {item.id for item in messages}
+    evidence_valid = has_valid_conversation_evidence(evaluation, valid_message_ids)
+    resumes = session.scalars(
+        select(db.Resume).where(
+            db.Resume.user_id == DEFAULT_USER_ID,
+            db.Resume.platform == conversation.platform,
+            db.Resume.is_available.is_(True),
+        )
+    ).all()
+    job = get_job_entity(session, conversation.job_id)
+    selected = select_resume(
+        [
+            ResumeCandidate(
+                id=item.id,
+                attachment_name=item.attachment_name,
+                target_directions=item.target_directions,
+                is_available=item.is_available,
+            )
+            for item in resumes
+        ],
+        job.title,
+    )
+    duplicate = bool(
+        selected
+        and session.scalar(
+            select(db.ResumeSendRecord).where(
+                db.ResumeSendRecord.conversation_id == conversation.id,
+                db.ResumeSendRecord.resume_id == selected.id,
+            )
+        )
+    )
+    allowed = (
+        score.total_score >= 60
+        and not score.hard_rejected
+        and score.effective_job_status == "OPEN"
+        and evidence_valid
+        and (evaluation.resume_requested or evaluation.positive_feedback)
+        and selected is not None
+        and not duplicate
+    )
+    fingerprint = _fingerprint(
+        "RESUME",
+        conversation.id,
+        selected.id if selected else None,
+        evaluation.evidence_message_ids,
+    )
+    existing = session.scalar(
+        select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
+    )
+    if existing:
+        return _draft_response(session, existing)
+    result = DraftResult(
+        content=selected.attachment_name if selected else "无可用的匹配简历附件",
+        intents=[Intent.RESUME_REQUEST],
+        confidence=float(evaluation.confidence),
+        risk_codes=[] if allowed else ["RESUME_SEND_CONDITIONS_NOT_MET"],
+        decision=Decision.ALLOW_AUTO if allowed else Decision.DENY,
+        reason_codes=["RESUME_SEND_ALLOWED"] if allowed else ["RESUME_SEND_DENIED"],
+    )
+    return _persist_draft(
+        session,
+        result,
+        fingerprint,
+        "RESUME",
+        conversation.id,
+        message.id,
+        score.id,
+        resume_id=selected.id if selected else None,
+    )
 
 
 def list_confirmation_tasks(session: Session) -> list[dict[str, object]]:
@@ -117,6 +386,7 @@ def list_confirmation_tasks(session: Session) -> list[dict[str, object]]:
 def _persist_draft(
     session: Session, result: DraftResult, fingerprint: str, draft_type: str,
     conversation_id: object | None, message_id: object | None, score_id: object | None,
+    resume_id: object | None = None,
 ) -> DraftResponse:
     draft = db.GeneratedDraft(
         user_id=DEFAULT_USER_ID, conversation_id=conversation_id, message_id=message_id,
@@ -134,11 +404,12 @@ def _persist_draft(
         reason_codes=result.reason_codes, policy_version=POLICY_VERSION,
         input_snapshot={"intents": [item.value for item in result.intents],
                         "fact_ids": [str(item) for item in result.fact_ids],
-                        "confidence": result.confidence, "risk_codes": result.risk_codes},
+                        "confidence": result.confidence, "risk_codes": result.risk_codes,
+                        "resume_id": str(resume_id) if resume_id else None},
     )
     session.add(decision)
     session.flush()
-    if decision.decision != "DENY":
+    if decision.decision == "REQUIRE_CONFIRMATION":
         policy = get_conversation_policy()
         session.add(db.ConfirmationTask(
             user_id=DEFAULT_USER_ID,
@@ -161,7 +432,12 @@ def _draft_response(session: Session, draft: db.GeneratedDraft) -> DraftResponse
                          intents=draft.intents, fact_ids=draft.fact_ids,
                          confidence=float(draft.confidence), risk_codes=draft.risk_codes,
                          decision=decision.decision, reason_codes=decision.reason_codes,
-                         confirmation_task_id=task.id if task else None)
+                         confirmation_task_id=task.id if task else None,
+                         resume_id=(
+                             decision.input_snapshot.get("resume_id")
+                             if decision.input_snapshot.get("resume_id")
+                             else None
+                         ))
 
 
 def _knowledge_facts(session: Session) -> list[KnowledgeFact]:
@@ -174,6 +450,104 @@ def _knowledge_facts(session: Session) -> list[KnowledgeFact]:
 
 def _knowledge_versions(session: Session) -> list[tuple[str, int]]:
     return sorted((str(item.id), item.version) for item in get_knowledge_entities(session))
+
+
+def _bind_current_score(
+    session: Session,
+    conversation: db.Conversation,
+    provider: LlmProvider,
+) -> db.JobScore:
+    strategies = session.scalars(
+        select(db.JobStrategy).where(
+            db.JobStrategy.user_id == DEFAULT_USER_ID,
+            db.JobStrategy.enabled.is_(True),
+        )
+    ).all()
+    if conversation.strategy_id:
+        strategies = [item for item in strategies if item.id == conversation.strategy_id]
+    candidates: list[tuple[db.JobScore, int]] = []
+    for strategy in strategies:
+        profile = session.get(db.CandidateProfile, strategy.candidate_profile_id)
+        if profile is None:
+            continue
+        score = session.scalar(
+            select(db.JobScore)
+            .where(
+                db.JobScore.job_id == conversation.job_id,
+                db.JobScore.strategy_id == strategy.id,
+                db.JobScore.scoring_version.like("llm:%"),
+            )
+            .order_by(db.JobScore.created_at.desc())
+            .limit(1)
+        )
+        if (
+            score is None
+            or score.strategy_version != strategy.version
+            or score.profile_version != profile.version
+        ):
+            response = create_score(
+                session,
+                conversation.job_id,
+                ScoreRequest(
+                    strategy_id=strategy.id,
+                    candidate_profile_id=profile.id,
+                ),
+                provider=provider,
+            )
+            score = session.get(db.JobScore, response.id)
+        if score is not None:
+            candidates.append((score, strategy.priority))
+    if not candidates:
+        raise ValueError("当前对话没有可用的启用策略评分")
+    eligible = [item for item in candidates if not item[0].hard_rejected]
+    selected = (
+        min(eligible, key=lambda item: (-item[0].total_score, item[1]))
+        if eligible
+        else min(candidates, key=lambda item: item[1])
+    )[0]
+    conversation.strategy_id = selected.strategy_id
+    conversation.latest_job_score_id = selected.id
+    session.flush()
+    return selected
+
+
+def _call_llm[LlmDataT](
+    session: Session,
+    provider: LlmProvider,
+    purpose: str,
+    method: str,
+    input_hash: str,
+    call: Callable[[], LlmResult[LlmDataT]],
+) -> LlmResult[LlmDataT]:
+    try:
+        result = call()
+    except LlmProviderError as exc:
+        record_llm_invocation(
+            session,
+            user_id=DEFAULT_USER_ID,
+            purpose=purpose,
+            input_hash=input_hash,
+            status="FAILED",
+            metadata=LlmCallMetadata(
+                provider=provider.provider_name,
+                model=provider.model_name,
+                prompt_version=provider.prompt_version(method),
+                latency_ms=0,
+                attempt_number=exc.attempt_number,
+            ),
+            failure_code=exc.code,
+        )
+        session.commit()
+        raise
+    record_llm_invocation(
+        session,
+        user_id=DEFAULT_USER_ID,
+        purpose=purpose,
+        input_hash=input_hash,
+        status="SUCCEEDED",
+        metadata=result.metadata,
+    )
+    return result
 
 
 def _fingerprint(*parts: object) -> str:

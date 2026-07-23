@@ -15,6 +15,7 @@ class AutomationRules(BaseModel):
     auto_greet_enabled: bool = False
     auto_greet_min_score: int = Field(default=80, ge=80, le=100)
     auto_reply_enabled: bool = False
+    low_score_decline_enabled: bool = True
     auto_reply_min_confidence: float = Field(default=0.90, ge=0.75, le=1)
     auto_resume_enabled: bool = False
     auto_resume_min_score: int = Field(default=60, ge=60, le=100)
@@ -52,37 +53,45 @@ def evaluate_automation(
     """用确定性顺序评估自动动作，前序拒绝不能被后序条件覆盖。"""
     if not rules.enabled or rules.paused:
         return AutomationDecision.DENY, ["AUTOMATION_DISABLED_OR_PAUSED"]
-    if not context.eligible or not context.job_open:
-        return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
     if context.hourly_count >= rules.hourly_limit or context.daily_count >= rules.daily_limit:
         return AutomationDecision.DENY, ["RATE_LIMIT_REACHED"]
+    if context.action_type == "LOW_SCORE_DECLINE":
+        if not context.job_open:
+            return AutomationDecision.DENY, ["JOB_NOT_OPEN"]
+        if context.score >= 60:
+            return AutomationDecision.DENY, ["SCORE_NOT_LOW"]
+        if not rules.low_score_decline_enabled:
+            return AutomationDecision.DENY, ["LOW_SCORE_DECLINE_DISABLED"]
+        return AutomationDecision.ALLOW_AUTO, ["LOW_SCORE_DECLINE_POLICY_MATCHED"]
+    if not context.eligible or not context.job_open:
+        return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
     if context.grade == "C":
-        return AutomationDecision.REQUIRE_CONFIRMATION if context.whitelisted_c else AutomationDecision.DENY, ["C_GRADE_NO_AUTO"]
+        return AutomationDecision.DENY, ["C_GRADE_NO_AUTO"]
 
     if context.action_type == "GREETING":
         if not rules.auto_greet_enabled:
-            return AutomationDecision.REQUIRE_CONFIRMATION, ["AUTO_GREETING_DISABLED"]
+            return AutomationDecision.DENY, ["AUTO_GREETING_DISABLED"]
         if context.score < rules.auto_greet_min_score:
-            return AutomationDecision.REQUIRE_CONFIRMATION, ["GREETING_SCORE_BELOW_THRESHOLD"]
+            return AutomationDecision.DENY, ["GREETING_SCORE_BELOW_THRESHOLD"]
         return AutomationDecision.ALLOW_AUTO, ["GREETING_POLICY_MATCHED"]
 
     if context.action_type == "REPLY":
-        if set(context.intents) & SENSITIVE_INTENTS:
-            return AutomationDecision.REQUIRE_CONFIRMATION, ["SENSITIVE_OR_TIME_INTENT"]
-        if not context.has_verified_facts or context.original_decision != "ALLOW_AUTO":
-            return AutomationDecision.REQUIRE_CONFIRMATION, ["REPLY_REQUIRES_CONFIRMATION"]
-        if not rules.auto_reply_enabled or context.confidence < rules.auto_reply_min_confidence:
-            return AutomationDecision.REQUIRE_CONFIRMATION, ["REPLY_CONFIDENCE_OR_SWITCH"]
+        if "INTERVIEW_TIME" in context.intents:
+            return AutomationDecision.REQUIRE_CONFIRMATION, ["SPECIFIC_TIME_REQUIRES_CONFIRMATION"]
+        if context.original_decision != "ALLOW_AUTO":
+            return AutomationDecision.DENY, ["REPLY_NOT_AUTHORIZED"]
+        if not rules.auto_reply_enabled:
+            return AutomationDecision.DENY, ["AUTO_REPLY_DISABLED"]
         return AutomationDecision.ALLOW_AUTO, ["REPLY_POLICY_MATCHED"]
 
     if context.action_type == "RESUME":
         if context.resume_already_sent:
             return AutomationDecision.DENY, ["RESUME_ALREADY_SENT"]
         if not context.explicit_resume_request:
-            return AutomationDecision.REQUIRE_CONFIRMATION, ["RESUME_NOT_EXPLICITLY_REQUESTED"]
+            return AutomationDecision.DENY, ["RESUME_NOT_EXPLICITLY_REQUESTED"]
         if not context.resume_available:
             return AutomationDecision.DENY, ["RESUME_NOT_AVAILABLE"]
         if not rules.auto_resume_enabled or context.score < rules.auto_resume_min_score:
-            return AutomationDecision.REQUIRE_CONFIRMATION, ["RESUME_SCORE_OR_SWITCH"]
+            return AutomationDecision.DENY, ["RESUME_SCORE_OR_SWITCH"]
         return AutomationDecision.ALLOW_AUTO, ["RESUME_POLICY_MATCHED"]
     return AutomationDecision.DENY, ["UNSUPPORTED_ACTION"]

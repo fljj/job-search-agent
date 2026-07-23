@@ -204,7 +204,7 @@ users
 
 ### 8.1 第五阶段数据表和字段
 
-- `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；`(user_id, scope_type, scope_key)` 唯一。
+- `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；包含独立的 `low_score_decline_enabled`，`(user_id, scope_type, scope_key)` 唯一。
 - `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
 - `action_queue.policy_decision_id`：自动动作关联“模型建议 + 确定性约束”的最终策略决策。
 - `action_queue.strategy_id`：保存自动动作采用的策略范围。

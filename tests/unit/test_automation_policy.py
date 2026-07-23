@@ -38,24 +38,32 @@ def test_greeting_requires_fixed_80_threshold() -> None:
     assert evaluate_automation(context(), rules())[0] is AutomationDecision.ALLOW_AUTO
     assert evaluate_automation(
         context(score=79), rules()
-    )[0] is AutomationDecision.REQUIRE_CONFIRMATION
+    )[0] is AutomationDecision.DENY
     with pytest.raises(ValueError):
         rules(auto_greet_min_score=79)
 
 
-@pytest.mark.parametrize("intent", [
-    "SALARY", "ARRIVAL_DATE", "PHONE_CALL", "INTERVIEW_INVITATION", "INTERVIEW_TIME", "SENSITIVE",
-])
-def test_sensitive_or_time_reply_always_requires_confirmation(intent: str) -> None:
+def test_only_specific_time_reply_requires_confirmation() -> None:
+    intent = "INTERVIEW_TIME"
     reply = context(action_type="REPLY", confidence=1, intents=[intent], has_verified_facts=True)
     assert evaluate_automation(reply, rules())[0] is AutomationDecision.REQUIRE_CONFIRMATION
 
 
-def test_reply_requires_verified_facts_confidence_and_original_allow() -> None:
+@pytest.mark.parametrize(
+    "intent",
+    ["SALARY", "ARRIVAL_DATE", "PHONE_CALL", "INTERVIEW_INVITATION", "SENSITIVE"],
+)
+def test_non_time_safe_replies_do_not_require_confirmation(intent: str) -> None:
+    reply = context(action_type="REPLY", confidence=.5, intents=[intent], has_verified_facts=False)
+    assert evaluate_automation(reply, rules())[0] is AutomationDecision.ALLOW_AUTO
+
+
+def test_reply_requires_original_allow_but_not_model_confidence() -> None:
     reply = context(action_type="REPLY", confidence=.95, intents=["TECH_STACK"], has_verified_facts=True)
     assert evaluate_automation(reply, rules())[0] is AutomationDecision.ALLOW_AUTO
-    assert evaluate_automation(reply.model_copy(update={"has_verified_facts": False}), rules())[0] is AutomationDecision.REQUIRE_CONFIRMATION
-    assert evaluate_automation(reply.model_copy(update={"confidence": .89}), rules())[0] is AutomationDecision.REQUIRE_CONFIRMATION
+    assert evaluate_automation(reply.model_copy(update={"has_verified_facts": False}), rules())[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(reply.model_copy(update={"confidence": .4}), rules())[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(reply.model_copy(update={"original_decision": "DENY"}), rules())[0] is AutomationDecision.DENY
 
 
 def test_resume_requires_explicit_request_available_attachment_and_a_grade() -> None:
@@ -64,7 +72,7 @@ def test_resume_requires_explicit_request_available_attachment_and_a_grade() -> 
         explicit_resume_request=True, resume_available=True,
     )
     assert evaluate_automation(resume, rules())[0] is AutomationDecision.ALLOW_AUTO
-    assert evaluate_automation(resume.model_copy(update={"explicit_resume_request": False}), rules())[0] is AutomationDecision.REQUIRE_CONFIRMATION
+    assert evaluate_automation(resume.model_copy(update={"explicit_resume_request": False}), rules())[0] is AutomationDecision.DENY
     assert evaluate_automation(resume.model_copy(update={"resume_already_sent": True}), rules())[0] is AutomationDecision.DENY
 
 
@@ -73,3 +81,13 @@ def test_switch_pause_and_rate_limits_stop_automation() -> None:
     assert evaluate_automation(context(), rules(paused=True))[0] is AutomationDecision.DENY
     assert evaluate_automation(context(hourly_count=10), rules(hourly_limit=10))[0] is AutomationDecision.DENY
     assert evaluate_automation(context(daily_count=50), rules(daily_limit=50))[0] is AutomationDecision.DENY
+
+
+def test_low_score_decline_is_separate_automatic_action() -> None:
+    decline = context(
+        action_type="LOW_SCORE_DECLINE",
+        score=59,
+        grade="C",
+        eligible=False,
+    )
+    assert evaluate_automation(decline, rules())[0] is AutomationDecision.ALLOW_AUTO

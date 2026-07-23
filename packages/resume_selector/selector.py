@@ -12,5 +12,10 @@ class ResumeCandidate:
 
 def select_resume(resumes: list[ResumeCandidate], job_title: str) -> ResumeCandidate | None:
     lowered = job_title.lower()
-    return next((resume for resume in resumes if resume.is_available and
-                 any(direction.lower() in lowered for direction in resume.target_directions)), None)
+    matches = [
+        resume
+        for resume in resumes
+        if resume.is_available
+        and any(direction.lower() in lowered for direction in resume.target_directions)
+    ]
+    return matches[0] if len(matches) == 1 else None

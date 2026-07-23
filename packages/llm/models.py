@@ -77,12 +77,17 @@ class GeneratedMessage(BaseModel):
     risk_codes: list[str] = Field(default_factory=list)
 
 
+class ConversationMessage(BaseModel):
+    id: UUID
+    content: str = Field(min_length=1, max_length=10000)
+
+
 class ConversationEvaluationRequest(BaseModel):
-    messages: list[str] = Field(min_length=1, max_length=50)
+    messages: list[ConversationMessage] = Field(min_length=1, max_length=50)
 
 
 class ConversationEvaluation(BaseModel):
     resume_requested: bool
     positive_feedback: bool
-    evidence_message_indexes: list[int] = Field(default_factory=list)
+    evidence_message_ids: list[UUID] = Field(default_factory=list)
     confidence: Decimal = Field(ge=0, le=1)

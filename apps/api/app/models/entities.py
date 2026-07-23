@@ -524,6 +524,9 @@ class AutomationSetting(TimestampMixin, Base):
     auto_greet_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_greet_min_score: Mapped[int] = mapped_column(Integer, default=80, server_default="80")
     auto_reply_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    low_score_decline_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
     auto_reply_min_confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0.90"))
     auto_resume_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_resume_min_score: Mapped[int] = mapped_column(Integer, default=60, server_default="60")

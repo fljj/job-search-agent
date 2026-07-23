@@ -105,15 +105,15 @@ class FakeLlmProvider:
         self, request: ConversationEvaluationRequest
     ) -> LlmResult[ConversationEvaluation]:
         matches = [
-            index
-            for index, message in enumerate(request.messages)
-            if "简历" in message or "合适" in message
+            message
+            for message in request.messages
+            if "简历" in message.content or "合适" in message.content
         ]
         return self._result(
             ConversationEvaluation(
-                resume_requested=any("简历" in request.messages[index] for index in matches),
-                positive_feedback=any("合适" in request.messages[index] for index in matches),
-                evidence_message_indexes=matches,
+                resume_requested=any("简历" in message.content for message in matches),
+                positive_feedback=any("合适" in message.content for message in matches),
+                evidence_message_ids=[message.id for message in matches],
                 confidence=Decimal("1"),
             ),
             "conversation-evaluate-fake-v1",

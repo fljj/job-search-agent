@@ -10,11 +10,13 @@ from apps.api.app.schemas.conversation import (
     GreetingRequest,
     MessagePayload,
     ReplyRequest,
+    ResumeDraftRequest,
 )
 from apps.api.app.services.conversation_service import (
     create_conversation,
     create_greeting_draft,
     create_reply_draft,
+    create_resume_draft,
     import_message,
 )
 
@@ -40,3 +42,8 @@ def reply(payload: ReplyRequest, session: Session = Depends(get_session)) -> dic
 @router.post("/drafts/greeting")
 def greeting(payload: GreetingRequest, session: Session = Depends(get_session)) -> dict[str, object]:
     return response(create_greeting_draft(session, payload.job_score_id))
+
+
+@router.post("/drafts/resume")
+def resume(payload: ResumeDraftRequest, session: Session = Depends(get_session)) -> dict[str, object]:
+    return response(create_resume_draft(session, payload.message_id))

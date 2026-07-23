@@ -78,8 +78,14 @@ def dispatch(session: Session, payload: AutomationDispatchRequest) -> dict[str, 
         action_type=payload.action_type,
         score=score.total_score,
         grade=score.grade,
-        eligible=(not score.hard_rejected and score.eligibility == "ELIGIBLE"
-                  and score.automation_eligible),
+        eligible=(
+            not score.hard_rejected
+            and score.eligibility == "ELIGIBLE"
+            and (
+                payload.action_type != "GREETING"
+                or score.automation_eligible
+            )
+        ),
         job_open=score.effective_job_status == "OPEN",
         confidence=float(draft.confidence),
         original_decision=original.decision,
@@ -138,6 +144,9 @@ def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> Auto
         rules.paused = rules.paused or row.paused
         rules.auto_greet_enabled = rules.auto_greet_enabled and row.auto_greet_enabled
         rules.auto_reply_enabled = rules.auto_reply_enabled and row.auto_reply_enabled
+        rules.low_score_decline_enabled = (
+            rules.low_score_decline_enabled and row.low_score_decline_enabled
+        )
         rules.auto_resume_enabled = rules.auto_resume_enabled and row.auto_resume_enabled
         rules.auto_greet_min_score = max(rules.auto_greet_min_score, row.auto_greet_min_score)
         rules.auto_reply_min_confidence = max(rules.auto_reply_min_confidence, float(row.auto_reply_min_confidence))
@@ -152,6 +161,7 @@ def _rules(row: db.AutomationSetting) -> AutomationRules:
         enabled=row.enabled, paused=row.paused,
         auto_greet_enabled=row.auto_greet_enabled, auto_greet_min_score=row.auto_greet_min_score,
         auto_reply_enabled=row.auto_reply_enabled,
+        low_score_decline_enabled=row.low_score_decline_enabled,
         auto_reply_min_confidence=float(row.auto_reply_min_confidence),
         auto_resume_enabled=row.auto_resume_enabled, auto_resume_min_score=row.auto_resume_min_score,
         hourly_limit=row.hourly_limit, daily_limit=row.daily_limit,
