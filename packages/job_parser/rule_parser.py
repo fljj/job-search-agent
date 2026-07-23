@@ -11,7 +11,7 @@ class RuleJobParser:
     version = "1.0.0"
 
     def parse(self, job: JobInput) -> ParsedJob:
-        text = f"{job.title}\n{job.description}"
+        text = f"{job.title}\n{job.company_name}\n{job.description}"
         skills = self._extract_skills(text)
         preferred_section = self._preferred_skills(text, skills)
         required = [skill for skill in skills if skill not in preferred_section]

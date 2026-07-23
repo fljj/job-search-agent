@@ -4,5 +4,6 @@
   "confirmation_min_confidence": 0.75,
   "missing_fact_reply": "这部分信息我需要确认一下，稍后回复您。",
   "max_greeting_facts": 3,
-  "max_greeting_skills": 3
+  "max_greeting_skills": 3,
+  "platform_default_greetings": {}
 }

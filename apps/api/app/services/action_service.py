@@ -210,6 +210,12 @@ def approve_task(
     )
     if duplicate:
         raise ValueError("相同对话中已存在相同发送动作")
+    platform_default_content = (
+        get_conversation_policy().platform_default_greetings.get(job.source)
+        if decision.action_type == "GREETING"
+        else None
+    )
+    uses_platform_default = decision.action_type == "GREETING" and job.source == "BOSS"
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID,
         confirmation_task_id=task.id,
@@ -222,6 +228,10 @@ def approve_task(
         action_type=decision.action_type,
         status=ActionStatus.APPROVED.value,
         content=draft.content if decision.action_type != "RESUME" else None,
+        delivery_mode=(
+            "PLATFORM_DEFAULT" if uses_platform_default else "CUSTOM"
+        ),
+        expected_platform_content=platform_default_content,
         platform=conversation.platform if conversation else job.source,
         target_company=job.company_name,
         target_job_title=job.title,
@@ -369,6 +379,8 @@ def execute_action(
         job_title=action.target_job_title,
         recruiter=action.target_recruiter,
         content=action.content,
+        delivery_mode=action.delivery_mode,
+        expected_platform_content=action.expected_platform_content,
         attachment_name=action.attachment_name,
     )
     result = (executor or PlaywrightActionExecutor(get_browser_selectors())).execute(
@@ -458,7 +470,10 @@ def _finish(
     attempt.error_code = result.error_code
     attempt.external_reference = result.external_reference
     attempt.evidence_hash = result.evidence_hash
+    attempt.observed_content = result.observed_content
     attempt.finished_at = datetime.now(UTC)
+    if result.observed_content:
+        action.observed_content = result.observed_content
     if (
         target is ActionStatus.SUCCEEDED
         and action.action_type == "RESUME"
@@ -596,6 +611,9 @@ def _response(action: db.ActionQueue) -> ActionResponse:
         job_id=action.job_id,
         conversation_id=action.conversation_id,
         content=action.content,
+        delivery_mode=action.delivery_mode,
+        expected_platform_content=action.expected_platform_content,
+        observed_content=action.observed_content,
         attachment_name=action.attachment_name,
         failure_code=action.failure_code,
         version=action.version,

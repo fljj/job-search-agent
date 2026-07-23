@@ -12,3 +12,13 @@ def test_parser_extracts_structured_fields() -> None:
     assert parsed.architecture_required is True
     assert parsed.salary is not None
     assert parsed.salary.salary_months == 14
+
+
+def test_parser_detects_agency_recruiting_from_company_label() -> None:
+    job = JobInput(
+        title="Java开发工程师",
+        company_name="代招公司：上海某大型证券公司",
+        description="负责核心业务系统开发。",
+    )
+
+    assert RuleJobParser().parse(job).headhunter_detected is True

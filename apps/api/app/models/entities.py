@@ -498,6 +498,11 @@ class ActionQueue(TimestampMixin, Base):
     action_type: Mapped[str] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(30))
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivery_mode: Mapped[str] = mapped_column(
+        String(30), default="CUSTOM", server_default="CUSTOM"
+    )
+    expected_platform_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observed_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     platform: Mapped[str] = mapped_column(String(30))
     target_company: Mapped[str] = mapped_column(String(200))
     target_job_title: Mapped[str] = mapped_column(String(200))
@@ -555,6 +560,7 @@ class ActionAttempt(Base):
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     external_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
     evidence_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observed_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

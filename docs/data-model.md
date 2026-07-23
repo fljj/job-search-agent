@@ -198,7 +198,10 @@ users
 ## 7. 第四阶段数据表
 
 - `action_queue`：确认任务、职位/对话、草稿/简历、目标快照、状态、时间、幂等键和发送指纹；`confirmation_task_id`、`idempotency_key` 和 `send_fingerprint` 唯一。首次招呼使用 `job_id` 且 `conversation_id/target_conversation_key` 可空；回复和简历动作仍必须绑定对话。
+- `action_queue.delivery_mode`：`CUSTOM/PLATFORM_DEFAULT`；平台默认模式同时保存
+  `expected_platform_content` 和回读到的 `observed_content`。
 - `action_attempts`：每次外部执行的状态、错误、外部引用和证据哈希；`(action_id, attempt_number)` 唯一。
+- `action_attempts.observed_content`：保存本次执行实际观察到的平台文案，供对账审计。
 - `resume_send_records`：已成功发送附件记录；`(conversation_id, resume_id)` 唯一。
 - `audit_events`：追加保存行为者、事件、实体、前后状态、原因码和关联 ID，不保存 Cookie、Token 或完敏感内容。
 

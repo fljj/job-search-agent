@@ -24,6 +24,8 @@ class PlatformSelectors(BaseModel):
     recruiter_on_job: str
     job_open_marker: str
     job_closed_marker: str
+    platform_greeting_dialog: str
+    platform_greeting_message: str
     conversation_list_root: str
     conversation_list_items: str
     conversation_list_item_id_attribute: str
@@ -33,10 +35,13 @@ class PlatformSelectors(BaseModel):
     conversation_list_item_unread_attribute: str
     conversation_root: str
     conversation_id: str
+    conversation_id_attribute: str
     recruiter: str
+    conversation_job_title: str
     message_items: str
     message_id_attribute: str
     message_direction_attribute: str
+    message_outbound_class: str
     message_time_attribute: str
     message_content: str
     message_composer: str

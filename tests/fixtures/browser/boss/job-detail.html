@@ -14,14 +14,22 @@
       <section data-testid="job-description">Python、FastAPI、PostgreSQL，5 年后端经验。</section>
       <button data-testid="start-chat" type="button" onclick="openChat()">立即沟通</button>
     </main>
-    <section data-testid="chat-panel" data-conversation-id="boss-chat-new" hidden>
+    <section data-testid="chat-panel" d-c="boss-chat-new" hidden>
       <textarea data-testid="message-composer"></textarea>
       <button data-testid="send-message" type="button" onclick="sendMessage()">发送</button>
       <div id="messages"></div>
     </section>
+    <section data-testid="greeting-dialog" hidden>
+      <span>已发送</span>
+      <p data-testid="greeting-message"></p>
+    </section>
     <script>
       function openChat() {
         document.querySelector('[data-testid="chat-panel"]').hidden = false;
+        const dialog = document.querySelector('[data-testid="greeting-dialog"]');
+        dialog.hidden = false;
+        document.querySelector('[data-testid="greeting-message"]').textContent =
+          '您好，我对这个岗位很感兴趣，我的经历与岗位要求有一定匹配，希望能进一步沟通了解，谢谢。';
       }
       function sendMessage() {
         const composer = document.querySelector('[data-testid="message-composer"]');

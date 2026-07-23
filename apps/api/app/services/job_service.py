@@ -20,6 +20,7 @@ from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.job_parser.models import JobInput, ParsedJob
+from packages.job_parser.rule_parser import RuleJobParser
 from packages.job_parser.service import JobParserService
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
@@ -140,10 +141,14 @@ def parse_job(
             )
             session.commit()
             raise
+        deterministic_flags = RuleJobParser().parse(domain_job)
         parsed = llm_result.data.model_copy(
             update={
                 "parser_type": "LLM",
                 "parser_version": llm_result.metadata.prompt_version,
+                "outsourcing_detected": deterministic_flags.outsourcing_detected,
+                "headhunter_detected": deterministic_flags.headhunter_detected,
+                "internship_detected": deterministic_flags.internship_detected,
             }
         )
         record_llm_invocation(

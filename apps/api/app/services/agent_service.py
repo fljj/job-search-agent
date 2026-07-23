@@ -162,6 +162,7 @@ def tick_run(
         .where(
             db.Conversation.platform == run.platform,
             db.Message.direction == "INBOUND",
+            db.Message.status == "RECEIVED",
             ~select(db.GeneratedDraft.id)
             .where(db.GeneratedDraft.message_id == db.Message.id)
             .exists(),

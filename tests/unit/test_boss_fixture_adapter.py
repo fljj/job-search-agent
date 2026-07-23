@@ -113,6 +113,46 @@ def test_starts_job_conversation_and_sends_greeting_once() -> None:
         assert page.locator("[data-direction='outbound']").count() == 1
 
 
+def test_observes_matching_platform_default_greeting_without_second_message() -> None:
+    expected = (
+        "您好，我对这个岗位很感兴趣，我的经历与岗位要求有一定匹配，"
+        "希望能进一步沟通了解，谢谢。"
+    )
+    with fixture_page("job-detail.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            approved_command(
+                "GREETING",
+                conversation_key=None,
+                external_job_id="boss-job-1",
+                content="不会作为第二条消息发送",
+                delivery_mode="PLATFORM_DEFAULT",
+                expected_platform_content=expected,
+            ),
+        )
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert result.observed_content == expected
+        assert page.locator("[data-direction='outbound']").count() == 0
+
+
+def test_accepts_any_non_empty_platform_default_when_content_is_not_pinned() -> None:
+    with fixture_page("job-detail.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            approved_command(
+                "GREETING",
+                conversation_key=None,
+                external_job_id="boss-job-1",
+                content="仅用于内部生成记录",
+                delivery_mode="PLATFORM_DEFAULT",
+                expected_platform_content=None,
+            ),
+        )
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert result.observed_content
+        assert page.locator("[data-direction='outbound']").count() == 0
+
+
 def test_greeting_target_mismatch_stops_before_click() -> None:
     with fixture_page("job-detail.html") as page:
         result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(

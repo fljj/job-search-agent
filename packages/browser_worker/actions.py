@@ -20,6 +20,8 @@ class ApprovedCommand(BaseModel):
     job_title: str
     recruiter: str
     content: str | None = None
+    delivery_mode: str = "CUSTOM"
+    expected_platform_content: str | None = None
     attachment_name: str | None = None
 
 
@@ -28,6 +30,7 @@ class ExecutionResult(BaseModel):
     error_code: str | None = None
     external_reference: str | None = None
     evidence_hash: str | None = None
+    observed_content: str | None = None
 
 
 class ActionExecutor(Protocol):

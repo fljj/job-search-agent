@@ -81,13 +81,22 @@ def test_normalizes_boss_company_accessibility_prefix() -> None:
     assert result.job and result.job.company_name == "示例科技"
 
 
+def test_preserves_boss_recruiting_agency_company_prefix_as_scoring_evidence() -> None:
+    page, selectors = job_page(Platform.BOSS)
+    page.texts[selectors.company] = "代招公司：上海某大型证券公司"
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+    assert result.job and result.job.company_name == "代招公司：上海某大型证券公司"
+
+
 def test_extracts_conversation_messages() -> None:
     config = get_browser_selectors()
     selectors = config.platforms["BOSS"]
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")
     page.visible = {selectors.login_marker, selectors.conversation_root}
     page.texts = {selectors.recruiter: "张HR"}
-    page.attributes = {(selectors.conversation_id, "data-conversation-id"): "chat-1"}
+    page.attributes = {
+        (selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"
+    }
     page.element_lists = {selectors.message_items: [FakeElement(
         texts={selectors.message_content: "请发一份简历"},
         attributes={("", selectors.message_id_attribute): "message-1"},
@@ -95,6 +104,46 @@ def test_extracts_conversation_messages() -> None:
     result = extract_current_page(page, Platform.BOSS, selectors, "v1")
     assert result.page_type is PageType.CONVERSATION
     assert result.conversation and result.conversation.messages[0].external_message_id == "message-1"
+
+
+def test_extracts_real_boss_conversation_dom_shape() -> None:
+    selectors = get_browser_selectors().platforms["BOSS"]
+    page = FakePage(url="https://www.zhipin.com/web/geek/chat")
+    page.visible = {selectors.login_marker, selectors.conversation_root}
+    page.texts = {
+        selectors.recruiter: "李剑",
+        selectors.conversation_job_title: "java开发工程师（代招职位）",
+    }
+    page.attributes = {
+        (selectors.conversation_id, selectors.conversation_id_attribute): "62001"
+    }
+    page.element_lists = {
+        selectors.message_items: [
+            FakeElement(
+                texts={selectors.message_content: "你好，最近看新机会吗"},
+                attributes={
+                    ("", selectors.message_id_attribute): "367232427933707",
+                    ("", "class"): "message-item item-friend",
+                },
+            ),
+            FakeElement(
+                texts={selectors.message_content: "您好，可以具体聊聊"},
+                attributes={
+                    ("", selectors.message_id_attribute): "367232427933708",
+                    ("", "class"): "message-item item-myself",
+                },
+            ),
+        ]
+    }
+
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+
+    assert result.status is SessionStatus.SESSION_READY
+    assert result.conversation
+    assert result.conversation.external_conversation_id == "62001"
+    assert result.conversation.job_title == "java开发工程师（代招职位）"
+    assert result.conversation.messages[0].direction.value == "INBOUND"
+    assert result.conversation.messages[1].direction.value == "OUTBOUND"
 
 
 def test_job_list_missing_required_field_stops_discovery() -> None:
@@ -123,7 +172,9 @@ def test_invalid_message_time_stops_conversation_read() -> None:
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")
     page.visible = {selectors.login_marker, selectors.conversation_root}
     page.texts = {selectors.recruiter: "张HR"}
-    page.attributes = {(selectors.conversation_id, "data-conversation-id"): "chat-1"}
+    page.attributes = {
+        (selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"
+    }
     page.element_lists = {
         selectors.message_items: [
             FakeElement(

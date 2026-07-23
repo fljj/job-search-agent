@@ -141,7 +141,9 @@ def _extract_conversation(
     page: PageReader, platform: Platform, selectors: PlatformSelectors, version: str,
     expected_recruiter: str | None,
 ) -> ReadResult:
-    conversation_id = page.attribute(selectors.conversation_id, "data-conversation-id")
+    conversation_id = page.attribute(
+        selectors.conversation_id, selectors.conversation_id_attribute
+    )
     recruiter = page.text(selectors.recruiter)
     if not conversation_id or not recruiter:
         return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
@@ -163,11 +165,12 @@ def _extract_conversation(
         except ValueError:
             return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
                             "INVALID_MESSAGE_TIME")
-        direction = (
-            MessageDirection.OUTBOUND
-            if element.attribute("", selectors.message_direction_attribute) == "outbound"
-            else MessageDirection.INBOUND
-        )
+        direction_value = element.attribute("", selectors.message_direction_attribute)
+        class_names = (element.attribute("", "class") or "").split()
+        direction = MessageDirection.OUTBOUND if (
+            direction_value == "outbound"
+            or selectors.message_outbound_class in class_names
+        ) else MessageDirection.INBOUND
         messages.append(BrowserMessage(
             external_message_id=external_id,
             content=content,
@@ -176,7 +179,7 @@ def _extract_conversation(
         ))
     conversation = BrowserConversation(external_conversation_id=conversation_id,
                                        recruiter_name=recruiter,
-                                       job_title=page.text(selectors.job_title),
+                                       job_title=page.text(selectors.conversation_job_title),
                                        company_name=_normalize_company_name(
                                            page.text(selectors.company)
                                        ),

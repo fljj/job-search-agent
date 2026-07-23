@@ -33,6 +33,9 @@ class ActionResponse(BaseModel):
     job_id: UUID | None
     conversation_id: UUID | None
     content: str | None
+    delivery_mode: str
+    expected_platform_content: str | None
+    observed_content: str | None
     attachment_name: str | None
     failure_code: str | None
     version: int

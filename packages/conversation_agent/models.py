@@ -46,3 +46,4 @@ class ConversationPolicyConfig(BaseModel):
     missing_fact_reply: str = "这部分信息我需要确认一下，稍后回复您。"
     max_greeting_facts: int = Field(default=3, ge=1, le=5)
     max_greeting_skills: int = Field(default=3, ge=1, le=5)
+    platform_default_greetings: dict[str, str] = Field(default_factory=dict)
