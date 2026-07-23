@@ -118,3 +118,41 @@ def test_automation_requires_80_and_model_recommendation(
 ) -> None:
     result = validate_llm_score(context, output_for_total(total, recommends=recommends))
     assert is_automation_eligible(result, recommends) is eligible
+
+
+def test_headhunter_score_cap_blocks_proactive_contact(context: ScoringContext) -> None:
+    headhunter_context = context.model_copy(
+        update={
+            "parsed_job": context.parsed_job.model_copy(
+                update={"headhunter_detected": True}
+            ),
+            "strategy": context.strategy.model_copy(
+                update={"accept_headhunter": True, "headhunter_score_cap": 79}
+            ),
+        }
+    )
+
+    result = validate_llm_score(headhunter_context, output_for_total(100))
+
+    assert result.hard_rejected is False
+    assert result.total_score == 79
+    assert sum(result.dimension_scores.values()) == 79
+    assert result.action_blockers == ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"]
+    assert any("猎头岗位" in note for note in result.risk_notes)
+    assert is_automation_eligible(result, True) is False
+
+
+def test_headhunter_without_configured_cap_keeps_model_score(
+    context: ScoringContext,
+) -> None:
+    headhunter_context = context.model_copy(
+        update={
+            "parsed_job": context.parsed_job.model_copy(
+                update={"headhunter_detected": True}
+            )
+        }
+    )
+
+    result = validate_llm_score(headhunter_context, output_for_total(100))
+
+    assert result.total_score == 100

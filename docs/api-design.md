@@ -55,7 +55,9 @@
 - `work_mode_rules` 及允许地点；
 - `salary_rules` 及计分区间；
 - `industry_rules`、`company_blacklist`；
-- `accept_outsourcing`、`accept_headhunter`、`max_posted_days`。
+- `accept_outsourcing`、`accept_headhunter`、`headhunter_score_cap`、`max_posted_days`。
+
+`headhunter_score_cap` 可为空；配置时范围为 0–79。它只在可靠识别为猎头岗位时限制最终分数，不等同于 `accept_headhunter=false` 的硬性排除。
 
 `priority` 为正整数，数值越小优先级越高，用于未绑定策略的入站对话在同分时选择策略。
 

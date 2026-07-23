@@ -103,6 +103,16 @@ def validate_llm_score(
         blockers.append("JOB_CLOSED")
     elif effective_status == EffectiveJobStatus.EXPIRED:
         blockers.append("JOB_TOO_OLD")
+    risk_notes = [*output.risk_notes, *context.parsed_job.warnings]
+    if (
+        context.parsed_job.headhunter_detected
+        and context.strategy.headhunter_score_cap is not None
+        and total > context.strategy.headhunter_score_cap
+    ):
+        total = context.strategy.headhunter_score_cap
+        _apply_score_cap(details, Decimal(total))
+        blockers.append("HEADHUNTER_PROACTIVE_CONTACT_BLOCKED")
+        risk_notes.append(f"识别为猎头岗位，策略将总分封顶为 {total} 分")
 
     return ScoreResult(
         total_score=total,
@@ -111,13 +121,28 @@ def validate_llm_score(
         hard_rejected=bool(rejections),
         effective_job_status=effective_status,
         action_blockers=blockers,
-        dimension_scores={item.dimension: item.score for item in output.dimensions},
+        dimension_scores={item.dimension: item.score for item in details},
         details=details,
         rejection_reasons=rejections,
         match_reasons=output.match_reasons,
-        risk_notes=[*output.risk_notes, *context.parsed_job.warnings],
+        risk_notes=risk_notes,
         scoring_version=LLM_SCORING_VERSION,
     )
+
+
+def _apply_score_cap(details: list[ScoreDetail], cap: Decimal) -> None:
+    excess = sum((item.score for item in details), start=Decimal(0)) - cap
+    for dimension in ("industry", "title", "management", "location", "salary", "experience", "skills"):
+        if excess <= 0:
+            break
+        detail = next(item for item in details if item.dimension == dimension)
+        deduction = min(detail.score, excess)
+        if deduction <= 0:
+            continue
+        detail.score -= deduction
+        detail.rule_code = "HEADHUNTER_SCORE_CAP"
+        detail.explanation = f"{detail.explanation}；猎头岗位按策略扣减 {deduction} 分"
+        excess -= deduction
 
 
 def is_automation_eligible(result: ScoreResult, recommends_proactive_contact: bool) -> bool:

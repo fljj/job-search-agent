@@ -213,6 +213,9 @@ def _score_for_draft(session: Session, draft: db.GeneratedDraft, job_id: UUID) -
                                .order_by(db.JobScore.created_at.desc()))
     if score is None:
         raise ValueError("职位缺少评分结果")
+    strategy = session.get(db.JobStrategy, score.strategy_id)
+    if strategy is None or score.strategy_version != strategy.version:
+        raise ValueError("评分使用的策略版本已过期，必须重新评分")
     return score
 
 

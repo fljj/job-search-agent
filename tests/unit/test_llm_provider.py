@@ -9,7 +9,7 @@ from adapters.llm.errors import (
     LlmNetworkError,
 )
 from adapters.llm.fake import FakeLlmProvider
-from adapters.llm.qwen import QwenLlmProvider
+from adapters.llm.qwen import PROMPTS, QwenLlmProvider
 from apps.api.app.core.config import Settings
 from apps.api.app.core.llm import build_llm_provider
 from packages.llm.models import MessageClassificationRequest
@@ -119,3 +119,14 @@ def test_authorization_key_is_not_in_payload() -> None:
     qwen(transport).classify_message(MessageClassificationRequest(message="你好"))
     payload_text = json.dumps(transport.calls[0]["payload"], ensure_ascii=False)
     assert "secret-test-key" not in payload_text
+
+
+def test_score_prompt_lists_exact_evidence_contract() -> None:
+    version, prompt = PROMPTS["score_job"]
+    assert version == "job-score-v3"
+    assert "title=15，skills=25" in prompt
+    assert "industry=10，management=5" in prompt
+    assert "total_score必须等于七项score之和" in prompt
+    assert "title=[job.title,strategy.title_rules]" in prompt
+    assert "salary=[job.salary_text,parsed_job.salary,strategy.salary_rules]" in prompt
+    assert "不得创造、缩写或添加路径前缀" in prompt

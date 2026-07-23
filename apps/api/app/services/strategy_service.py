@@ -88,6 +88,7 @@ def _apply(strategy: db.JobStrategy, payload: StrategyPayload) -> None:
     strategy.max_posted_days = payload.max_posted_days
     strategy.accept_outsourcing = payload.accept_outsourcing
     strategy.accept_headhunter = payload.accept_headhunter
+    strategy.headhunter_score_cap = payload.headhunter_score_cap
     strategy.core_required_skills = payload.core_required_skills
     strategy.title_rules = [db.JobTitleRule(rule_type=item.rule_type.value, pattern=item.pattern,
                                             normalized_pattern=normalize_text(item.pattern), score=item.score,
@@ -127,6 +128,7 @@ def _response(strategy: db.JobStrategy) -> StrategyResponse:
         max_posted_days=strategy.max_posted_days,
         accept_outsourcing=strategy.accept_outsourcing,
         accept_headhunter=strategy.accept_headhunter,
+        headhunter_score_cap=strategy.headhunter_score_cap,
         core_required_skills=strategy.core_required_skills,
         title_rules=[TitleRule(rule_type=item.rule_type, pattern=item.pattern, score=item.score,
                                is_hard_requirement=item.is_hard_requirement) for item in strategy.title_rules],

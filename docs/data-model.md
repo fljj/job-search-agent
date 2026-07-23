@@ -67,11 +67,13 @@ users
 
 ### 3.5 `job_strategies`
 
-字段：`id`、`user_id`、`candidate_profile_id`、`name`、`enabled`、`priority`、`accepted_seniority_levels JSONB`、`max_posted_days`、`accept_outsourcing`、`accept_headhunter`、`version`、`created_at`、`updated_at`。
+字段：`id`、`user_id`、`candidate_profile_id`、`name`、`enabled`、`priority`、`accepted_seniority_levels JSONB`、`max_posted_days`、`accept_outsourcing`、`accept_headhunter`、`headhunter_score_cap`、`version`、`created_at`、`updated_at`。
 
 唯一约束：`(user_id, name)`。
 
 `priority` 为正整数，数值越小优先级越高，用于未绑定策略的入站对话在同分时选择策略。自动化开关保存在 `automation_settings`，不复制到策略聚合中。
+
+`headhunter_score_cap` 可空且最大为 79；用于保留猎头入站沟通能力，同时确定性阻止达到主动招呼分数门槛。
 
 ### 3.6 `job_title_rules`
 
