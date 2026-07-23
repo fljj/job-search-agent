@@ -179,13 +179,26 @@ users
 
 - `knowledge_items`：候选人事实、来源、敏感度、自动引用权限、验证和有效时间；`(user_id, category, normalized_key)` 唯一。
 - `resumes`：平台内附件名、适用方向和可用状态；`(user_id, platform, attachment_name)` 唯一。
-- `conversations`：平台对话、职位归属、`strategy_id`、`latest_job_score_id` 和状态；`(user_id, platform, external_conversation_id)` 唯一。策略绑定变化必须记录审计。
+- `conversations`：平台对话、可选职位归属、`strategy_id`、可选
+  `latest_job_score_id`、`qualification_stage`、资格原因码和状态；
+  `(user_id, platform, external_conversation_id)` 唯一。策略、职位绑定和资格成熟度变化
+  必须记录审计。
 - `messages`：原始消息、方向、多意图和状态；`(conversation_id, external_message_id)` 唯一。
 - `generated_drafts`：招呼或回复草稿、事实引用、置信度、风险和生成器版本；`input_fingerprint` 唯一。
 - `policy_decisions`：动作类型、权限结果、原因码、策略版本和输入快照。
 - `confirmation_tasks`：只保存电话、面试具体时间和日历写操作的 `PENDING_APPROVAL` 数据；`decision_id` 唯一。
 
 第二阶段幂等：模拟消息使用外部消息 ID，草稿使用消息/评分、知识版本和生成器版本生成指纹。
+
+`qualification_stage`：
+
+- `UNKNOWN`：岗位信息不足；
+- `ROUGH_MATCH`：大体符合，可以推进电话沟通；
+- `FULL_MATCH`：关键信息充分且符合，可以推进面试；
+- `MISMATCH`：存在明确冲突，只允许婉拒或停止。
+
+入站对话允许 `job_id/latest_job_score_id` 暂时为空。明确索要简历的入站动作必须引用
+招聘方消息 ID、资格快照和确定性阻断检查结果，不能伪造 `job_score_id`。
 
 ## 6. 第三阶段数据表
 
@@ -203,6 +216,25 @@ users
 - `action_attempts`：每次外部执行的状态、错误、外部引用和证据哈希；`(action_id, attempt_number)` 唯一。
 - `action_attempts.observed_content`：保存本次执行实际观察到的平台文案，供对账审计。
 - `resume_send_records`：已成功发送附件记录；`(conversation_id, resume_id)` 唯一。
+
+### 7.1 脉脉系统推荐扩展
+
+- `platform_recommendations`：保存平台、外部推荐 ID、招聘人、公司、岗位、地点、薪资、
+  职责摘要、原始卡片哈希、简化判断、原因码、状态和首次/最后观察时间；
+  `(user_id, platform, external_recommendation_id)` 唯一。
+- 推荐状态：
+  `DISCOVERED/DECIDED/EXECUTING/ACCEPTED/REJECTED/OUTCOME_UNKNOWN/FAILED_FINAL`。
+- 推荐判断：
+  `ACCEPT_AND_SEND_PROFILE/REJECT_RECOMMENDATION/DENY`。
+- `action_queue` 增加可选 `platform_recommendation_id`；推荐动作类型为
+  `PLATFORM_RECOMMENDATION_ACCEPT/PLATFORM_RECOMMENDATION_REJECT`，不能同时绑定普通
+  `draft_id`。
+- 推荐同意成功后追加平台资料/简历发送记录，动作证据保存平台回读文本哈希，不保存
+  无必要的完整个人资料。
+- 推荐幂等指纹由平台、外部推荐 ID、招聘人稳定标识、岗位和动作类型生成；同意和拒绝
+  只能有一个达到最终成功状态。
+- 普通入站简历发送记录允许 `job_score_id` 为空，但必须保存
+  `authorization_basis=INBOUND_EXPLICIT_RESUME_REQUEST`、入站消息 ID 和资格快照。
 - `audit_events`：追加保存行为者、事件、实体、前后状态、原因码和关联 ID，不保存 Cookie、Token 或完敏感内容。
 
 ## 8. 后续阶段实体与状态
@@ -314,6 +346,8 @@ SESSION_PAUSED
 - 实际消息唯一约束为 `messages(conversation_id, external_message_id)`；消息列表游标
   仅用于减少重复扫描，数据库唯一约束才是最终幂等边界；
 - `resume_send_records(conversation_id, resume_id)` 唯一；
+- `platform_recommendations(user_id, platform, external_recommendation_id)` 唯一；
+- 推荐同意/拒绝共享同一推荐级原子状态；已有最终结果时不得创建相反或重复动作；
 - 只有原子条件更新成功将动作转为 `EXECUTING` 的执行者可以调用外部平台；
 - `OUTCOME_UNKNOWN` 只能对账，不能直接重试；
 - 对账使用动作行锁串行执行；只有平台明确确认未发送后才转为

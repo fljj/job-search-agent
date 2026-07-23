@@ -241,7 +241,9 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 
 - `POST /api/v1/conversations`：为已导入职位创建幂等模拟对话。
 - `POST /api/v1/conversations/{conversation_id}/messages`：幂等导入模拟招聘方消息并识别多意图。
-- `POST /api/v1/drafts/reply`：请求包含 `message_id`；服务端先读取对话绑定策略的最新有效评分。低于 60 分返回婉拒草稿，60 分及以上返回事实受限回复；只有时间类意图返回确认任务 ID。
+- `POST /api/v1/drafts/reply`：请求包含 `message_id`；服务端先更新入站对话资格成熟度。
+  `MISMATCH` 返回礼貌婉拒，其他状态返回事实受限的澄清或普通回复。存在正式评分时
+  作为上下文使用，但评分不是入站回复前置条件；只有具体时间意图返回确认任务 ID。
 - `POST /api/v1/drafts/greeting`：请求包含 `job_score_id`，仅基于 JD 与已验证知识生成个性化招呼草稿。
 - `POST /api/v1/drafts/resume`：请求包含 `message_id`；模型返回当前对话中的证据消息 UUID，服务端校验评分、硬排除、附件唯一匹配和重复发送后返回 `ALLOW_AUTO/DENY` 及 `resume_id`，不创建普通确认任务。
 - `PATCH /api/v1/drafts/{draft_id}`：人工编辑尚未产生动作的草稿；服务端重新执行内容安全检查，创建新草稿和新策略决策并审计，不覆盖原记录。
@@ -293,7 +295,7 @@ API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回
 
 确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。首次真实
 招呼联调按 `development-plan.md` 要求人工确认；稳定后的普通自动招呼不重复要求确认。
-普通回复、低分婉拒和按策略允许的简历发送不使用本组确认 API。
+普通回复、不匹配婉拒和按策略允许的简历发送不使用本组确认 API。
 
 ## 13. 第五阶段安全自动化 API
 
@@ -306,7 +308,20 @@ API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回
 - `POST /api/v1/automation/runs/{id}/tick`：由短周期工作进程携带 `worker_id` 执行一次受租约保护的轮询。
 - `GET /api/v1/automation/runs/{id}`：返回运行状态、最近心跳、动作计数和暂停原因。
 
-`dispatch` 返回 `decision`、`reason_codes`，允许执行时同时返回 `action_id` 和 `action_status`。调用方不能直接指定决策、分数、模型建议、置信度或资格状态，这些数据全部由服务端读取。主动招呼必须同时满足 80 分和模型建议；低于 60 分的入站消息只能进入婉拒；60 分及以上才允许按反馈发送简历。
+`dispatch` 返回 `decision`、`reason_codes`，允许执行时同时返回 `action_id` 和
+`action_status`。调用方不能直接指定决策、分数、模型建议、置信度或资格成熟度，这些
+数据全部由服务端读取。主动招呼必须同时满足 80 分和模型建议。招聘方入站明确索要
+简历时不设分数门槛，但必须引用当前入站消息、资格快照并通过保险销售、完全无关、
+黑名单、欺诈、附件和重复发送检查。
+
+入站资格 API：
+
+- `GET /api/v1/conversations/{id}/qualification`：返回成熟度、已知/缺失字段、明确冲突和
+  最近判断证据；
+- `POST /api/v1/conversations/{id}/qualification/evaluate`：根据新增消息和岗位信息
+  幂等更新成熟度，客户端不能直接指定结果；
+- 电话沟通动作要求 `ROUGH_MATCH` 或 `FULL_MATCH`；面试动作只允许 `FULL_MATCH`；
+  两者涉及具体时间时仍必须进入排期确认 API。
 
 BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客户端不能覆盖。
 动作响应和审计保存实际观察文案；未固定预期文案时接受任意非空平台招呼，固定预期
@@ -342,6 +357,25 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 灰度配置、灰度暂停、当前级别未开放动作或达到灰度日限额时，动作决策返回 `DENY`，
 原因码分别为 `ROLLOUT_NOT_CONFIGURED`、`ROLLOUT_PAUSED`、
 `ROLLOUT_ACTION_NOT_ENABLED` 或 `ROLLOUT_DAILY_LIMIT_REACHED`。
+
+第十四阶段脉脉推荐 API：
+
+- `GET /api/v1/platform-recommendations`：按平台、判断和状态查询推荐记录；
+- `GET /api/v1/platform-recommendations/{id}`：返回脱敏卡片快照、简化判断、原因码、
+  动作状态和回读证据；
+- `POST /api/v1/platform-recommendations/scan`：触发一次受 Worker 租约和平台灰度约束的
+  只读扫描，不直接接受或拒绝；
+- `POST /api/v1/platform-recommendations/{id}/dispatch`：重新核对当前卡片后执行服务端
+  已保存的 `ACCEPT_AND_SEND_PROFILE` 或 `REJECT_RECOMMENDATION` 判断；请求方不能覆盖
+  判断结果；
+- `POST /api/v1/platform-recommendations/{id}/reconcile`：只读回查结果未知的推荐动作，
+  不允许直接重试点击。
+
+扫描和执行要求启用脉脉平台配置及 `maimai_recommendation_enabled`。同意并发送平台
+资料还要求 `maimai_recommendation_resume_enabled`。重复请求必须携带
+`Idempotency-Key` 并返回既有动作；页面招聘人、岗位或推荐身份变化返回
+`TARGET_MISMATCH`，控件不唯一返回 `ACTION_CONTROL_AMBIGUOUS`，点击后无法回读返回
+`OUTCOME_UNKNOWN`。
 
 ## 14. 第六阶段排期 API
 
