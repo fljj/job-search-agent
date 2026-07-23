@@ -73,9 +73,16 @@ def _extract_job_list(
         external_id = element.attribute("", selectors.job_list_item_id_attribute)
         title = element.text(selectors.job_list_item_title)
         company = _normalize_company_name(element.text(selectors.job_list_item_company))
-        if not external_id or not title or not company:
-            return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
-                            "REQUIRED_JOB_LIST_FIELD_MISSING")
+        if not external_id:
+            continue
+        if not title or not company:
+            return _failure(
+                page,
+                platform,
+                version,
+                SessionStatus.SESSION_PAGE_CHANGED,
+                "REQUIRED_JOB_LIST_FIELD_MISSING",
+            )
         jobs.append(BrowserJobSummary(
             external_job_id=external_id,
             title=title,

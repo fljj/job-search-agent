@@ -12,6 +12,10 @@ interface SettingForm {
   auto_greet_min_score: number; auto_reply_enabled: boolean
   auto_reply_min_confidence: number; auto_resume_enabled: boolean
   auto_resume_min_score: number; hourly_limit: number; daily_limit: number
+  emergency_stop: boolean; job_scan_enabled: boolean
+  hourly_scan_limit: number; daily_scan_limit: number
+  company_cooldown_hours: number; recruiter_cooldown_hours: number
+  work_start_hour: number; work_end_hour: number
 }
 
 interface LlmStatus { provider: string; model: string; configured: boolean }
@@ -121,7 +125,9 @@ export function AutomationPage() {
       initialValues={{ scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
         auto_greet_enabled: false, auto_greet_min_score: 80, auto_reply_enabled: false,
         auto_reply_min_confidence: .9, auto_resume_enabled: false, auto_resume_min_score: 60,
-        hourly_limit: 1, daily_limit: 3 }}>
+        hourly_limit: 1, daily_limit: 3, emergency_stop: false, job_scan_enabled: false,
+        hourly_scan_limit: 100, daily_scan_limit: 500, company_cooldown_hours: 24,
+        recruiter_cooldown_hours: 24, work_start_hour: 8, work_end_hour: 22 }}>
       <Form.Item name="scope_type" label="范围"><Select options={[
         { value: 'GLOBAL', label: '全局' }, { value: 'PLATFORM', label: '平台' },
         { value: 'STRATEGY', label: '策略' },
@@ -133,6 +139,8 @@ export function AutomationPage() {
         <Form.Item name="auto_greet_enabled" label="自动招呼" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="auto_reply_enabled" label="自动回复" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="auto_resume_enabled" label="自动简历" valuePropName="checked"><Switch /></Form.Item>
+        <Form.Item name="job_scan_enabled" label="主动扫描职位" valuePropName="checked"><Switch /></Form.Item>
+        <Form.Item name="emergency_stop" label="紧急停止" valuePropName="checked"><Switch /></Form.Item>
       </Space>
       <Space wrap>
         <Form.Item name="auto_greet_min_score" label="招呼最低分"><InputNumber min={80} max={100} /></Form.Item>
@@ -140,6 +148,12 @@ export function AutomationPage() {
         <Form.Item name="auto_resume_min_score" label="简历最低分"><InputNumber min={60} max={100} /></Form.Item>
         <Form.Item name="hourly_limit" label="每小时上限"><InputNumber min={1} max={100} /></Form.Item>
         <Form.Item name="daily_limit" label="每日上限"><InputNumber min={1} max={1000} /></Form.Item>
+        <Form.Item name="hourly_scan_limit" label="每小时扫描上限"><InputNumber min={1} max={1000} /></Form.Item>
+        <Form.Item name="daily_scan_limit" label="每日扫描上限"><InputNumber min={1} max={10000} /></Form.Item>
+        <Form.Item name="company_cooldown_hours" label="公司冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
+        <Form.Item name="recruiter_cooldown_hours" label="招聘人冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
+        <Form.Item name="work_start_hour" label="工作开始小时"><InputNumber min={0} max={23} /></Form.Item>
+        <Form.Item name="work_end_hour" label="工作结束小时"><InputNumber min={1} max={24} /></Form.Item>
       </Space>
       <Button type="primary" htmlType="submit">保存配置</Button>
     </Form></Card>

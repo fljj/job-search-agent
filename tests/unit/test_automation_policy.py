@@ -83,6 +83,14 @@ def test_switch_pause_and_rate_limits_stop_automation() -> None:
     assert evaluate_automation(context(daily_count=50), rules(daily_limit=50))[0] is AutomationDecision.DENY
 
 
+def test_emergency_stop_overrides_all_automatic_permissions() -> None:
+    decision, reasons = evaluate_automation(
+        context(score=100), rules(emergency_stop=True)
+    )
+    assert decision is AutomationDecision.DENY
+    assert reasons == ["EMERGENCY_STOP_ACTIVE"]
+
+
 def test_low_score_decline_is_separate_automatic_action() -> None:
     decline = context(
         action_type="LOW_SCORE_DECLINE",

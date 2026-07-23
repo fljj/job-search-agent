@@ -303,7 +303,7 @@ API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回
 - `POST /api/v1/automation/runs`：启动指定平台和策略的 Agent 运行；服务端校验模型配置和自动化开关。
 - `POST /api/v1/automation/runs/{id}/pause`：暂停发现、招呼和自动回复。
 - `POST /api/v1/automation/runs/{id}/resume`：自动化配置恢复安全状态后恢复运行。
-- `POST /api/v1/automation/runs/{id}/tick`：由短周期工作进程携带 `worker_id` 执行一次受租约保护的轮询；当前阶段固定使用离线假执行器。
+- `POST /api/v1/automation/runs/{id}/tick`：由短周期工作进程携带 `worker_id` 执行一次受租约保护的轮询。
 - `GET /api/v1/automation/runs/{id}`：返回运行状态、最近心跳、动作计数和暂停原因。
 
 `dispatch` 返回 `decision`、`reason_codes`，允许执行时同时返回 `action_id` 和 `action_status`。调用方不能直接指定决策、分数、模型建议、置信度或资格状态，这些数据全部由服务端读取。主动招呼必须同时满足 80 分和模型建议；低于 60 分的入站消息只能进入婉拒；60 分及以上才允许按反馈发送简历。
@@ -311,6 +311,12 @@ API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回
 BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客户端不能覆盖。
 动作响应和审计保存实际观察文案；未固定预期文案时接受任意非空平台招呼，固定预期
 文案时必须逐字一致。两种模式均不得追加发送千问生成文本。
+
+第十阶段的配置请求增加 `job_scan_enabled`、`emergency_stop`、
+`hourly_scan_limit`、`daily_scan_limit`、`company_cooldown_hours`、
+`recruiter_cooldown_hours`、`work_start_hour` 和 `work_end_hour`。职位发现由 Worker
+内部编排，不提供绕过策略引擎的公开“扫描并发送”接口。BOSS 运行只允许真实 CDP
+执行器，`MOCK` 运行只允许假执行器。
 
 ## 14. 第六阶段排期 API
 

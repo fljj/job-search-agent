@@ -215,9 +215,17 @@ users
 - `agent_runs.cursor`：第九阶段保存消息列表分区、虚拟滚动位置、下一游标、最后会话
   和消息 ID、扫描时间、是否到末尾及最近 500 个 `conversation_id:last_message_id`
   去重键；扫描到末尾后滚动位置归零，新消息仍可被发现。
+- `agent_runs.cursor.job_discovery`：第十阶段保存搜索条件键、虚拟滚动位置、下一游标、
+  最后/下次扫描时间、是否到末尾及最近 2000 个已见外部职位 ID。消息游标与职位游标
+  使用不同子键，轮询心跳更新不得覆盖两者。
+- `job_discovery_records`：按运行保存外部职位 ID、公司、标题、招聘人、内容哈希、处理
+  状态、原因码及关联职位/评分/动作；`(agent_run_id, external_job_id)` 唯一，确保刷新、
+  重排和进程恢复后不会重复处理。
 - `conversations.processing_lease_owner/processing_lease_expires_at`：消息发现的会话级
   短租约，防止多个执行者同时导入和决策同一对话。
 - `agent_run_events`：追加保存运行启动、租约轮询、草稿、动作、失败、熔断和恢复事件，不覆盖历史记录。
+- `automation_settings` 第十阶段增加职位扫描开关、全局紧急停止、小时/每日扫描上限、
+  公司/招聘人冷却小时数及工作开始/结束小时；多层配置采用最保守的有效值。
 - `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
 - `action_queue.policy_decision_id`：自动动作关联“模型建议 + 确定性约束”的最终策略决策。
 - `action_queue.strategy_id`：保存自动动作采用的策略范围。

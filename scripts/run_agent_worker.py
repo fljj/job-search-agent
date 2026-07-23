@@ -11,13 +11,17 @@ from contextlib import contextmanager
 from sqlalchemy import select
 
 from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.browser.job_discovery import BossJobDiscoveryAdapter
 from adapters.browser.message_discovery import BossMessageDiscoveryAdapter
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings
 from apps.api.app.core.database import SessionLocal
+from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.services.agent_service import pause_run, tick_run
+from apps.api.app.services.automation_service import _effective_rules
+from apps.api.app.services.job_discovery_service import process_job_discovery_batch
 from apps.api.app.services.message_discovery_service import persist_discovery_batch
 from packages.browser_worker.actions import ActionExecutor
 from packages.browser_worker.models import Platform
@@ -65,7 +69,13 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     run.platform, get_settings().agent_executor_mode
                 )
                 if run.platform == Platform.BOSS.value:
-                    cursor = run.cursor or {}
+                    root_cursor = run.cursor or {}
+                    raw_message_cursor = root_cursor.get("message_discovery")
+                    cursor = (
+                        raw_message_cursor
+                        if isinstance(raw_message_cursor, dict)
+                        else {}
+                    )
                     raw_position = cursor.get("scroll_position")
                     raw_seen = cursor.get("seen_message_keys")
                     try:
@@ -91,6 +101,57 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                         )
                         continue
                     persist_discovery_batch(session, run, worker_id, batch)
+                    rules = _effective_rules(
+                        session, run.platform, run.strategy_id
+                    )
+                    if rules.job_scan_enabled and not rules.emergency_stop:
+                        raw_job_cursor = (run.cursor or {}).get("job_discovery")
+                        job_cursor = (
+                            raw_job_cursor
+                            if isinstance(raw_job_cursor, dict)
+                            else {}
+                        )
+                        raw_job_position = job_cursor.get("scroll_position")
+                        raw_seen_jobs = job_cursor.get("seen_job_ids")
+                        try:
+                            job_batch = BossJobDiscoveryAdapter(
+                                get_browser_selectors()
+                            ).scan(
+                                cdp_url,
+                                search_key=str(
+                                    job_cursor.get("search_key") or "CURRENT_SEARCH"
+                                ),
+                                scroll_position=(
+                                    raw_job_position
+                                    if isinstance(raw_job_position, int)
+                                    else 0
+                                ),
+                                seen_job_ids=[
+                                    str(item)
+                                    for item in (
+                                        raw_seen_jobs
+                                        if isinstance(raw_seen_jobs, list)
+                                        else []
+                                    )
+                                ],
+                                limit=min(
+                                    get_settings().agent_tick_batch_size,
+                                    rules.hourly_scan_limit,
+                                ),
+                            )
+                        except ValueError:
+                            pause_run(
+                                session, run_id, ["JOB_DISCOVERY_UNAVAILABLE"]
+                            )
+                            continue
+                        process_job_discovery_batch(
+                            session,
+                            run,
+                            job_batch,
+                            provider=build_llm_provider(get_settings()),
+                            executor=executor,
+                            cdp_url=cdp_url,
+                        )
                 run.executor_type = executor_type
                 session.commit()
                 tick_run(

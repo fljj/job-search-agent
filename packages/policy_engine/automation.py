@@ -21,6 +21,14 @@ class AutomationRules(BaseModel):
     auto_resume_min_score: int = Field(default=60, ge=60, le=100)
     hourly_limit: int = Field(default=10, ge=1, le=100)
     daily_limit: int = Field(default=50, ge=1, le=1000)
+    emergency_stop: bool = False
+    job_scan_enabled: bool = False
+    hourly_scan_limit: int = Field(default=100, ge=1, le=1000)
+    daily_scan_limit: int = Field(default=500, ge=1, le=10000)
+    company_cooldown_hours: int = Field(default=24, ge=0, le=720)
+    recruiter_cooldown_hours: int = Field(default=24, ge=0, le=720)
+    work_start_hour: int = Field(default=8, ge=0, le=23)
+    work_end_hour: int = Field(default=22, ge=1, le=24)
 
 
 class AutomationContext(BaseModel):
@@ -51,6 +59,8 @@ def evaluate_automation(
     context: AutomationContext, rules: AutomationRules
 ) -> tuple[AutomationDecision, list[str]]:
     """用确定性顺序评估自动动作，前序拒绝不能被后序条件覆盖。"""
+    if rules.emergency_stop:
+        return AutomationDecision.DENY, ["EMERGENCY_STOP_ACTIVE"]
     if not rules.enabled or rules.paused:
         return AutomationDecision.DENY, ["AUTOMATION_DISABLED_OR_PAUSED"]
     if context.hourly_count >= rules.hourly_limit or context.daily_count >= rules.daily_limit:

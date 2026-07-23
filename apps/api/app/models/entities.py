@@ -554,6 +554,30 @@ class AutomationSetting(TimestampMixin, Base):
     auto_resume_min_score: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
     hourly_limit: Mapped[int] = mapped_column(Integer, default=10)
     daily_limit: Mapped[int] = mapped_column(Integer, default=50)
+    emergency_stop: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    job_scan_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    hourly_scan_limit: Mapped[int] = mapped_column(
+        Integer, default=100, server_default="100"
+    )
+    daily_scan_limit: Mapped[int] = mapped_column(
+        Integer, default=500, server_default="500"
+    )
+    company_cooldown_hours: Mapped[int] = mapped_column(
+        Integer, default=24, server_default="24"
+    )
+    recruiter_cooldown_hours: Mapped[int] = mapped_column(
+        Integer, default=24, server_default="24"
+    )
+    work_start_hour: Mapped[int] = mapped_column(
+        Integer, default=8, server_default="8"
+    )
+    work_end_hour: Mapped[int] = mapped_column(
+        Integer, default=22, server_default="22"
+    )
 
 
 class ActionAttempt(Base):
@@ -642,6 +666,41 @@ class AgentRunEvent(Base):
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JobDiscoveryRecord(Base):
+    __tablename__ = "job_discovery_records"
+    __table_args__ = (
+        UniqueConstraint("agent_run_id", "external_job_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    agent_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE")
+    )
+    external_job_id: Mapped[str] = mapped_column(String(200))
+    company_name: Mapped[str] = mapped_column(String(200))
+    job_title: Mapped[str] = mapped_column(String(200))
+    recruiter_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(40))
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    job_score_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("job_scores.id", ondelete="SET NULL"), nullable=True
+    )
+    action_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("action_queue.id", ondelete="SET NULL"), nullable=True
+    )
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class SchedulingPreference(TimestampMixin, Base):

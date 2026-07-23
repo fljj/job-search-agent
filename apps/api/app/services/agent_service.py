@@ -242,7 +242,9 @@ def tick_run(
     if run.failure_count == failure_count_before:
         run.consecutive_failure_count = 0
     run.heartbeat_at = current
-    run.cursor = {"last_tick_at": current.isoformat()}
+    cursor = dict(run.cursor or {})
+    cursor["last_tick_at"] = current.isoformat()
+    run.cursor = cursor
     _release_lease(session, run)
     run.version += 1
     _event(session, run.id, "TICK_COMPLETED", metadata={"processed": processed})

@@ -124,7 +124,8 @@ def persist_discovery_batch(
         conversation.processing_lease_expires_at = None
         _discovery_event(session, run, item, ["CONVERSATION_IMPORTED"])
         _record_state_sequence(session, run, item, ["RETURNING_TO_LIST"])
-    run.cursor = {
+    root_cursor = dict(run.cursor or {})
+    root_cursor["message_discovery"] = {
         "discovery_state": "LIST_READY",
         "partition": batch.partition,
         "scroll_position": 0 if batch.exhausted else batch.scroll_position,
@@ -139,6 +140,7 @@ def persist_discovery_batch(
         "seen_message_keys": batch.seen_message_keys,
         "exhausted": batch.exhausted,
     }
+    run.cursor = root_cursor
     session.commit()
     return counts
 

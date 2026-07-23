@@ -164,6 +164,135 @@ def dispatch(
             "failure_code": result.failure_code}
 
 
+def dispatch_proactive_greeting(
+    session: Session,
+    job_id: UUID,
+    draft_id: UUID,
+    recruiter_name: str,
+    cdp_url: str,
+    *,
+    executor: ActionExecutor,
+    agent_run_id: UUID,
+) -> dict[str, object]:
+    job = session.get(db.Job, job_id)
+    draft = session.get(db.GeneratedDraft, draft_id)
+    if job is None or job.user_id != DEFAULT_USER_ID:
+        raise ResourceNotFoundError("职位不存在")
+    if draft is None or draft.user_id != DEFAULT_USER_ID:
+        raise ResourceNotFoundError("招呼草稿不存在")
+    score = _score_for_draft(session, draft, job.id)
+    rules = _effective_rules(session, "BOSS", score.strategy_id)
+    original = session.scalar(
+        select(db.PolicyDecision)
+        .where(db.PolicyDecision.draft_id == draft.id)
+        .order_by(db.PolicyDecision.created_at.asc())
+    )
+    if original is None:
+        raise ValueError("招呼草稿缺少原始策略决策")
+    counts = _rate_counts(session, "BOSS")
+    context = AutomationContext(
+        action_type="GREETING",
+        score=score.total_score,
+        grade=score.grade,
+        eligible=(
+            score.automation_eligible
+            and not score.hard_rejected
+            and score.eligibility == "ELIGIBLE"
+        ),
+        job_open=score.effective_job_status == "OPEN",
+        confidence=float(draft.confidence),
+        original_decision=original.decision,
+        has_verified_facts=bool(draft.fact_ids),
+        hourly_count=counts[0],
+        daily_count=counts[1],
+    )
+    decision, reasons = evaluate_automation(context, rules)
+    missing = _proactive_safety_gaps(job, recruiter_name)
+    if missing:
+        decision = AutomationDecision.DENY
+        reasons = missing
+    policy = db.PolicyDecision(
+        user_id=DEFAULT_USER_ID,
+        draft_id=draft.id,
+        action_type="GREETING",
+        decision=decision.value,
+        reason_codes=reasons,
+        policy_version=POLICY_VERSION,
+        input_snapshot={
+            "rules": rules.model_dump(mode="json"),
+            "context": context.model_dump(mode="json"),
+        },
+    )
+    session.add(policy)
+    session.flush()
+    if decision is not AutomationDecision.ALLOW_AUTO:
+        _audit(session, "AUTOMATION_DECIDED", policy.id, None, decision.value, reasons)
+        session.commit()
+        return {"decision": decision.value, "reason_codes": reasons}
+    fingerprint = hashlib.sha256(
+        f"BOSS:GREETING:{job.external_job_id or job.id}".encode()
+    ).hexdigest()
+    existing = session.scalar(
+        select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == fingerprint)
+    )
+    if existing:
+        return {
+            "decision": "DENY",
+            "reason_codes": ["GREETING_ALREADY_EXISTS"],
+            "action_id": existing.id,
+            "action_status": existing.status,
+        }
+    action = db.ActionQueue(
+        user_id=DEFAULT_USER_ID,
+        policy_decision_id=policy.id,
+        strategy_id=score.strategy_id,
+        authorization_source="AUTO",
+        agent_run_id=agent_run_id,
+        job_id=job.id,
+        draft_id=draft.id,
+        action_type="GREETING",
+        status=ActionStatus.APPROVED.value,
+        content=draft.content,
+        delivery_mode="PLATFORM_DEFAULT",
+        platform="BOSS",
+        target_company=job.company_name,
+        target_job_title=job.title,
+        target_recruiter=recruiter_name,
+        idempotency_key=f"auto:{fingerprint}",
+        send_fingerprint=fingerprint,
+        approved_at=datetime.now(UTC),
+    )
+    session.add(action)
+    session.flush()
+    _audit(session, "AUTO_ACTION_ALLOWED", action.id, None, "APPROVED", reasons)
+    session.commit()
+    result = execute_action(session, action.id, cdp_url, executor)
+    if result.status in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
+        _pause_platform(session, "BOSS", result.failure_code or result.status)
+    return {
+        "decision": decision.value,
+        "reason_codes": reasons,
+        "action_id": result.id,
+        "action_status": result.status,
+        "failure_code": result.failure_code,
+    }
+
+
+def _proactive_safety_gaps(job: db.Job, recruiter_name: str) -> list[str]:
+    reasons: list[str] = []
+    if not job.company_name or job.company_name in {"匿名公司", "某公司", "保密"}:
+        reasons.append("ANONYMOUS_COMPANY")
+    if job.work_mode == "UNKNOWN":
+        reasons.append("WORK_MODE_UNKNOWN")
+    if not job.salary_text:
+        reasons.append("SALARY_UNKNOWN")
+    if not recruiter_name:
+        reasons.append("RECRUITER_UNKNOWN")
+    if not job.external_job_id:
+        reasons.append("EXTERNAL_JOB_ID_MISSING")
+    return reasons
+
+
 def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> AutomationRules:
     rows = session.scalars(select(db.AutomationSetting).where(
         db.AutomationSetting.user_id == DEFAULT_USER_ID,
@@ -191,6 +320,20 @@ def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> Auto
         rules.auto_resume_min_score = max(rules.auto_resume_min_score, row.auto_resume_min_score)
         rules.hourly_limit = min(rules.hourly_limit, row.hourly_limit)
         rules.daily_limit = min(rules.daily_limit, row.daily_limit)
+        rules.emergency_stop = rules.emergency_stop or row.emergency_stop
+        rules.job_scan_enabled = rules.job_scan_enabled and row.job_scan_enabled
+        rules.hourly_scan_limit = min(
+            rules.hourly_scan_limit, row.hourly_scan_limit
+        )
+        rules.daily_scan_limit = min(rules.daily_scan_limit, row.daily_scan_limit)
+        rules.company_cooldown_hours = max(
+            rules.company_cooldown_hours, row.company_cooldown_hours
+        )
+        rules.recruiter_cooldown_hours = max(
+            rules.recruiter_cooldown_hours, row.recruiter_cooldown_hours
+        )
+        rules.work_start_hour = max(rules.work_start_hour, row.work_start_hour)
+        rules.work_end_hour = min(rules.work_end_hour, row.work_end_hour)
     return rules
 
 
@@ -203,6 +346,14 @@ def _rules(row: db.AutomationSetting) -> AutomationRules:
         auto_reply_min_confidence=float(row.auto_reply_min_confidence),
         auto_resume_enabled=row.auto_resume_enabled, auto_resume_min_score=row.auto_resume_min_score,
         hourly_limit=row.hourly_limit, daily_limit=row.daily_limit,
+        emergency_stop=row.emergency_stop,
+        job_scan_enabled=row.job_scan_enabled,
+        hourly_scan_limit=row.hourly_scan_limit,
+        daily_scan_limit=row.daily_scan_limit,
+        company_cooldown_hours=row.company_cooldown_hours,
+        recruiter_cooldown_hours=row.recruiter_cooldown_hours,
+        work_start_hour=row.work_start_hour,
+        work_end_hour=row.work_end_hour,
     )
 
 
@@ -216,6 +367,9 @@ def _score_for_draft(session: Session, draft: db.GeneratedDraft, job_id: UUID) -
     strategy = session.get(db.JobStrategy, score.strategy_id)
     if strategy is None or score.strategy_version != strategy.version:
         raise ValueError("评分使用的策略版本已过期，必须重新评分")
+    profile = session.get(db.CandidateProfile, score.candidate_profile_id)
+    if profile is None or score.profile_version != profile.version:
+        raise ValueError("评分使用的候选人资料版本已过期，必须重新评分")
     return score
 
 

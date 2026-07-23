@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.browser.job_discovery import DiscoveredJob, JobDiscoveryBatch
 from adapters.browser.message_discovery import (
     DiscoveredConversation,
     MessageDiscoveryBatch,
@@ -20,6 +21,7 @@ from apps.api.app.models import entities  # noqa: F401
 from apps.api.app.schemas.browser import BrowserReadRequest
 from apps.api.app.services.agent_service import tick_run
 from apps.api.app.services.browser_service import persist_read_result
+from apps.api.app.services.job_discovery_service import process_job_discovery_batch
 from apps.api.app.services.message_discovery_service import persist_discovery_batch
 from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
 from packages.browser_worker.models import (
@@ -287,6 +289,10 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "auto_reply_enabled": True, "auto_reply_min_confidence": 0.9,
         "auto_resume_enabled": True, "auto_resume_min_score": 60,
         "hourly_limit": 10, "daily_limit": 50,
+        "job_scan_enabled": True, "hourly_scan_limit": 100,
+        "daily_scan_limit": 500, "company_cooldown_hours": 24,
+        "recruiter_cooldown_hours": 24, "work_start_hour": 8,
+        "work_end_hour": 22, "emergency_stop": False,
     }
     saved_setting = client.put("/api/v1/automation/settings", json=automation_setting)
     assert saved_setting.status_code == 200
@@ -470,7 +476,9 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
             "paused": 0,
             "skipped": 0,
         }
-        assert run_entity.cursor["scroll_position"] == 0
+        message_cursor = run_entity.cursor["message_discovery"]
+        assert isinstance(message_cursor, dict)
+        assert message_cursor["scroll_position"] == 0
         assert discovery_session.scalar(
             select(entities.Message)
             .join(entities.Conversation)
@@ -482,6 +490,97 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         json={"worker_id": "api-without-real-executor"},
     )
     assert unsafe_boss_tick.status_code == 400
+    proactive_now = datetime(2026, 7, 23, 2, 0, tzinfo=UTC)
+    proactive_summary = BrowserJob(
+        external_job_id="proactive-job-1",
+        title="Java后端工程师",
+        company_name="主动发现测试公司",
+        industry="互联网",
+        location="远程",
+        work_mode="REMOTE",
+        salary_text="40K-45K",
+        recruiter_name="主动发现招聘人",
+        description="5年以上Java、Spring Boot和MySQL经验",
+        source_status="OPEN",
+    )
+    with Session(lease_engine, expire_on_commit=False) as discovery_session:
+        run_entity = discovery_session.get(entities.AgentRun, discovery_run_id)
+        assert run_entity is not None
+        proactive_counts = process_job_discovery_batch(
+            discovery_session,
+            run_entity,
+            JobDiscoveryBatch(
+                platform=Platform.BOSS,
+                search_key="java",
+                scroll_position=1,
+                scanned_at=proactive_now,
+                next_scan_at=proactive_now + timedelta(seconds=30),
+                seen_job_ids=["proactive-job-1"],
+                exhausted=True,
+                items=[DiscoveredJob(
+                    summary={
+                        "external_job_id": "proactive-job-1",
+                        "title": "Java后端工程师",
+                        "company_name": "主动发现测试公司",
+                    },
+                    detail=ReadResult(
+                        platform=Platform.BOSS,
+                        status=SessionStatus.SESSION_READY,
+                        page_type=PageType.JOB,
+                        page_url="https://www.zhipin.com/job_detail/proactive-job-1.html",
+                        page_title="Java后端工程师",
+                        content_hash="c" * 64,
+                        selector_version="fixture",
+                        job=proactive_summary,
+                    ),
+                )],
+            ),
+            provider=FakeLlmProvider(),
+            executor=FakeActionExecutor(),
+            cdp_url="http://127.0.0.1:9222",
+            now=proactive_now,
+        )
+        assert proactive_counts == {
+            "discovered": 1,
+            "scored": 1,
+            "contacted": 1,
+            "skipped": 0,
+        }
+        repeated_counts = process_job_discovery_batch(
+            discovery_session,
+            run_entity,
+            JobDiscoveryBatch(
+                platform=Platform.BOSS,
+                search_key="java",
+                scroll_position=1,
+                scanned_at=proactive_now + timedelta(minutes=1),
+                next_scan_at=proactive_now + timedelta(minutes=2),
+                seen_job_ids=["proactive-job-1"],
+                exhausted=True,
+                items=[DiscoveredJob(
+                    summary={
+                        "external_job_id": "proactive-job-1",
+                        "title": "Java后端工程师",
+                        "company_name": "主动发现测试公司",
+                    },
+                    detail=ReadResult(
+                        platform=Platform.BOSS,
+                        status=SessionStatus.SESSION_READY,
+                        page_type=PageType.JOB,
+                        page_url="https://www.zhipin.com/job_detail/proactive-job-1.html",
+                        page_title="Java后端工程师",
+                        content_hash="c" * 64,
+                        selector_version="fixture",
+                        job=proactive_summary,
+                    ),
+                )],
+            ),
+            provider=FakeLlmProvider(),
+            executor=FakeActionExecutor(),
+            cdp_url="http://127.0.0.1:9222",
+            now=proactive_now + timedelta(minutes=2),
+        )
+        assert repeated_counts["contacted"] == 0
     duplicate_start = client.post("/api/v1/automation/runs", json={
         "platform": "MOCK", "strategy_id": strategy_id,
     })
