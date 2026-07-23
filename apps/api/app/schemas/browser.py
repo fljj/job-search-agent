@@ -2,7 +2,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from packages.browser_worker.models import PageType, Platform, SessionStatus
+from packages.browser_worker.models import (
+    BrowserConversationSummary,
+    BrowserJobSummary,
+    PageType,
+    Platform,
+    SessionStatus,
+)
 
 
 class BrowserReadRequest(BaseModel):
@@ -20,6 +26,9 @@ class BrowserReadResponse(BaseModel):
     status: SessionStatus
     page_type: PageType | None
     reason_codes: list[str]
+    cursor: str | None
+    jobs: list[BrowserJobSummary]
+    conversations: list[BrowserConversationSummary]
     imported_job_id: UUID | None
     imported_conversation_id: UUID | None
     imported_message_ids: list[UUID]

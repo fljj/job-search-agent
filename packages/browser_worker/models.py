@@ -18,8 +18,22 @@ class SessionStatus(StrEnum):
 
 
 class PageType(StrEnum):
+    JOB_LIST = "JOB_LIST"
     JOB = "JOB"
+    CONVERSATION_LIST = "CONVERSATION_LIST"
     CONVERSATION = "CONVERSATION"
+
+
+class MessageDirection(StrEnum):
+    INBOUND = "INBOUND"
+    OUTBOUND = "OUTBOUND"
+
+
+class BrowserJobSummary(BaseModel):
+    external_job_id: str
+    title: str
+    company_name: str
+    detail_url: str | None = None
 
 
 class BrowserJob(BaseModel):
@@ -30,6 +44,7 @@ class BrowserJob(BaseModel):
     location: str | None = None
     work_mode: str = "UNKNOWN"
     salary_text: str | None = None
+    recruiter_name: str | None = None
     description: str
 
 
@@ -37,11 +52,22 @@ class BrowserMessage(BaseModel):
     external_message_id: str
     content: str
     received_at: datetime
+    direction: MessageDirection = MessageDirection.INBOUND
+
+
+class BrowserConversationSummary(BaseModel):
+    external_conversation_id: str
+    recruiter_name: str
+    job_title: str | None = None
+    company_name: str | None = None
+    unread_count: int = 0
 
 
 class BrowserConversation(BaseModel):
     external_conversation_id: str
     recruiter_name: str
+    job_title: str | None = None
+    company_name: str | None = None
     messages: list[BrowserMessage] = Field(default_factory=list)
 
 
@@ -53,6 +79,9 @@ class ReadResult(BaseModel):
     page_title: str
     content_hash: str
     selector_version: str
+    cursor: str | None = None
+    jobs: list[BrowserJobSummary] = Field(default_factory=list)
+    conversations: list[BrowserConversationSummary] = Field(default_factory=list)
     job: BrowserJob | None = None
     conversation: BrowserConversation | None = None
     reason_codes: list[str] = Field(default_factory=list)

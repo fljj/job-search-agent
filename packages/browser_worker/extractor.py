@@ -5,8 +5,11 @@ from urllib.parse import urlparse
 from packages.browser_worker.config import PlatformSelectors
 from packages.browser_worker.models import (
     BrowserConversation,
+    BrowserConversationSummary,
     BrowserJob,
+    BrowserJobSummary,
     BrowserMessage,
+    MessageDirection,
     PageType,
     Platform,
     ReadResult,
@@ -35,8 +38,36 @@ def extract_current_page(
                             expected_company, expected_job_title)
     if page.exists(selectors.conversation_root):
         return _extract_conversation(page, platform, selectors, selector_version, expected_recruiter)
+    if page.exists(selectors.job_list_root):
+        return _extract_job_list(page, platform, selectors, selector_version)
+    if page.exists(selectors.conversation_list_root):
+        return _extract_conversation_list(page, platform, selectors, selector_version)
     return _failure(page, platform, selector_version, SessionStatus.SESSION_PAGE_CHANGED,
                     "SUPPORTED_PAGE_ROOT_NOT_FOUND")
+
+
+def _extract_job_list(
+    page: PageReader, platform: Platform, selectors: PlatformSelectors, version: str,
+) -> ReadResult:
+    jobs: list[BrowserJobSummary] = []
+    for element in page.elements(selectors.job_list_items):
+        external_id = element.attribute("", selectors.job_list_item_id_attribute)
+        title = element.text(selectors.job_list_item_title)
+        company = _normalize_company_name(element.text(selectors.job_list_item_company))
+        if not external_id or not title or not company:
+            return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
+                            "REQUIRED_JOB_LIST_FIELD_MISSING")
+        jobs.append(BrowserJobSummary(
+            external_job_id=external_id,
+            title=title,
+            company_name=company,
+            detail_url=element.attribute(selectors.job_list_item_link, "href"),
+        ))
+    if not jobs:
+        return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
+                        "JOB_LIST_EMPTY")
+    cursor = page.attribute(selectors.job_list_root, selectors.next_cursor_attribute)
+    return _success(page, platform, version, PageType.JOB_LIST, jobs=jobs, cursor=cursor)
 
 
 def _extract_job(
@@ -58,8 +89,45 @@ def _extract_job(
                      title=title, company_name=company, industry=page.text(selectors.industry),
                      location=page.text(selectors.location),
                      work_mode=_normalize_work_mode(page.text(selectors.work_mode)),
-                     salary_text=page.text(selectors.salary), description=description)
+                     salary_text=page.text(selectors.salary),
+                     recruiter_name=page.text(selectors.recruiter_on_job),
+                     description=description)
     return _success(page, platform, version, PageType.JOB, job=job)
+
+
+def _extract_conversation_list(
+    page: PageReader, platform: Platform, selectors: PlatformSelectors, version: str,
+) -> ReadResult:
+    conversations: list[BrowserConversationSummary] = []
+    for element in page.elements(selectors.conversation_list_items):
+        external_id = element.attribute("", selectors.conversation_list_item_id_attribute)
+        recruiter = element.text(selectors.conversation_list_item_recruiter)
+        if not external_id or not recruiter:
+            return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
+                            "REQUIRED_CONVERSATION_LIST_FIELD_MISSING")
+        unread = element.attribute("", selectors.conversation_list_item_unread_attribute)
+        try:
+            unread_count = max(0, int(unread or "0"))
+        except ValueError:
+            return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
+                            "INVALID_UNREAD_COUNT")
+        conversations.append(BrowserConversationSummary(
+            external_conversation_id=external_id,
+            recruiter_name=recruiter,
+            job_title=element.text(selectors.conversation_list_item_job_title),
+            company_name=_normalize_company_name(
+                element.text(selectors.conversation_list_item_company)
+            ),
+            unread_count=unread_count,
+        ))
+    if not conversations:
+        return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
+                        "CONVERSATION_LIST_EMPTY")
+    cursor = page.attribute(selectors.conversation_list_root, selectors.next_cursor_attribute)
+    return _success(
+        page, platform, version, PageType.CONVERSATION_LIST,
+        conversations=conversations, cursor=cursor,
+    )
 
 
 def _extract_conversation(
@@ -82,20 +150,44 @@ def _extract_conversation(
         external_id = element.attribute("", selectors.message_id_attribute) or _hash(
             f"{conversation_id}:{index}:{content}"
         )
-        messages.append(BrowserMessage(external_message_id=external_id, content=content,
-                                       received_at=datetime.now(UTC)))
+        raw_time = element.attribute("", selectors.message_time_attribute)
+        try:
+            received_at = datetime.fromisoformat(raw_time) if raw_time else datetime.now(UTC)
+        except ValueError:
+            return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
+                            "INVALID_MESSAGE_TIME")
+        direction = (
+            MessageDirection.OUTBOUND
+            if element.attribute("", selectors.message_direction_attribute) == "outbound"
+            else MessageDirection.INBOUND
+        )
+        messages.append(BrowserMessage(
+            external_message_id=external_id,
+            content=content,
+            received_at=received_at,
+            direction=direction,
+        ))
     conversation = BrowserConversation(external_conversation_id=conversation_id,
-                                       recruiter_name=recruiter, messages=messages)
+                                       recruiter_name=recruiter,
+                                       job_title=page.text(selectors.job_title),
+                                       company_name=_normalize_company_name(
+                                           page.text(selectors.company)
+                                       ),
+                                       messages=messages)
     return _success(page, platform, version, PageType.CONVERSATION, conversation=conversation)
 
 
 def _success(page: PageReader, platform: Platform, version: str, page_type: PageType,
              job: BrowserJob | None = None,
-             conversation: BrowserConversation | None = None) -> ReadResult:
+             conversation: BrowserConversation | None = None,
+             jobs: list[BrowserJobSummary] | None = None,
+             conversations: list[BrowserConversationSummary] | None = None,
+             cursor: str | None = None) -> ReadResult:
     return ReadResult(platform=platform, status=SessionStatus.SESSION_READY,
                       page_type=page_type, page_url=page.url, page_title=page.title,
                       content_hash=_evidence_hash(page, job, conversation),
-                      selector_version=version, job=job, conversation=conversation)
+                      selector_version=version, job=job, conversation=conversation,
+                      jobs=jobs or [], conversations=conversations or [], cursor=cursor)
 
 
 def _failure(page: PageReader, platform: Platform, version: str, status: SessionStatus,

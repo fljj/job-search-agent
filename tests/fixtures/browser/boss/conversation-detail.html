@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+  <head><title>BOSS 对话详情夹具</title></head>
+  <body>
+    <div data-testid="user-avatar">已登录</div>
+    <main data-testid="chat-panel" data-conversation-id="boss-chat-1">
+      <span data-testid="recruiter-name">张招聘</span>
+      <span data-testid="job-title">高级 Python 后端工程师</span>
+      <span data-testid="company-name">示例科技</span>
+      <article data-testid="message-item" data-message-id="message-1"
+               data-direction="inbound" data-sent-at="2026-07-23T09:00:00+08:00">
+        <span data-testid="message-content">方便发一份简历吗？</span>
+      </article>
+      <textarea data-testid="message-composer"></textarea>
+      <button data-testid="send-message" onclick="sendMessage()">发送</button>
+      <button data-testid="send-resume" onclick="showResumes()">发送简历</button>
+      <section id="resumes" hidden>
+        <button data-testid="resume-item" onclick="selectResume(this)">后端开发简历</button>
+        <button data-testid="confirm-send-resume" onclick="sendResume()">确认</button>
+      </section>
+    </main>
+    <script>
+      let selectedResume = "";
+      function sendMessage() {
+        const content = document.querySelector("[data-testid='message-composer']").value;
+        const item = document.createElement("article");
+        item.dataset.testid = "message-item";
+        item.dataset.direction = "outbound";
+        item.innerHTML = `<span data-testid="message-content">${content}</span>`;
+        document.querySelector("[data-testid='chat-panel']").appendChild(item);
+      }
+      function showResumes() { document.querySelector("#resumes").hidden = false; }
+      function selectResume(element) { selectedResume = element.textContent.trim(); }
+      function sendResume() {
+        const item = document.createElement("div");
+        item.dataset.testid = "sent-resume";
+        item.textContent = selectedResume;
+        document.querySelector("[data-testid='chat-panel']").appendChild(item);
+      }
+    </script>
+  </body>
+</html>

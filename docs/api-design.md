@@ -251,7 +251,7 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 - `POST /api/v1/browser/read-current`：连接用户手动启动的本机 CDP 会话，读取当前聚焦页面。
 - `GET /api/v1/browser/sessions`：查看 BOSS/脉脉最后只读检查状态和原因码。
 
-`read-current` 请求包含 `platform`、`cdp_url`，并可选包含 `job_id/expected_company/expected_job_title/expected_recruiter`。读取对话页时 `job_id` 必填。
+`read-current` 请求包含 `platform`、`cdp_url`，并可选包含 `job_id/expected_company/expected_job_title/expected_recruiter`。读取对话详情页时 `job_id` 必填。响应通过 `page_type` 区分 `JOB_LIST/JOB/CONVERSATION_LIST/CONVERSATION`；列表页返回 `cursor` 以及 `jobs` 或 `conversations`，重复读取返回首次保存的相同脱敏列表快照。
 
 只允许本机 `localhost/127.0.0.1/::1` HTTP(S) CDP 端点且 URL 不得包含凭证。返回会话状态、页面类型、原因码、导入资源 ID、证据 ID 和重复标记。
 

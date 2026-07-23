@@ -1,6 +1,6 @@
 # job-search-agent
 
-半自动求职 Agent。当前实现前六个阶段：职位评分、知识库与沟通草稿、BOSS/脉脉只读接入、人工确认发送、安全自动沟通，以及电话/面试时间解析与本地假日历冲突检查。
+半自动求职 Agent。当前已实现职位评分、LLM 解析与沟通、Agent 安全循环，以及 BOSS 本地脱敏页面夹具的读取和受控写入验证。
 
 ## 技术栈
 
@@ -88,7 +88,7 @@ python scripts/run_agent_worker.py
 open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=/tmp/job-agent-browser-profile
 ```
 
-然后手动打开职位详情或对话页，在前端“招聘网站只读”页执行读取。只允许 `localhost/127.0.0.1/::1` CDP 端点，不保存账号、密码或 Cookie。
+然后手动打开职位列表、职位详情、对话列表或对话详情页，在前端“招聘网站只读”页执行读取。只允许 `localhost/127.0.0.1/::1` CDP 端点，不保存账号、密码或 Cookie。
 
 前端提供候选人资料编辑、策略创建/编辑、模拟 JD 导入、解析、评分和结果明细查看。
 
@@ -97,6 +97,7 @@ open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=/tm
 ## 验证
 
 ```bash
+playwright install chromium
 pytest
 ruff check .
 mypy .
@@ -122,8 +123,9 @@ PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQ
 
 ## 当前范围限制
 
-- BOSS 直聘和脉脉只允许用户主动触发的当前页读取，不做后台扫描。
-- 只有人工确认且执行前复核通过的动作才能发送；没有自动发送。
+- BOSS 已覆盖职位列表/详情、对话列表/详情、文本及站内附件简历的本地夹具；脉脉仍只保留当前页基础适配。
+- 第六阶段默认测试只使用脱敏 HTML 和本地无头 Chromium，不登录或操作真实账号。
+- 真实平台写操作尚未接入 Agent 循环，需在第七阶段按限速步骤受控联调。
 - 简历仅能从已登记且平台页面中唯一匹配的附件中选择，不上传本地文件。
 - 不接入日历。
 - 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。

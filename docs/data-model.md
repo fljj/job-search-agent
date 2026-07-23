@@ -188,7 +188,7 @@ users
 ## 6. 第三阶段数据表
 
 - `platform_sessions`：用户和平台唯一，仅保存无凭证的本机 CDP 端点、会话状态、原因码和最后检查时间。
-- `browser_read_runs`：追加保存平台、状态、页面类型、原因码、导入对象 ID 及输入指纹；`input_fingerprint` 唯一。
+- `browser_read_runs`：追加保存平台、状态、页面类型、原因码、列表游标、脱敏列表提取结果、导入对象 ID 及输入指纹；`input_fingerprint` 唯一。列表结果保存在 `extracted_items` JSONB，职位/对话详情仍通过外键指向正式业务实体。
 - `page_evidence`：每次读取记录唯一，保存已去除 query/fragment 的 URL、页面标题、内容哈希、选择器版本和捕获时间；不保存 Cookie、Token 或完整 HTML。
 
 第三阶段重复读取使用“平台 + 状态 + 页面类型 + 内容哈希 + 原因码”生成指纹。职位、对话和消息同时受已有来源唯一约束保护。

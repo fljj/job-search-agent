@@ -450,6 +450,8 @@ class BrowserReadRun(Base):
     page_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     input_fingerprint: Mapped[str] = mapped_column(String(64))
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    cursor: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    extracted_items: Mapped[list[dict[str, object]]] = mapped_column(JSONB, default=list)
     imported_job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
     imported_conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
     imported_message_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)

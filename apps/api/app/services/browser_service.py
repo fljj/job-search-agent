@@ -21,7 +21,7 @@ from apps.api.app.services.conversation_service import create_conversation, impo
 from apps.api.app.services.errors import DependencyUnavailableError
 from apps.api.app.services.job_service import get_job_entity, import_job
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
-from packages.browser_worker.models import Platform, ReadResult, SessionStatus
+from packages.browser_worker.models import MessageDirection, Platform, ReadResult, SessionStatus
 
 
 def read_current_page(session: Session, payload: BrowserReadRequest) -> BrowserReadResponse:
@@ -54,6 +54,11 @@ def persist_read_result(
         platform=payload.platform.value, status=result.status.value,
         page_type=result.page_type.value if result.page_type else None,
         input_fingerprint=fingerprint, reason_codes=result.reason_codes,
+        cursor=result.cursor,
+        extracted_items=(
+            [item.model_dump(mode="json") for item in result.jobs]
+            or [item.model_dump(mode="json") for item in result.conversations]
+        ),
     )
     session.add(run)
     session.flush()
@@ -110,7 +115,8 @@ def _import_extraction(
                 external_message_id=item.external_message_id, content=item.content,
                 received_at=item.received_at,
             )
-        ).id) for item in result.conversation.messages]
+        ).id) for item in result.conversation.messages
+            if item.direction is MessageDirection.INBOUND]
 
 
 def _upsert_platform_session(
@@ -138,6 +144,13 @@ def _response(session: Session, run: db.BrowserReadRun, duplicate: bool = False)
         raise RuntimeError("浏览器读取记录缺少证据")
     return BrowserReadResponse(id=run.id, platform=run.platform, status=run.status,
                                page_type=run.page_type, reason_codes=run.reason_codes,
+                               cursor=run.cursor,
+                               jobs=run.extracted_items if run.page_type == "JOB_LIST" else [],
+                               conversations=(
+                                   run.extracted_items
+                                   if run.page_type == "CONVERSATION_LIST"
+                                   else []
+                               ),
                                imported_job_id=run.imported_job_id,
                                imported_conversation_id=run.imported_conversation_id,
                                imported_message_ids=run.imported_message_ids,

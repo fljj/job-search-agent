@@ -294,6 +294,21 @@ JD、招聘方消息和网页文本均视为不可信数据，不得与系统指
 
 `playwright_reader` 仅实现定位、可见性、文本、属性和页面焦点读取，不包含 `click/fill/type/upload`。第四阶段的有限写操作单独位于 `playwright_actions`，只接收已批准命令。选择器失效或目标不匹配时只记录失败状态。
 
+## 10.1 第六阶段 BOSS 模拟适配流程
+
+```text
+职位列表（列表项 + next cursor）→ 职位详情（职位/公司/招聘人身份）
+对话列表（未读数 + next cursor）→ 对话详情（消息 ID/方向/时间）
+→ 服务端策略产生 ApprovedCommand
+→ playwright_actions 执行前重新读取并核对目标
+→ 本地夹具模拟文本或站内附件发送
+→ 回读出站消息/简历节点 → SUCCEEDED 或 OUTCOME_UNKNOWN
+```
+
+选择器集中在带版本号的 `config/browser-selectors.json`。`playwright_actions.execute_on_page`
+是受控 CDP 和本地夹具共用的单动作执行边界；它不做评分或授权。页面根节点、
+必填字段、消息时间或目标身份变化时，适配器返回安全失败且不执行写操作。
+
 ## 11. 第四阶段人工执行流程
 
 ```text

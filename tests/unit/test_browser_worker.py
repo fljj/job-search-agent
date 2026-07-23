@@ -1,11 +1,14 @@
 from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
 
 from adapters.browser.playwright_reader import validate_local_cdp_url
 from apps.api.app.core.browser_config import get_browser_selectors
+from packages.browser_worker.config import PlatformSelectors
 from packages.browser_worker.extractor import extract_current_page
 from packages.browser_worker.models import PageType, Platform, SessionStatus
+from packages.browser_worker.ports import ElementReader
 
 
 @dataclass
@@ -30,11 +33,11 @@ class FakePage(FakeElement):
     def exists(self, selector: str) -> bool:
         return selector in self.visible
 
-    def elements(self, selector: str) -> list[FakeElement]:
-        return self.element_lists.get(selector, [])
+    def elements(self, selector: str) -> list[ElementReader]:
+        return [cast(ElementReader, item) for item in self.element_lists.get(selector, [])]
 
 
-def job_page(platform: Platform) -> tuple[FakePage, object]:
+def job_page(platform: Platform) -> tuple[FakePage, PlatformSelectors]:
     config = get_browser_selectors()
     selectors = config.platforms[platform.value]
     host = "www.zhipin.com" if platform is Platform.BOSS else "maimai.cn"
@@ -83,6 +86,49 @@ def test_extracts_conversation_messages() -> None:
     result = extract_current_page(page, Platform.BOSS, selectors, "v1")
     assert result.page_type is PageType.CONVERSATION
     assert result.conversation and result.conversation.messages[0].external_message_id == "message-1"
+
+
+def test_job_list_missing_required_field_stops_discovery() -> None:
+    config = get_browser_selectors()
+    selectors = config.platforms["BOSS"]
+    page = FakePage(url="https://www.zhipin.com/web/geek/job")
+    page.visible = {selectors.login_marker, selectors.job_list_root}
+    page.element_lists = {
+        selectors.job_list_items: [
+            FakeElement(
+                texts={selectors.job_list_item_title: "缺少公司字段"},
+                attributes={
+                    ("", selectors.job_list_item_id_attribute): "job-1",
+                },
+            )
+        ]
+    }
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+    assert result.status is SessionStatus.SESSION_PAGE_CHANGED
+    assert result.reason_codes == ["REQUIRED_JOB_LIST_FIELD_MISSING"]
+
+
+def test_invalid_message_time_stops_conversation_read() -> None:
+    config = get_browser_selectors()
+    selectors = config.platforms["BOSS"]
+    page = FakePage(url="https://www.zhipin.com/web/geek/chat")
+    page.visible = {selectors.login_marker, selectors.conversation_root}
+    page.texts = {selectors.recruiter: "张HR"}
+    page.attributes = {(selectors.conversation_id, "data-conversation-id"): "chat-1"}
+    page.element_lists = {
+        selectors.message_items: [
+            FakeElement(
+                texts={selectors.message_content: "您好"},
+                attributes={
+                    ("", selectors.message_id_attribute): "message-1",
+                    ("", selectors.message_time_attribute): "not-a-time",
+                },
+            )
+        ]
+    }
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+    assert result.status is SessionStatus.SESSION_PAGE_CHANGED
+    assert result.reason_codes == ["INVALID_MESSAGE_TIME"]
 
 
 @pytest.mark.parametrize(("visible_extra", "expected", "reason"), [
