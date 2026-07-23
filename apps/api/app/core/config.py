@@ -21,10 +21,21 @@ class Settings(BaseSettings):
     agent_failure_threshold: int = Field(default=3, ge=1, le=20)
     agent_poll_interval_seconds: int = Field(default=10, ge=1, le=300)
     agent_executor_mode: Literal["REAL", "FAKE"] = "REAL"
+    calendar_provider: Literal["MOCK", "GOOGLE"] = "MOCK"
+    google_calendar_access_token: SecretStr | None = None
+    google_calendar_id: str = "primary"
+    calendar_timeout_seconds: int = Field(default=10, ge=1, le=60)
 
     @property
     def llm_configured(self) -> bool:
         return self.llm_api_key is not None and bool(self.llm_api_key.get_secret_value())
+
+    @property
+    def calendar_configured(self) -> bool:
+        if self.calendar_provider == "MOCK":
+            return True
+        token = self.google_calendar_access_token
+        return token is not None and bool(token.get_secret_value())
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

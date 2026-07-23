@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.v1.helpers import response
+from apps.api.app.core.calendar import build_calendar_gateway
+from apps.api.app.core.config import get_settings
 from apps.api.app.core.database import get_session
 from apps.api.app.schemas.scheduling import (
     AnalyzeInvitationRequest,
@@ -19,6 +21,7 @@ from apps.api.app.services.scheduling_service import (
     get_preference,
     import_calendar_event,
     list_requests,
+    reject_schedule,
     save_preference,
 )
 
@@ -45,7 +48,15 @@ def add_calendar_event(payload: CalendarEventPayload,
 @router.post("/analyze")
 def analyze(payload: AnalyzeInvitationRequest,
             session: Session = Depends(get_session)) -> dict[str, object]:
-    return response(analyze_invitation(session, payload.message_id, payload.calendar_available))
+    gateway = build_calendar_gateway(get_settings())
+    available = (
+        payload.calendar_available
+        if get_settings().calendar_provider == "MOCK"
+        else gateway is not None
+    )
+    return response(
+        analyze_invitation(session, payload.message_id, available, gateway)
+    )
 
 
 @router.get("/requests")
@@ -62,4 +73,20 @@ def approve(request_id: UUID, payload: ApproveScheduleRequest,
 @router.post("/requests/{request_id}/execute")
 def execute(request_id: UUID, payload: ExecuteScheduleRequest,
             session: Session = Depends(get_session)) -> dict[str, object]:
-    return response(execute_schedule(session, request_id, payload.cdp_url))
+    settings = get_settings()
+    gateway = build_calendar_gateway(settings)
+    return response(
+        execute_schedule(
+            session,
+            request_id,
+            payload.cdp_url,
+            gateway,
+            settings.calendar_provider == "MOCK" or gateway is not None,
+        )
+    )
+
+
+@router.post("/requests/{request_id}/reject")
+def reject(request_id: UUID,
+           session: Session = Depends(get_session)) -> dict[str, object]:
+    return response(reject_schedule(session, request_id))

@@ -18,6 +18,7 @@ from apps.api.app.services.action_service import execute_action
 from apps.api.app.services.errors import ResourceNotFoundError, VersionConflictError
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.policy_engine.state_machine import ActionStatus
+from packages.scheduling.calendar import CalendarGateway, CalendarProviderUnavailable
 from packages.scheduling.engine import check_calendar, parse_invitation, suggest_slots
 from packages.scheduling.models import (
     CalendarBusySlot,
@@ -69,7 +70,8 @@ def import_calendar_event(session: Session, payload: CalendarEventPayload) -> di
 
 
 def analyze_invitation(session: Session, message_id: UUID,
-                       calendar_available: bool) -> dict[str, object]:
+                       calendar_available: bool,
+                       gateway: CalendarGateway | None = None) -> dict[str, object]:
     existing = session.scalar(select(db.InterviewRequest).where(db.InterviewRequest.message_id == message_id))
     if existing:
         return _request_response(session, existing)
@@ -79,9 +81,16 @@ def analyze_invitation(session: Session, message_id: UUID,
     conversation = session.get(db.Conversation, message.conversation_id)
     if conversation is None or conversation.user_id != DEFAULT_USER_ID:
         raise ResourceNotFoundError("对话不存在")
+    _supersede_open_requests(session, conversation.id)
+    _supersede_generic_time_confirmations(session, message.id)
     config = _config(session)
     parsed = parse_invitation(message.content, message.received_at, config)
     slots = _busy_slots(session)
+    if gateway:
+        try:
+            slots.extend(_provider_slots(gateway, parsed, message.received_at))
+        except CalendarProviderUnavailable:
+            calendar_available = False
     status = check_calendar(parsed, slots, config, calendar_available)
     candidates = suggest_slots(parsed, slots, config) if status in {
         CalendarStatus.CONFLICT, CalendarStatus.AMBIGUOUS, CalendarStatus.INCOMPLETE,
@@ -98,7 +107,7 @@ def analyze_invitation(session: Session, message_id: UUID,
     session.add(request)
     session.flush()
     check = db.CalendarCheck(interview_request_id=request.id, status=status.value,
-                             snapshot_version=_snapshot(session), conflicts=[],
+                             snapshot_version=_snapshot(session, slots), conflicts=[],
                              checked_at=datetime.now(UTC))
     session.add(check)
     session.flush()
@@ -142,7 +151,30 @@ def approve_schedule(session: Session, request_id: UUID,
     return _request_response(session, request)
 
 
-def execute_schedule(session: Session, request_id: UUID, cdp_url: str) -> dict[str, object]:
+def reject_schedule(session: Session, request_id: UUID) -> dict[str, object]:
+    request, _, confirmation = _bundle(session, request_id)
+    if confirmation.status == "CANCELLED":
+        return _request_response(session, request)
+    if confirmation.status not in {"PENDING_APPROVAL", "APPROVED"}:
+        raise ValueError("当前排期任务不能拒绝")
+    before = confirmation.status
+    confirmation.status = "CANCELLED"
+    request.status = "CANCELLED"
+    conversation = session.get(db.Conversation, request.conversation_id)
+    if conversation and conversation.state == "SCHEDULING":
+        conversation.state = "WAITING_RECRUITER"
+    _audit(session, "SCHEDULE_REJECTED", confirmation.id, before, "CANCELLED", [])
+    session.commit()
+    return _request_response(session, request)
+
+
+def execute_schedule(
+    session: Session,
+    request_id: UUID,
+    cdp_url: str,
+    gateway: CalendarGateway | None = None,
+    calendar_available: bool = True,
+) -> dict[str, object]:
     request, _, confirmation = _bundle(session, request_id)
     if confirmation.status == "SUCCEEDED" and confirmation.action_id:
         return _request_response(session, request)
@@ -154,10 +186,12 @@ def execute_schedule(session: Session, request_id: UUID, cdp_url: str) -> dict[s
         session.commit()
         raise ValueError("排期确认已过期")
     config = _config(session)
-    status = _recheck_selected(session, request, confirmation, config)
+    status, slots = _recheck_selected(
+        session, request, confirmation, config, gateway, calendar_available
+    )
     latest_check = db.CalendarCheck(
         interview_request_id=request.id, status=status.value,
-        snapshot_version=_snapshot(session), conflicts=[], checked_at=datetime.now(UTC),
+        snapshot_version=_snapshot(session, slots), conflicts=[], checked_at=datetime.now(UTC),
     )
     session.add(latest_check)
     session.flush()
@@ -182,7 +216,7 @@ def execute_schedule(session: Session, request_id: UUID, cdp_url: str) -> dict[s
         if conversation:
             conversation.state = "SCHEDULE_CONFIRMED"
         if confirmation.create_calendar_event:
-            _create_confirmed_event(session, request, confirmation)
+            _create_confirmed_event(session, request, confirmation, gateway)
     session.commit()
     return _request_response(session, request)
 
@@ -240,27 +274,57 @@ def _schedule_action(session: Session, request: db.InterviewRequest,
 
 def _recheck_selected(session: Session, request: db.InterviewRequest,
                       confirmation: db.ScheduleConfirmation,
-                      config: SchedulingConfig) -> CalendarStatus:
+                      config: SchedulingConfig,
+                      gateway: CalendarGateway | None,
+                      calendar_available: bool,
+                      ) -> tuple[CalendarStatus, list[CalendarBusySlot]]:
+    slots = _busy_slots(session)
+    if not calendar_available:
+        return CalendarStatus.UNAVAILABLE, slots
     if confirmation.selected_start_at is None or confirmation.selected_end_at is None:
-        return CalendarStatus.AMBIGUOUS
+        return CalendarStatus.AMBIGUOUS, slots
     parsed = ParsedInvitation(event_type=request.event_type,
         start_at=confirmation.selected_start_at, end_at=confirmation.selected_end_at,
         timezone=request.timezone, duration_minutes=request.duration_minutes,
         source_text=request.source_text, confidence=float(request.parse_confidence))
-    return check_calendar(parsed, _busy_slots(session), config)
+    if gateway:
+        try:
+            slots.extend(
+                gateway.list_busy(
+                    confirmation.selected_start_at - timedelta(days=1),
+                    confirmation.selected_end_at + timedelta(days=1),
+                    request.timezone,
+                )
+            )
+        except CalendarProviderUnavailable:
+            return CalendarStatus.UNAVAILABLE, slots
+    return check_calendar(parsed, slots, config), slots
 
 
 def _create_confirmed_event(session: Session, request: db.InterviewRequest,
-                            confirmation: db.ScheduleConfirmation) -> None:
+                            confirmation: db.ScheduleConfirmation,
+                            gateway: CalendarGateway | None) -> None:
     if confirmation.selected_start_at is None or confirmation.selected_end_at is None:
         return
-    external_id = f"schedule-{confirmation.id}"
+    external_id = (
+        gateway.create_event(
+            idempotency_key=f"schedule:{confirmation.id}",
+            title=f"求职沟通：{request.event_type}",
+            start_at=confirmation.selected_start_at,
+            end_at=confirmation.selected_end_at,
+            timezone=request.timezone,
+        )
+        if gateway
+        else f"schedule-{confirmation.id}"
+    )
+    provider = gateway.provider if gateway else "MOCK"
     if session.scalar(select(db.CalendarEvent).where(
         db.CalendarEvent.user_id == DEFAULT_USER_ID,
-        db.CalendarEvent.provider == "MOCK", db.CalendarEvent.external_event_id == external_id)):
+        db.CalendarEvent.provider == provider,
+        db.CalendarEvent.external_event_id == external_id)):
         return
     session.add(db.CalendarEvent(
-        user_id=DEFAULT_USER_ID, provider="MOCK", external_event_id=external_id,
+        user_id=DEFAULT_USER_ID, provider=provider, external_event_id=external_id,
         title=f"求职沟通：{request.event_type}", start_at=confirmation.selected_start_at,
         end_at=confirmation.selected_end_at, availability="BUSY", source="USER_AUTHORIZED",
     ))
@@ -279,6 +343,49 @@ def _bundle(session: Session, request_id: UUID) -> tuple[db.InterviewRequest, db
     return request, check, confirmation
 
 
+def _supersede_open_requests(session: Session, conversation_id: UUID) -> None:
+    rows = session.scalars(
+        select(db.InterviewRequest).where(
+            db.InterviewRequest.conversation_id == conversation_id,
+            db.InterviewRequest.status.in_(["PENDING_APPROVAL", "APPROVED"]),
+        )
+    ).all()
+    for request in rows:
+        confirmation = session.scalar(
+            select(db.ScheduleConfirmation).where(
+                db.ScheduleConfirmation.interview_request_id == request.id
+            )
+        )
+        before = request.status
+        request.status = "SUPERSEDED"
+        if confirmation:
+            confirmation.status = "SUPERSEDED"
+        _audit(
+            session,
+            "SCHEDULE_SUPERSEDED",
+            request.id,
+            before,
+            "SUPERSEDED",
+            ["NEW_SCHEDULING_MESSAGE"],
+        )
+
+
+def _supersede_generic_time_confirmations(
+    session: Session, message_id: UUID
+) -> None:
+    tasks = session.scalars(
+        select(db.ConfirmationTask)
+        .join(db.PolicyDecision, db.PolicyDecision.id == db.ConfirmationTask.decision_id)
+        .join(db.GeneratedDraft, db.GeneratedDraft.id == db.PolicyDecision.draft_id)
+        .where(
+            db.GeneratedDraft.message_id == message_id,
+            db.ConfirmationTask.status == "PENDING_APPROVAL",
+        )
+    ).all()
+    for task in tasks:
+        task.status = "SUPERSEDED"
+
+
 def _config(session: Session) -> SchedulingConfig:
     item = session.scalar(select(db.SchedulingPreference).where(
         db.SchedulingPreference.user_id == DEFAULT_USER_ID))
@@ -292,12 +399,28 @@ def _busy_slots(session: Session) -> list[CalendarBusySlot]:
                 db.CalendarEvent.user_id == DEFAULT_USER_ID)).all()]
 
 
-def _snapshot(session: Session) -> str:
-    rows = session.scalars(select(db.CalendarEvent).where(
-        db.CalendarEvent.user_id == DEFAULT_USER_ID).order_by(db.CalendarEvent.id)).all()
-    raw = [(str(row.id), row.start_at.isoformat(), row.end_at.isoformat(), row.availability,
-            row.updated_at.isoformat() if row.updated_at else "") for row in rows]
+def _snapshot(
+    session: Session, slots: list[CalendarBusySlot] | None = None
+) -> str:
+    raw = [
+        (slot.start_at.isoformat(), slot.end_at.isoformat(), slot.availability)
+        for slot in (slots if slots is not None else _busy_slots(session))
+    ]
     return hashlib.sha256(json.dumps(raw).encode()).hexdigest()
+
+
+def _provider_slots(
+    gateway: CalendarGateway,
+    parsed: ParsedInvitation,
+    received_at: datetime,
+) -> list[CalendarBusySlot]:
+    start = parsed.start_at or received_at
+    end = parsed.end_at or start + timedelta(days=14)
+    return gateway.list_busy(
+        start - timedelta(days=1),
+        end + timedelta(days=1),
+        parsed.timezone,
+    )
 
 
 def _suggested_reply(parsed: ParsedInvitation, status: CalendarStatus,

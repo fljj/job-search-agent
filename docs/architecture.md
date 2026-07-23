@@ -168,6 +168,16 @@ config/
   开关、限速和幂等指纹。
 - `run_agent_worker.py`：串联消息发现与职位发现；页面结构不符合预期时暂停对应平台运行。
 
+### 3.9 第十一阶段日历与后半程沟通
+
+- `packages/scheduling/calendar.py`：定义忙闲查询和事件创建的供应商无关端口。
+- `adapters/calendar/google.py`：调用 Google Calendar FreeBusy 和 Events API；不参与
+  邀请解析、冲突判断或确认授权。
+- `scheduling_service`：解析邀请、合并本地/真实忙碌时段、创建确认任务、处理替代/拒绝，
+  并在发送前重新查询冲突。
+- `agent_service`：时间意图转交排期服务；其他入站消息同时评估明确索要简历和有证据的
+  积极反馈。
+
 ## 4. 模块依赖
 
 允许的依赖方向：
@@ -401,7 +411,9 @@ LIST_READY → OPENING_CONVERSATION → VERIFYING_TARGET → READING_MESSAGES
 → 复用第四阶段浏览器安全发送 → 成功后按独立授权创建日历事件
 ```
 
-当前日历适配使用数据库中的本地假事件，不连接真实日历供应商。日历读取和写入均由应用服务编排；时间解析器和冲突引擎不依赖 FastAPI、浏览器或具体日历供应商。
+日历默认使用数据库中的本地假事件；配置 Google Calendar 后通过供应商适配器查询忙闲
+和创建已授权事件。日历读取和写入均由应用服务编排；时间解析器和冲突引擎不依赖
+FastAPI、浏览器或具体日历供应商。
 
 ## 13. 第七阶段前端控制台
 

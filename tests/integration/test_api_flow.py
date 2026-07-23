@@ -363,6 +363,12 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "message_id": explicit_message["id"], "calendar_available": True,
     }).json()["data"]
     assert schedule["calendar_status"] == "AVAILABLE"
+    prior_schedule = next(
+        item
+        for item in client.get("/api/v1/scheduling/requests").json()["data"]["items"]
+        if item["id"] == unavailable_schedule.json()["data"]["id"]
+    )
+    assert prior_schedule["status"] == "SUPERSEDED"
     approved_schedule = client.post(f"/api/v1/scheduling/requests/{schedule['id']}/approve", json={
         "reply_content": schedule["suggested_reply"], "create_calendar_event": True,
     })
@@ -400,6 +406,19 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     changed_item = next(item for item in client.get("/api/v1/scheduling/requests").json()["data"]["items"]
                         if item["id"] == changed_schedule["id"])
     assert changed_item["status"] == "PENDING_APPROVAL"
+
+    rejected_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
+        "external_message_id": "message-schedule-rejected",
+        "content": "2026-07-25 10:00 可以电话沟通吗，北京时间",
+        "received_at": datetime.now(UTC).isoformat(),
+    }).json()["data"]
+    rejected_schedule = client.post("/api/v1/scheduling/analyze", json={
+        "message_id": rejected_message["id"], "calendar_available": True,
+    }).json()["data"]
+    rejected_result = client.post(
+        f"/api/v1/scheduling/requests/{rejected_schedule['id']}/reject"
+    )
+    assert rejected_result.json()["data"]["status"] == "CANCELLED"
 
     monkeypatch.setattr(
         "apps.api.app.services.agent_service.build_llm_provider",

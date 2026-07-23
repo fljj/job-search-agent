@@ -235,7 +235,8 @@ users
 ### 8.2 第六阶段数据表
 
 - `scheduling_preferences`：用户时区、工作时间、午休、默认时长、缓冲、通勤和快照有效期配置；用户唯一并使用版本并发控制。
-- `calendar_events`：本地假日历的忙闲事件和用户单独授权创建的面试事件；`(user_id, provider, external_event_id)` 唯一。
+- `calendar_events`：本地假日历忙闲事件，以及用户单独授权后由 Google Calendar 创建并
+  回写的面试事件；`(user_id, provider, external_event_id)` 唯一。
 - `interview_requests`：原始消息、解析事件、时间、时区、置信度、风险和候选时间；`message_id` 唯一。
 - `calendar_checks`：检查状态、快照版本、检查时间和受控冲突摘要，历史检查追加保存。
 - `schedule_confirmations`：具体回复、选定时间、独立日历写入授权、有效期和发送动作；排期请求及幂等键唯一。

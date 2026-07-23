@@ -326,15 +326,19 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 - `GET /api/v1/scheduling/requests`：返回时间确认卡片、冲突状态、候选时间、风险和建议回复。
 - `POST /api/v1/scheduling/requests/{id}/approve`：批准或修改具体时间回复，可独立授权发送成功后创建日历事件。
 - `POST /api/v1/scheduling/requests/{id}/execute`：验证批准状态、任务有效期和日历快照后发送；新冲突退回待确认。
+- `POST /api/v1/scheduling/requests/{id}/reject`：幂等拒绝待确认或已批准但尚未执行的时间安排。
+- `GET /api/v1/system/calendar-status`：返回供应商、日历 ID 和是否配置，不返回 OAuth 令牌。
 
 `calendar_available=false` 只用于当前本地假适配器模拟供应商不可用，此时必须返回 `UNAVAILABLE`，不得声称日历空闲。批准接口不直接发送；执行接口仍复用浏览器目标复核和动作幂等保护。
+配置真实 Google Calendar 后，客户端提交的 `calendar_available` 不再生效，服务端以真实
+FreeBusy 结果为准；供应商不可用时安全降级为 `UNAVAILABLE`。
 
 ## 15. 当前明确不提供的 API
 
 - 简历文件上传 API；
 - 绕过策略引擎直接发送消息或简历的 API；
 - 验证码、反检测或任意页面操作 API；
-- 真实 Google、Outlook 或其他外部日历供应商 API；
+- Outlook 或其他尚未实现的外部日历供应商 API；
 - 通过 HTTP 请求传入 API Key 或任意系统提示词的 API。
 
 千问通过服务端环境变量接入，不提供前端读取密钥的接口。后续切换智谱时复用相同领域 API。

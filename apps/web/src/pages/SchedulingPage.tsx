@@ -7,6 +7,9 @@ interface ScheduleRequest {
   timezone: string; status: string; calendar_status?: string; candidate_slots: Array<{ start_at: string; end_at: string }>
   suggested_reply?: string; create_calendar_event: boolean
 }
+interface CalendarStatus {
+  provider: string; calendar_id: string; configured: boolean; real_provider: boolean
+}
 
 export function SchedulingPage() {
   const [items, setItems] = useState<ScheduleRequest[]>([])
@@ -15,8 +18,12 @@ export function SchedulingPage() {
   const [calendarAvailable, setCalendarAvailable] = useState(true)
   const [createEvent, setCreateEvent] = useState(false)
   const [cdpUrl, setCdpUrl] = useState('http://127.0.0.1:9222')
+  const [calendar, setCalendar] = useState<CalendarStatus>()
   const load = () => api<{ items: ScheduleRequest[] }>('/scheduling/requests').then((data) => setItems(data.items))
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    void load()
+    void api<CalendarStatus>('/system/calendar-status').then(setCalendar)
+  }, [])
   const analyze = async () => {
     if (!messageId) return message.warning('请填写招聘方消息 ID')
     await api('/scheduling/analyze', { method: 'POST', body: JSON.stringify({ message_id: messageId, calendar_available: calendarAvailable }) })
@@ -33,12 +40,22 @@ export function SchedulingPage() {
     await api(`/scheduling/requests/${item.id}/execute`, { method: 'POST', body: JSON.stringify({ cdp_url: cdpUrl }) })
     await load()
   }
+  const reject = async (item: ScheduleRequest) => {
+    await api(`/scheduling/requests/${item.id}/reject`, { method: 'POST' })
+    await load(); message.success('已拒绝该时间安排')
+  }
   return <Space direction="vertical" style={{ width: '100%' }}>
     <Alert type="warning" showIcon message="日历空闲也必须人工确认"
       description="时间回复与日历写入是两个独立授权。发送前会检查日历快照；出现新冲突会退回待确认。" />
+    <Alert type={calendar?.configured ? 'info' : 'error'} showIcon
+      message={`日历：${calendar?.provider ?? '-'} / ${calendar?.configured ? '已配置' : '未配置'}`}
+      description={calendar?.real_provider
+        ? `真实日历 ${calendar.calendar_id}；读取忙闲与创建事件仍是独立操作。`
+        : '当前使用本地模拟日历，不代表真实日历空闲。'} />
     <Card title="分析邀请"><Space direction="vertical" style={{ width: '100%' }}>
       <Input value={messageId} onChange={(event) => setMessageId(event.target.value)} placeholder="招聘方消息 ID" />
-      <Checkbox checked={calendarAvailable} onChange={(event) => setCalendarAvailable(event.target.checked)}>模拟日历当前可用</Checkbox>
+      {!calendar?.real_provider && <Checkbox checked={calendarAvailable}
+        onChange={(event) => setCalendarAvailable(event.target.checked)}>模拟日历当前可用</Checkbox>}
       <Button onClick={() => void analyze()}>解析并检查日历</Button>
       <Input.TextArea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="确认或修改后的时间回复" />
       <Checkbox checked={createEvent} onChange={(event) => setCreateEvent(event.target.checked)}>发送成功后单独授权创建日历事件</Checkbox>
@@ -53,6 +70,8 @@ export function SchedulingPage() {
       { title: '建议', dataIndex: 'suggested_reply' },
       { title: '操作', render: (_: unknown, item: ScheduleRequest) => <Space>
         <Button disabled={item.status !== 'PENDING_APPROVAL'} onClick={() => void approve(item)}>确认时间回复</Button>
+        <Button disabled={!['PENDING_APPROVAL', 'APPROVED'].includes(item.status)}
+          onClick={() => void reject(item)}>拒绝</Button>
         <Button danger disabled={item.status !== 'APPROVED'} onClick={() => void execute(item)}>复核并发送</Button>
       </Space> },
     ]} /></Card>

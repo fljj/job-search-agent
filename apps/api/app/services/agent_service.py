@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from adapters.browser.fake_actions import FakeActionExecutor
 from adapters.llm.errors import LlmProviderError
+from apps.api.app.core.calendar import build_calendar_gateway
 from apps.api.app.core.config import get_settings
 from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
@@ -14,6 +15,7 @@ from apps.api.app.schemas.automation import AgentRunStartRequest, AutomationDisp
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
@@ -156,6 +158,7 @@ def tick_run(
             return pause_run(session, run.id, ["PLATFORM_SESSION_NOT_READY"])
 
     llm_provider = provider or build_llm_provider(settings)
+    calendar_gateway = build_calendar_gateway(settings)
     action_executor = executor or FakeActionExecutor()
     processed = 0
     failure_count_before = run.failure_count
@@ -185,7 +188,25 @@ def tick_run(
             draft = create_reply_draft(session, message.id, llm_provider)
             processed += 1
             _event(session, run.id, "DRAFT_CREATED", "draft", draft.id)
-            if "RESUME_REQUEST" in [intent.value for intent in draft.intents]:
+            intent_values = [intent.value for intent in draft.intents]
+            if any(
+                intent in intent_values
+                for intent in ("PHONE_CALL", "INTERVIEW_INVITATION", "INTERVIEW_TIME")
+            ):
+                schedule = analyze_invitation(
+                    session,
+                    message.id,
+                    calendar_available=calendar_gateway is not None,
+                    gateway=calendar_gateway,
+                )
+                _event(
+                    session,
+                    run.id,
+                    "SCHEDULE_CONFIRMATION_CREATED",
+                    "scheduling",
+                    UUID(str(schedule["id"])),
+                )
+            else:
                 resume = create_resume_draft(session, message.id, llm_provider)
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
         except LlmProviderError as exc:

@@ -26,6 +26,11 @@ pip install -e '.[dev]'
 `.env.example` 已预留千问配置。`LLM_PROVIDER=FAKE` 可完全离线运行；使用千问时将
 `LLM_PROVIDER=QWEN` 和 `LLM_API_KEY` 只写入本机 `.env`，不得提交。
 
+日历默认使用 `CALENDAR_PROVIDER=MOCK`，仅用于本地测试，不代表真实空闲。接入 Google
+Calendar 时配置 `CALENDAR_PROVIDER=GOOGLE`、`GOOGLE_CALENDAR_ACCESS_TOKEN` 和
+`GOOGLE_CALENDAR_ID`。访问令牌只写入本机 `.env`；忙闲查询只读取时间范围，事件写入
+仍需用户在时间确认卡片中独立授权。令牌缺失或失效时系统返回日历不可用。
+
 统一 LLM 适配器的默认测试不会访问网络。如需显式执行一次千问消息分类冒烟：
 
 ```bash
@@ -71,7 +76,8 @@ npm run dev
 11. `POST /api/v1/browser/read-current` 只读解析当前 BOSS/脉脉页面并幂等导入。
 12. 在“人工确认与发送”页批准、修改或拒绝任务，再单独执行已批准动作。
 13. 在“安全自动化”页按全局、平台或策略配置开关与阈值，通过 `/api/v1/automation/dispatch` 执行服务端授权。
-14. 在“电话与面试安排”页解析招聘消息、检查日历、确认具体回复，并独立授权创建日历事件。
+14. Agent 自动识别电话和面试邀请；在“电话与面试安排”页检查日历、确认或拒绝具体
+    回复，并独立授权创建日历事件。新的改期任务会替代尚未完成的旧任务。
 15. 通过 `/api/v1/automation/runs` 启动 Agent，并由 `/runs/{id}/tick` 执行受数据库短租约保护的离线轮询；可暂停、恢复和查看心跳、计数及熔断原因。
 
 本地短轮询 Worker 可独立启动。执行器必须通过 `AGENT_EXECUTOR_MODE` 显式隔离：
@@ -154,7 +160,7 @@ PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQ
   及后续阶段验收。
 - 控制台默认联调限速为每小时 1 次、每日 3 次；真实联调必须按 `docs/development-plan.md` 的顺序逐步人工放行。
 - 简历仅能从已登记且平台页面中唯一匹配的附件中选择，不上传本地文件。
-- 不接入日历。
+- 默认不连接真实日历；可选接入 Google Calendar，OAuth 凭证缺失时安全降级为不可用。
 - 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。
 - 自动招呼最低分配置不得低于80，自动简历最低分配置不得低于60。
 - 策略可配置最高 79 分的猎头岗位分数封顶，使猎头岗位可接收回复但不主动招呼。

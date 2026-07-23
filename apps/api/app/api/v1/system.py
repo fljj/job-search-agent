@@ -17,3 +17,17 @@ def llm_status() -> dict[str, object]:
             "configured": settings.llm_configured,
         }
     )
+
+
+@router.get("/calendar-status")
+def calendar_status() -> dict[str, object]:
+    """返回不含 OAuth 凭证的日历配置摘要。"""
+    settings = get_settings()
+    return response(
+        {
+            "provider": settings.calendar_provider,
+            "calendar_id": settings.google_calendar_id,
+            "configured": settings.calendar_configured,
+            "real_provider": settings.calendar_provider != "MOCK",
+        }
+    )
