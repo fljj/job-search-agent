@@ -2,6 +2,7 @@ import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag } fr
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
+import { activeWorkers, workerStatusText } from './worker-status'
 
 interface Run {
   id: string; platform: string; status: string; processed_count: number
@@ -49,6 +50,7 @@ export function OverviewPage() {
     })
   }, [])
   const activeRun = runs.find((item) => ['RUNNING', 'PAUSED'].includes(item.status))
+  const currentWorkers = activeWorkers(operations?.workers)
   const safetyErrors = Object.values(rollout?.safety_metrics ?? {}).reduce((sum, value) => sum + value, 0)
   return <Space direction="vertical" size="large" style={{ width: '100%' }}>
     {(!operations?.database_ready || !operations?.llm_configured || safetyErrors > 0) &&
@@ -69,8 +71,11 @@ export function OverviewPage() {
         { key: 'run', label: '运行', children: <Tag color={statusColor(activeRun?.status ?? '')}>
           {activeRun?.status ?? 'STOPPED'}</Tag> },
         { key: 'platform', label: '平台', children: activeRun?.platform ?? '-' },
-        { key: 'worker', label: 'Worker', children:
-          operations?.workers.map((item) => `${item.worker_id}:${item.status}`).join('、') || '无' },
+        { key: 'worker', label: 'Worker', children: <Tag color={
+          currentWorkers.length > 1 ? 'red'
+            : currentWorkers[0]?.status === 'STALE' ? 'orange'
+              : currentWorkers.length === 1 ? 'green' : 'default'
+        }>{workerStatusText(operations?.workers)}</Tag> },
         { key: 'rollout', label: 'BOSS 灰度', children: rollout
           ? `${rollout.current_level} - ${rollout.level_name}（${rollout.status}）` : '未初始化' },
         { key: 'unknown', label: '未知结果', children: operations?.unknown_action_count ?? 0 },

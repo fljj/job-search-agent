@@ -5,6 +5,7 @@ import {
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
+import { activeWorkers, workerStatusText } from './worker-status'
 
 interface SettingForm {
   scope_type: 'GLOBAL' | 'PLATFORM' | 'STRATEGY'; scope_key: string
@@ -54,6 +55,7 @@ export function AutomationPage() {
   const [operations, setOperations] = useState<OperationsStatus>()
   const [rollout, setRollout] = useState<RolloutStatus>()
   const [strategies, setStrategies] = useState<StrategyOption[]>([])
+  const currentWorkers = activeWorkers(operations?.workers)
 
   const load = async () => {
     const [llmStatus, runList, actionList, operationStatus, rolloutList, strategyList] = await Promise.all([
@@ -146,8 +148,11 @@ export function AutomationPage() {
         { key: 'calendar', label: '日历', children: operations?.calendar_provider ?? '-' },
         { key: 'unknown', label: '未知结果', children: operations?.unknown_action_count ?? 0 },
         { key: 'confirmations', label: '待确认', children: operations?.pending_confirmation_count ?? 0 },
-        { key: 'workers', label: 'Worker', children: operations?.workers.map(
-          (item) => `${item.worker_id}:${item.status}`).join('、') || '无' },
+        { key: 'workers', label: 'Worker', children: <Tag color={
+          currentWorkers.length > 1 ? 'red'
+            : currentWorkers[0]?.status === 'STALE' ? 'orange'
+              : currentWorkers.length === 1 ? 'green' : 'default'
+        }>{workerStatusText(operations?.workers)}</Tag> },
         { key: 'discrepancies', label: '审计差异', children: operations?.discrepancies.length ?? 0 },
       ]} />
       <Button disabled={!operations?.unknown_action_count} onClick={() => void reconcile()}>

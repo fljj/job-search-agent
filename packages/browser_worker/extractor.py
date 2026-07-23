@@ -132,7 +132,10 @@ def _extract_conversation_list(
 ) -> ReadResult:
     conversations: list[BrowserConversationSummary] = []
     for element in page.elements(selectors.conversation_list_items):
-        external_id = element.attribute("", selectors.conversation_list_item_id_attribute)
+        external_id = (
+            element.attribute("", selectors.conversation_list_item_id_attribute)
+            or element.attribute("", "d-c")
+        )
         recruiter = element.text(selectors.conversation_list_item_recruiter)
         if not external_id or not recruiter:
             return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,

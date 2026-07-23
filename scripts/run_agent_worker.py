@@ -23,7 +23,10 @@ from apps.api.app.models import entities as db
 from apps.api.app.services.agent_service import pause_run, tick_run
 from apps.api.app.services.automation_service import _effective_rules
 from apps.api.app.services.job_discovery_service import process_job_discovery_batch
-from apps.api.app.services.message_discovery_service import persist_discovery_batch
+from apps.api.app.services.message_discovery_service import (
+    persist_discovery_batch,
+    record_ready_platform_session,
+)
 from apps.api.app.services.operations_service import (
     apply_retention,
     heartbeat_worker,
@@ -117,6 +120,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             session, run_id, ["MESSAGE_DISCOVERY_UNAVAILABLE"]
                         )
                         continue
+                    record_ready_platform_session(session, run, cdp_url)
                     persist_discovery_batch(session, run, worker_id, batch)
                     gray_event(
                         logger,

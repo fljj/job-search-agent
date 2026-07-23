@@ -392,21 +392,7 @@ def worker_preflight(
             pass
     except (OSError, URLError, TimeoutError):
         reasons.append("CDP_UNAVAILABLE")
-    platforms = session.scalars(
-        select(db.AgentRun.platform)
-        .where(db.AgentRun.status == "RUNNING", db.AgentRun.platform != "MOCK")
-        .distinct()
-    ).all()
-    for platform in platforms:
-        ready = session.scalar(
-            select(db.PlatformSession.id).where(
-                db.PlatformSession.user_id == DEFAULT_USER_ID,
-                db.PlatformSession.platform == platform,
-                db.PlatformSession.status == "SESSION_READY",
-            )
-        )
-        if not ready:
-            reasons.append(f"PLATFORM_SESSION_NOT_READY:{platform}")
+    # 初始化后的首个消息列表扫描负责建立 SESSION_READY 证据；tick 仍会强制复核该状态。
     return reasons
 
 

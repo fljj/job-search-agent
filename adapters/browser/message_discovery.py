@@ -132,7 +132,7 @@ class BossMessageDiscoveryAdapter:
             f"const attribute = {json.dumps(self.selectors.conversation_list_item_id_attribute)}; "
             f"const expected = {json.dumps(summary.external_conversation_id)}; "
             "const matches = Array.from(document.querySelectorAll(selector)).filter("
-            "item => item.getAttribute(attribute) === expected); "
+            "item => (item.getAttribute(attribute) || item.getAttribute('d-c')) === expected); "
             "if (matches.length !== 1 || matches[0].getClientRects().length === 0) return false; "
             "matches[0].click(); return true; })()"
         )

@@ -1,7 +1,16 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from sqlalchemy.orm import Session
+
 from adapters.browser.message_discovery import (
     _matches_partition,
     _verify_target,
     select_discovery_candidates,
+)
+from apps.api.app.models import entities as db
+from apps.api.app.services.message_discovery_service import (
+    record_ready_platform_session,
 )
 from packages.browser_worker.models import (
     BrowserConversation,
@@ -94,3 +103,22 @@ def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:
     assert _matches_partition(item, "ALL")
     assert not _matches_partition(item, "UNREAD")
     assert not _matches_partition(item, "NEW_GREETING")
+
+
+def test_successful_discovery_records_ready_platform_session() -> None:
+    session = MagicMock(spec=Session)
+    session.scalar.return_value = None
+    run = SimpleNamespace(platform="BOSS")
+
+    record_ready_platform_session(
+        session,
+        run=run,
+        cdp_url="http://127.0.0.1:9222",
+    )
+
+    platform_session = session.add.call_args.args[0]
+    assert isinstance(platform_session, db.PlatformSession)
+    assert platform_session.platform == "BOSS"
+    assert platform_session.status == "SESSION_READY"
+    assert platform_session.cdp_endpoint == "http://127.0.0.1:9222"
+    session.flush.assert_called_once()

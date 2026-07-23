@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
@@ -143,6 +144,32 @@ def persist_discovery_batch(
     run.cursor = root_cursor
     session.commit()
     return counts
+
+
+def record_ready_platform_session(
+    session: Session,
+    run: db.AgentRun,
+    cdp_url: str,
+) -> None:
+    """消息列表扫描成功后记录真实会话证据，供后续动作服务端复核。"""
+    record = session.scalar(
+        select(db.PlatformSession).where(
+            db.PlatformSession.user_id == DEFAULT_USER_ID,
+            db.PlatformSession.platform == run.platform,
+        )
+    )
+    if record is None:
+        record = db.PlatformSession(
+            user_id=DEFAULT_USER_ID,
+            platform=run.platform,
+        )
+        session.add(record)
+    parsed = urlparse(cdp_url)
+    record.cdp_endpoint = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 80}"
+    record.status = "SESSION_READY"
+    record.last_reason_codes = []
+    record.last_checked_at = datetime.now(UTC)
+    session.flush()
 
 
 def _resolve_job(

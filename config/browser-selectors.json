@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-23-v6",
+  "version": "2026-07-24-v7",
   "platforms": {
     "BOSS": {
       "allowed_hosts": ["www.zhipin.com", "m.zhipin.com"],
@@ -26,11 +26,11 @@
       "job_closed_marker": "[data-testid='job-closed'], .job-status-closed, .job-detail-status-expired",
       "platform_greeting_dialog": "[data-testid='greeting-dialog'], .startchat-content",
       "platform_greeting_message": "[data-testid='greeting-message'], .startchat-content .message-list .message-item .text",
-      "conversation_list_root": "[data-testid='conversation-list']",
-      "conversation_list_items": "[data-testid='conversation-list-item']",
+      "conversation_list_root": "[data-testid='conversation-list'], .user-list-content",
+      "conversation_list_items": "[data-testid='conversation-list-item'], .user-list-content .friend-content[d-c]",
       "conversation_list_item_id_attribute": "data-conversation-id",
-      "conversation_list_item_recruiter": "[data-testid='recruiter-name']",
-      "conversation_list_item_job_title": "[data-testid='job-title']",
+      "conversation_list_item_recruiter": "[data-testid='recruiter-name'], .name-text",
+      "conversation_list_item_job_title": "[data-testid='job-title'], .title-box span:last-child",
       "conversation_list_item_company": "[data-testid='company-name']",
       "conversation_list_item_unread_attribute": "data-unread-count",
       "conversation_list_item_job_id_attribute": "data-job-id",

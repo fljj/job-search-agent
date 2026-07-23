@@ -106,6 +106,26 @@ def test_extracts_conversation_messages() -> None:
     assert result.conversation and result.conversation.messages[0].external_message_id == "message-1"
 
 
+def test_extracts_real_boss_conversation_list_id_from_d_c() -> None:
+    selectors = get_browser_selectors().platforms["BOSS"]
+    page = FakePage(url="https://www.zhipin.com/web/geek/chat")
+    page.visible = {selectors.login_marker, selectors.conversation_list_root}
+    page.element_lists = {
+        selectors.conversation_list_items: [
+            FakeElement(
+                texts={selectors.conversation_list_item_recruiter: "李招聘"},
+                attributes={("", "d-c"): "boss-chat-1"},
+            )
+        ]
+    }
+
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+
+    assert result.status is SessionStatus.SESSION_READY
+    assert result.page_type is PageType.CONVERSATION_LIST
+    assert result.conversations[0].external_conversation_id == "boss-chat-1"
+
+
 def test_extracts_real_boss_conversation_dom_shape() -> None:
     selectors = get_browser_selectors().platforms["BOSS"]
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")
