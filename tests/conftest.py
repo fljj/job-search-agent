@@ -11,6 +11,7 @@ from packages.job_parser.models import (
     SourceJobStatus,
     WorkMode,
 )
+from packages.scoring.evidence import with_evidence_catalog
 from packages.scoring.models import (
     CandidateProfile,
     CandidateSkill,
@@ -111,3 +112,8 @@ def parsed() -> ParsedJob:
 def context(job: JobInput, parsed: ParsedJob, candidate: CandidateProfile,
             strategy: Strategy) -> ScoringContext:
     return ScoringContext(job=job, parsed_job=parsed, candidate=candidate, strategy=strategy)
+
+
+@pytest.fixture
+def evidence_context(context: ScoringContext) -> ScoringContext:
+    return with_evidence_catalog(context)

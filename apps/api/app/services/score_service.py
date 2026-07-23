@@ -22,6 +22,7 @@ from apps.api.app.services.strategy_service import to_domain as strategy_to_doma
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
+from packages.scoring.evidence import with_evidence_catalog
 from packages.scoring.llm_engine import (
     LLM_SCORING_VERSION,
     LlmScoreValidationError,
@@ -95,8 +96,14 @@ def create_score(
         industry_experiences=[item.industry_code for item in profile.industries],
         version=profile.version,
     )
-    context = ScoringContext(job=to_job_domain(job), parsed_job=to_parsed_domain(parsed_record),
-                             candidate=candidate, strategy=strategy_to_domain(strategy))
+    context = with_evidence_catalog(
+        ScoringContext(
+            job=to_job_domain(job),
+            parsed_job=to_parsed_domain(parsed_record),
+            candidate=candidate,
+            strategy=strategy_to_domain(strategy),
+        )
+    )
     try:
         llm_result = llm_provider.score_job(context)
     except LlmProviderError as exc:

@@ -1,7 +1,8 @@
 from decimal import Decimal
 
 from packages.llm.models import JobScoreOutput, ScoreDimension
-from packages.scoring.llm_engine import EVIDENCE_REFS, validate_llm_score
+from packages.scoring.evidence import evidence_catalog, with_evidence_catalog
+from packages.scoring.llm_engine import validate_llm_score
 from packages.scoring.models import DIMENSION_MAX, ScoringContext
 from packages.scoring.strategy_selector import (
     StrategyScoreCandidate,
@@ -9,7 +10,8 @@ from packages.scoring.strategy_selector import (
 )
 
 
-def output_for_total(total: int) -> JobScoreOutput:
+def output_for_total(context: ScoringContext, total: int) -> JobScoreOutput:
+    catalog = evidence_catalog(context)
     remaining = Decimal(total)
     dimensions: list[ScoreDimension] = []
     for dimension, maximum in DIMENSION_MAX.items():
@@ -21,7 +23,13 @@ def output_for_total(total: int) -> JobScoreOutput:
                 score=score,
                 max_score=maximum,
                 reason="test",
-                evidence_refs=[sorted(EVIDENCE_REFS[dimension])[0]],
+                evidence_refs=[
+                    next(
+                        item.id
+                        for item in catalog.values()
+                        if dimension in item.dimensions
+                    )
+                ],
             )
         )
     return JobScoreOutput(
@@ -34,9 +42,12 @@ def output_for_total(total: int) -> JobScoreOutput:
 
 def candidate(context: ScoringContext, score: int, priority: int) -> StrategyScoreCandidate:
     strategy = context.strategy.model_copy(update={"priority": priority})
+    scoring_context = with_evidence_catalog(
+        context.model_copy(update={"strategy": strategy})
+    )
     result = validate_llm_score(
-        context.model_copy(update={"strategy": strategy}),
-        output_for_total(score),
+        scoring_context,
+        output_for_total(scoring_context, score),
     )
     return StrategyScoreCandidate(strategy=strategy, score=result)
 

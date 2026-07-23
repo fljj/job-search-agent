@@ -248,6 +248,15 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     assert first_score.json()["data"]["eligibility"] == "ELIGIBLE"
     assert first_score.json()["data"]["scoring_version"].startswith("llm:")
     assert first_score.json()["data"]["llm_invocation_id"] is not None
+    assert all(
+        reference.startswith("evidence:")
+        for detail in first_score.json()["data"]["details"]
+        for reference in detail["evidence_refs"]
+    )
+    assert all(
+        detail["matched_facts"]["evidence_items"]
+        for detail in first_score.json()["data"]["details"]
+    )
     assert duplicate_score.json()["data"]["id"] == first_score.json()["data"]["id"]
     reassessed = client.post(
         f"/api/v1/jobs/{job_id}/scores/re-evaluate",

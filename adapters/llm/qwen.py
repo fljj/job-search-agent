@@ -31,23 +31,15 @@ PROMPTS: dict[str, tuple[str, str]] = {
         "不得在没有候选人出生信息时推断年龄不匹配。",
     ),
     "score_job": (
-        "job-score-v4",
+        "job-score-v5",
         "仅按输入评分契约输出JSON。必须返回title/skills/experience/location/salary/"
         "industry/management七维且每个维度恰好出现一次。固定满分为："
         "title=15，skills=25，experience=15，location=15，salary=15，"
         "industry=10，management=5；每项score不得超过对应max_score，"
-        "total_score必须等于七项score之和。evidence_refs只能逐字使用以下路径："
-        "title=[job.title,strategy.title_rules]；"
-        "skills=[parsed_job.required_skills,parsed_job.preferred_skills,candidate.skills,"
-        "strategy.core_required_skills]；"
-        "experience=[parsed_job.years_required,candidate.total_years,"
-        "candidate.has_core_system_experience,candidate.industry_experiences]；"
-        "location=[job.work_mode,job.location,strategy.work_mode_rules]；"
-        "salary=[job.salary_text,parsed_job.salary,strategy.salary_rules]；"
-        "industry=[job.industry,candidate.industry_experiences,strategy.industry_rules]；"
-        "management=[parsed_job.management_required,parsed_job.seniority_level,"
-        "candidate.management_years,candidate.has_architecture_experience]。"
-        "不得创造、缩写或添加路径前缀；不得解除硬性排除或修改阈值。"
+        "total_score必须等于七项score之和。每个维度的evidence_refs必须至少引用一个"
+        "input.evidence_items中的完整id，只能引用dimensions包含当前维度的条目；"
+        "涉及技能、行业、规则或解析列表时必须引用实际使用的具体条目id，不得只引用"
+        "集合路径。不得创造、缩写或修改证据id；不得解除硬性排除或修改阈值。"
         "JD年龄限制只能作为岗位合规提示，不得在输入没有候选人出生信息时表述为年龄不匹配。"
         "不调用工具。",
     ),

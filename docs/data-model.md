@@ -142,9 +142,18 @@ users
 
 唯一约束：`input_fingerprint`。该指纹由职位、策略版本、候选人资料版本、解析记录、评分规则版本、提示词版本、供应商、模型名称和影响输出的模型参数生成。`job_scores` 只保存校验成功的评分，失败调用不能被当作有效评分复用。
 
+`input_snapshot` 保存评分上下文及条目级 `evidence_items`。每个条目包含由来源路径和
+规范化 JSON 值生成的稳定 ID、`source_path`、具体 `value` 和允许引用的
+`dimensions`。审计恢复时必须从上下文重新生成目录并完全一致；列表顺序变化不改变
+条目 ID，内容变化会使旧 ID 失效。
+
 ### 3.16 `job_score_details`
 
 字段：`id`、`job_score_id`、`dimension`、`rule_code`、`score_awarded`、`max_score`、`evidence_refs JSONB`、`matched_facts JSONB`、`explanation`、`sort_order`。
+
+`evidence_refs` 只保存当前评分快照中的条目级证据 ID；`matched_facts` 保存这些 ID
+解析后的来源路径、具体值和允许维度，便于不调用模型完成审计。现有 JSONB 字段足以
+承载该结构，本阶段不新增数据库列。
 
 ### 3.17 `job_rejections`
 

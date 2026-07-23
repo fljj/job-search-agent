@@ -182,7 +182,9 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 
 ### `GET /api/v1/scores/{score_id}`
 
-返回完整评分、明细、排除证据和输入快照摘要。敏感原始数据按权限裁剪。
+返回完整评分、明细、排除证据和输入快照摘要。评分明细的 `evidence_refs` 为
+`evidence:<sha256>` 条目级 ID，`matched_facts.evidence_items` 返回对应来源路径、
+具体值和允许维度。敏感原始数据按权限裁剪。
 
 ## 7. HTTP 状态和错误码
 
@@ -192,7 +194,7 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 | 401 | `UNAUTHENTICATED` | 未建立用户身份 |
 | 403 | `FORBIDDEN` | 无资源访问权限 |
 | 404 | `RESOURCE_NOT_FOUND` | 资源不存在或不属于当前用户 |
-| 422 | `LLM_OUTPUT_INVALID` | 模型输出缺字段、分值越界、求和不一致或证据非法 |
+| 422 | `LLM_OUTPUT_INVALID` | 模型输出缺字段、分值越界、求和不一致、证据不存在、跨维度或已过期 |
 | 429 | `LLM_RATE_LIMITED` | 模型供应商限流，本轮不执行自动写操作 |
 | 502 | `LLM_PROVIDER_ERROR` | 模型供应商返回错误或无有效响应 |
 | 503 | `LLM_UNAVAILABLE` | 模型未配置、超时或暂时不可用 |

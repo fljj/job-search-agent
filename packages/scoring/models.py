@@ -165,11 +165,19 @@ class RejectionReason(BaseModel):
     evidence: dict[str, object] = Field(default_factory=dict)
 
 
+class ScoringEvidenceItem(BaseModel):
+    id: str = Field(pattern=r"^evidence:[0-9a-f]{64}$")
+    source_path: str
+    value: object
+    dimensions: list[str] = Field(min_length=1)
+
+
 class ScoringContext(BaseModel):
     job: JobInput
     parsed_job: ParsedJob
     candidate: CandidateProfile
     strategy: Strategy
+    evidence_items: list[ScoringEvidenceItem] = Field(default_factory=list)
 
 
 class ScoreResult(BaseModel):

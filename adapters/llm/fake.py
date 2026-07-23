@@ -18,6 +18,7 @@ from packages.llm.models import (
     ScoreDimension,
 )
 from packages.scoring.engine import score_job
+from packages.scoring.evidence import evidence_catalog
 from packages.scoring.models import ScoringContext
 
 
@@ -51,13 +52,20 @@ class FakeLlmProvider:
 
     def score_job(self, request: ScoringContext) -> LlmResult[JobScoreOutput]:
         legacy = score_job(request)
+        catalog = evidence_catalog(request)
         dimensions = [
             ScoreDimension(
                 dimension=detail.dimension,
                 score=detail.score,
                 max_score=detail.max_score,
                 reason=detail.explanation,
-                evidence_refs=[_fake_evidence_ref(detail.dimension)],
+                evidence_refs=[
+                    next(
+                        item.id
+                        for item in catalog.values()
+                        if detail.dimension in item.dimensions
+                    )
+                ],
             )
             for detail in legacy.details
         ]
@@ -148,15 +156,3 @@ class FakeLlmProvider:
                 latency_ms=0,
             ),
         )
-
-
-def _fake_evidence_ref(dimension: str) -> str:
-    return {
-        "title": "job.title",
-        "skills": "candidate.skills",
-        "experience": "candidate.total_years",
-        "location": "job.work_mode",
-        "salary": "job.salary_text",
-        "industry": "job.industry",
-        "management": "candidate.management_years",
-    }[dimension]

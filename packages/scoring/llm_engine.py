@@ -4,6 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from packages.job_parser.models import SourceJobStatus
 from packages.llm.models import JobScoreOutput
 from packages.scoring.engine import grade_for_score
+from packages.scoring.evidence import evidence_catalog
 from packages.scoring.hard_filters import evaluate_hard_filters
 from packages.scoring.models import (
     DIMENSION_MAX,
@@ -14,36 +15,7 @@ from packages.scoring.models import (
     ScoringContext,
 )
 
-LLM_SCORING_VERSION = "llm:1.0.0"
-
-EVIDENCE_REFS: dict[str, set[str]] = {
-    "title": {"job.title", "strategy.title_rules"},
-    "skills": {
-        "parsed_job.required_skills",
-        "parsed_job.preferred_skills",
-        "candidate.skills",
-        "strategy.core_required_skills",
-    },
-    "experience": {
-        "parsed_job.years_required",
-        "candidate.total_years",
-        "candidate.has_core_system_experience",
-        "candidate.industry_experiences",
-    },
-    "location": {"job.work_mode", "job.location", "strategy.work_mode_rules"},
-    "salary": {"job.salary_text", "parsed_job.salary", "strategy.salary_rules"},
-    "industry": {
-        "job.industry",
-        "candidate.industry_experiences",
-        "strategy.industry_rules",
-    },
-    "management": {
-        "parsed_job.management_required",
-        "parsed_job.seniority_level",
-        "candidate.management_years",
-        "candidate.has_architecture_experience",
-    },
-}
+LLM_SCORING_VERSION = "llm:1.1.0"
 
 
 class LlmScoreValidationError(ValueError):
@@ -63,6 +35,10 @@ def validate_llm_score(
         raise LlmScoreValidationError("模型评分包含重复维度")
     if set(dimensions) != expected:
         raise LlmScoreValidationError("模型评分维度不完整或包含未知维度")
+    try:
+        catalog = evidence_catalog(context)
+    except ValueError as exc:
+        raise LlmScoreValidationError(str(exc)) from exc
 
     details: list[ScoreDetail] = []
     for item in output.dimensions:
@@ -76,9 +52,22 @@ def validate_llm_score(
             raise LlmScoreValidationError(f"{item.dimension} 维度分数最多保留两位小数")
         if not item.evidence_refs:
             raise LlmScoreValidationError(f"{item.dimension} 维度缺少证据引用")
-        invalid_refs = set(item.evidence_refs) - EVIDENCE_REFS[item.dimension]
+        if len(item.evidence_refs) != len(set(item.evidence_refs)):
+            raise LlmScoreValidationError(f"{item.dimension} 维度包含重复证据引用")
+        invalid_refs = set(item.evidence_refs) - set(catalog)
         if invalid_refs:
             raise LlmScoreValidationError(f"{item.dimension} 维度包含非法证据引用")
+        cross_dimension_refs = [
+            reference
+            for reference in item.evidence_refs
+            if item.dimension not in catalog[reference].dimensions
+        ]
+        if cross_dimension_refs:
+            raise LlmScoreValidationError(f"{item.dimension} 维度包含跨维度证据引用")
+        resolved_evidence = [
+            catalog[reference].model_dump(mode="json")
+            for reference in item.evidence_refs
+        ]
         details.append(
             ScoreDetail(
                 dimension=item.dimension,
@@ -87,7 +76,7 @@ def validate_llm_score(
                 rule_code="LLM_SEMANTIC_SCORE",
                 explanation=item.reason,
                 evidence_refs=item.evidence_refs,
-                matched_facts={"evidence_refs": item.evidence_refs},
+                matched_facts={"evidence_items": resolved_evidence},
             )
         )
 

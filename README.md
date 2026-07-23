@@ -37,10 +37,12 @@ Mac 默认使用 `CALENDAR_PROVIDER=APPLE`，通过系统 Calendar 读取所有�
 会请求“自动化/日历”权限；拒绝权限、目标日历不存在或 Calendar 不可用时，系统统一
 返回日历不可用。也可以改为 `MOCK` 做本地测试，或配置 `GOOGLE` 供应商。
 
-统一 LLM 适配器的默认测试不会访问网络。配置密钥后可显式执行一次模型消息分类冒烟：
+统一 LLM 适配器的默认测试不会访问网络。配置密钥后可显式执行一次模型消息分类冒烟，
+或执行一次不访问数据库和招聘网站的职位解析及条目级证据评分冒烟：
 
 ```bash
 python scripts/smoke_llm.py
+python scripts/smoke_llm_score.py
 ```
 
 ### 2. 初始化数据库

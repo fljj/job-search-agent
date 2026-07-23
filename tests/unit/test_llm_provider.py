@@ -149,13 +149,13 @@ def test_authorization_key_is_not_in_payload() -> None:
 
 def test_score_prompt_lists_exact_evidence_contract() -> None:
     version, prompt = PROMPTS["score_job"]
-    assert version == "job-score-v4"
+    assert version == "job-score-v5"
     assert "title=15，skills=25" in prompt
     assert "industry=10，management=5" in prompt
     assert "total_score必须等于七项score之和" in prompt
-    assert "title=[job.title,strategy.title_rules]" in prompt
-    assert "salary=[job.salary_text,parsed_job.salary,strategy.salary_rules]" in prompt
-    assert "不得创造、缩写或添加路径前缀" in prompt
+    assert "input.evidence_items中的完整id" in prompt
+    assert "具体条目id" in prompt
+    assert "不得创造、缩写或修改证据id" in prompt
 
 
 def test_greeting_prompt_requires_candidate_perspective() -> None:
