@@ -1,5 +1,6 @@
 import hashlib
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
 from packages.browser_worker.config import PlatformSelectors
@@ -85,13 +86,19 @@ def _extract_job(
     ):
         return _failure(page, platform, version, SessionStatus.SESSION_TARGET_MISMATCH,
                         "JOB_TARGET_MISMATCH")
-    job = BrowserJob(external_job_id=page.attribute(selectors.job_id, "data-job-id"),
+    source_status = "CLOSED" if page.exists(selectors.job_closed_marker) else (
+        "OPEN" if page.exists(selectors.job_open_marker) else "UNKNOWN"
+    )
+    job = BrowserJob(external_job_id=(
+                         page.attribute(selectors.job_id, "data-job-id")
+                         or _job_id_from_url(page.url)
+                     ),
                      title=title, company_name=company, industry=page.text(selectors.industry),
                      location=page.text(selectors.location),
                      work_mode=_normalize_work_mode(page.text(selectors.work_mode)),
                      salary_text=page.text(selectors.salary),
                      recruiter_name=page.text(selectors.recruiter_on_job),
-                     description=description)
+                     description=description, source_status=source_status)
     return _success(page, platform, version, PageType.JOB, job=job)
 
 
@@ -220,3 +227,8 @@ def _normalize_company_name(value: str | None) -> str | None:
     if value and value.startswith("公司名称"):
         return value.removeprefix("公司名称").strip()
     return value
+
+
+def _job_id_from_url(value: str) -> str | None:
+    name = PurePosixPath(urlparse(value).path).name
+    return name.removesuffix(".html") or None

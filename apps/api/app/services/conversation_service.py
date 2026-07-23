@@ -53,7 +53,7 @@ from packages.llm.ports import LlmProvider
 from packages.resume_selector.selector import ResumeCandidate, select_resume
 
 POLICY_VERSION = "conversation-policy-v1"
-GENERATOR_VERSION = "conversation-llm-v1"
+GENERATOR_VERSION = "conversation-llm-v4"
 
 
 def create_conversation(session: Session, payload: ConversationPayload) -> dict[str, object]:
@@ -261,12 +261,26 @@ def create_greeting_draft(
         raise ResourceNotFoundError("评分不存在")
     job = get_job_entity(session, score.job_id)
     parsed = get_parsed_entity(session, score.parsed_job_detail_id)
-    fingerprint = _fingerprint("GREETING", score.id, score.input_fingerprint, _knowledge_versions(session))
+    profile = session.get(db.CandidateProfile, score.candidate_profile_id)
+    if profile is None:
+        raise ResourceNotFoundError("候选人资料不存在")
+    fingerprint = _fingerprint(
+        "GREETING",
+        GENERATOR_VERSION,
+        score.id,
+        score.input_fingerprint,
+        _knowledge_versions(session),
+        profile.version,
+    )
     existing = session.scalar(select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint))
     if existing:
         return _draft_response(session, existing)
     llm_provider = provider or build_llm_provider(get_settings())
-    facts = _knowledge_facts(session)
+    profile_facts = _profile_facts(
+        profile,
+        parsed.required_skills + parsed.preferred_skills,
+    )
+    facts = profile_facts + _knowledge_facts(session)
     usable = [
         fact
         for fact in facts
@@ -285,7 +299,7 @@ def create_greeting_draft(
             LlmGreetingRequest(
                 company_name=job.company_name,
                 job_title=job.title,
-                matched_skills=(parsed.required_skills + parsed.preferred_skills)[:5],
+                matched_skills=[fact.fact for fact in profile_facts[1:5]],
                 facts=[
                     TrustedFact(id=fact.id, content=fact.fact)
                     for fact in usable
@@ -501,6 +515,67 @@ def _knowledge_facts(session: Session) -> list[KnowledgeFact]:
 
 def _knowledge_versions(session: Session) -> list[tuple[str, int]]:
     return sorted((str(item.id), item.version) for item in get_knowledge_entities(session))
+
+
+def _profile_facts(
+    profile: db.CandidateProfile,
+    desired_skills: list[str],
+) -> list[KnowledgeFact]:
+    """将用户已确认的候选人资料作为可追溯事实提供给招呼语生成器。"""
+    verified_at = profile.updated_at or profile.created_at or datetime.now(UTC)
+    experience_parts = [f"拥有{profile.total_years:g}年工作经验"]
+    if profile.management_years:
+        experience_parts.append(f"其中{profile.management_years:g}年管理经验")
+    if profile.has_architecture_experience:
+        experience_parts.append("具备架构经验")
+    if profile.has_core_system_experience:
+        experience_parts.append("具备核心系统经验")
+    facts = [
+        KnowledgeFact(
+            id=profile.id,
+            category="PROFILE",
+            key="experience_summary",
+            fact="，".join(experience_parts),
+            source="candidate_profile",
+            allowed_for_auto_reply=True,
+            sensitivity="NORMAL",
+            verified_at=verified_at,
+            version=profile.version,
+        )
+    ]
+    normalized_targets = [item.casefold().replace(" ", "") for item in desired_skills]
+    skills = sorted(
+        profile.skills,
+        key=lambda skill: (
+            0
+            if any(
+                skill.normalized_name.casefold().replace(" ", "") in target
+                or target in skill.normalized_name.casefold().replace(" ", "")
+                for target in normalized_targets
+            )
+            else 1,
+            0 if skill.is_core else 1,
+            skill.normalized_name,
+        ),
+    )
+    facts.extend(
+        KnowledgeFact(
+            id=skill.id,
+            category="SKILL",
+            key=skill.normalized_name,
+            fact=(
+                f"具备{skill.name}技能"
+                + (f"，相关经验{skill.years:g}年" if skill.years is not None else "")
+            ),
+            source=skill.source,
+            allowed_for_auto_reply=True,
+            sensitivity="NORMAL",
+            verified_at=skill.updated_at or skill.created_at or verified_at,
+            version=profile.version,
+        )
+        for skill in skills
+    )
+    return facts
 
 
 def _bind_current_score(

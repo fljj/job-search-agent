@@ -93,7 +93,7 @@ def _import_extraction(
             company_name=result.job.company_name, industry=result.job.industry,
             location=result.job.location, work_mode=result.job.work_mode,
             salary_text=result.job.salary_text, description=result.job.description,
-            source_status="UNKNOWN", source=payload.platform.value,
+            source_status=result.job.source_status, source=payload.platform.value,
         ))
         run.imported_job_id = imported.job.id
         return

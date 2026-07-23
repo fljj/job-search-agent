@@ -46,6 +46,7 @@ class BrowserJob(BaseModel):
     salary_text: str | None = None
     recruiter_name: str | None = None
     description: str
+    source_status: str = "UNKNOWN"
 
 
 class BrowserMessage(BaseModel):

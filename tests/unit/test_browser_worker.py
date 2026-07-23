@@ -42,7 +42,7 @@ def job_page(platform: Platform) -> tuple[FakePage, PlatformSelectors]:
     selectors = config.platforms[platform.value]
     host = "www.zhipin.com" if platform is Platform.BOSS else "maimai.cn"
     page = FakePage(url=f"https://{host}/job/abc")
-    page.visible = {selectors.login_marker, selectors.job_root}
+    page.visible = {selectors.login_marker, selectors.job_root, selectors.job_open_marker}
     page.texts = {
         selectors.job_title: "高级Java后端工程师",
         selectors.company: "示例科技",
@@ -63,6 +63,15 @@ def test_extracts_supported_platform_job_fixture(platform: Platform) -> None:
     assert result.status is SessionStatus.SESSION_READY
     assert result.page_type is PageType.JOB
     assert result.job and result.job.work_mode == "REMOTE"
+    assert result.job.source_status == "OPEN"
+    assert result.job.external_job_id == "job-abc"
+
+
+def test_closed_marker_takes_priority_over_open_action() -> None:
+    page, selectors = job_page(Platform.BOSS)
+    page.visible.add(selectors.job_closed_marker)
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+    assert result.job and result.job.source_status == "CLOSED"
 
 
 def test_normalizes_boss_company_accessibility_prefix() -> None:

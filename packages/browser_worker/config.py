@@ -22,6 +22,8 @@ class PlatformSelectors(BaseModel):
     salary: str
     description: str
     recruiter_on_job: str
+    job_open_marker: str
+    job_closed_marker: str
     conversation_list_root: str
     conversation_list_items: str
     conversation_list_item_id_attribute: str
