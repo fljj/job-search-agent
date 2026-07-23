@@ -12,15 +12,34 @@ from playwright.sync_api import (
     Error as PlaywrightError,
 )
 
+from adapters.browser.maimai_recommendations import (
+    MaimaiRecommendationAdapter,
+    MaimaiRecommendationCard,
+)
 from adapters.browser.playwright_reader import (
     PlaywrightPageReader,
     RawCdpPageReader,
     validate_local_cdp_url,
 )
+from apps.api.app.core.recommendation_config import get_recommendation_rules
 from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome, ExecutionResult
 from packages.browser_worker.config import BrowserSelectorsConfig
 from packages.browser_worker.extractor import extract_current_page
 from packages.browser_worker.models import Platform, SessionStatus
+
+
+def _recommendation_card(command: ApprovedCommand) -> MaimaiRecommendationCard:
+    if not command.conversation_key:
+        raise ValueError("推荐动作缺少平台推荐 ID")
+    return MaimaiRecommendationCard(
+        external_recommendation_id=command.conversation_key,
+        recruiter_name=command.recruiter,
+        recruiter_title="",
+        company_name=command.company,
+        job_title=command.job_title,
+        description_summary=command.content,
+        card_text=command.content or command.job_title,
+    )
 
 
 class PlaywrightActionExecutor:
@@ -31,6 +50,16 @@ class PlaywrightActionExecutor:
 
     def execute(self, cdp_url: str, command: ApprovedCommand) -> ExecutionResult:
         validate_local_cdp_url(cdp_url)
+        if command.action_type in {
+            "PLATFORM_RECOMMENDATION_ACCEPT",
+            "PLATFORM_RECOMMENDATION_REJECT",
+        }:
+            return MaimaiRecommendationAdapter().execute(
+                cdp_url,
+                _recommendation_card(command),
+                accept=command.action_type.endswith("ACCEPT"),
+                rules=get_recommendation_rules(),
+            )
         if command.action_type == "GREETING":
             return self._execute_greeting_over_raw_cdp(cdp_url, command)
         if command.action_type in {"REPLY", "LOW_SCORE_DECLINE"}:
@@ -239,6 +268,16 @@ class PlaywrightActionExecutor:
     def observe(self, cdp_url: str, command: ApprovedCommand) -> ExecutionResult:
         """只读对账文本动作；确认唯一目标页后判断精确内容是否已经出现。"""
         validate_local_cdp_url(cdp_url)
+        if command.action_type in {
+            "PLATFORM_RECOMMENDATION_ACCEPT",
+            "PLATFORM_RECOMMENDATION_REJECT",
+        }:
+            return MaimaiRecommendationAdapter().observe(
+                cdp_url,
+                _recommendation_card(command),
+                accept=command.action_type.endswith("ACCEPT"),
+                rules=get_recommendation_rules(),
+            )
         if command.action_type not in {"REPLY", "LOW_SCORE_DECLINE"}:
             return ExecutionResult(
                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,

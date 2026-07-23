@@ -8,6 +8,7 @@ import socket
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from uuid import UUID
 
 from sqlalchemy import select
 
@@ -35,6 +36,10 @@ from apps.api.app.services.operations_service import (
     stop_worker,
     worker_preflight,
 )
+from apps.api.app.services.recommendation_service import (
+    dispatch_recommendation,
+    scan_recommendations,
+)
 from apps.api.app.services.rollout_service import (
     allows_rollout_job_scan,
     enforce_rollout_health,
@@ -50,9 +55,9 @@ STOP_EVENT = threading.Event()
 
 
 def _build_executor(platform: str, mode: str) -> tuple[ActionExecutor, str]:
-    if platform == Platform.BOSS.value:
+    if platform in {Platform.BOSS.value, Platform.MAIMAI.value}:
         if mode != "REAL":
-            raise ValueError("BOSS 正式运行禁止使用 Fake 执行器")
+            raise ValueError("真实招聘平台正式运行禁止使用 Fake 执行器")
         return PlaywrightActionExecutor(get_browser_selectors()), "REAL_CDP"
     if platform == "MOCK":
         if mode != "FAKE":
@@ -195,6 +200,35 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             exhausted=job_batch.exhausted,
                             cursor=job_batch.scroll_position,
                         )
+                elif run.platform == Platform.MAIMAI.value:
+                    try:
+                        recommendations = scan_recommendations(
+                            session,
+                            run,
+                            cdp_url,
+                            limit=get_settings().agent_tick_batch_size,
+                        )
+                    except ValueError:
+                        pause_run(
+                            session, run_id, ["RECOMMENDATION_DISCOVERY_UNAVAILABLE"]
+                        )
+                        continue
+                    record_ready_platform_session(session, run, cdp_url)
+                    for recommendation in recommendations:
+                        if recommendation["action_status"] == "APPROVED":
+                            dispatch_recommendation(
+                                session,
+                                UUID(str(recommendation["id"])),
+                                cdp_url,
+                                executor=executor,
+                            )
+                    gray_event(
+                        logger,
+                        "RECOMMENDATION_SCAN_COMPLETED",
+                        worker_id=worker_id,
+                        run_id=run_id,
+                        scanned_count=len(recommendations),
+                    )
                 run.executor_type = executor_type
                 session.commit()
                 result = tick_run(
@@ -237,6 +271,7 @@ def maintenance_once(cdp_url: str) -> None:
     with SessionLocal() as session:
         process_reconciliation_queue(session, cdp_url)
         enforce_rollout_health(session, "BOSS")
+        enforce_rollout_health(session, "MAIMAI")
         apply_retention(session)
 
 

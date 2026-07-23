@@ -44,4 +44,11 @@ def action_limit(
         if level < RolloutLevel.RESUME_ENABLED:
             return 0
         return formal_daily_limit
+    if action_type in {
+        "PLATFORM_RECOMMENDATION_ACCEPT",
+        "PLATFORM_RECOMMENDATION_REJECT",
+    }:
+        if level < RolloutLevel.RESUME_ENABLED:
+            return 0
+        return formal_daily_limit
     return 0

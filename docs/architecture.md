@@ -432,7 +432,7 @@ LIST_READY → OPENING_CONVERSATION → VERIFYING_TARGET → READING_MESSAGES
 → 读取推荐卡片并生成稳定推荐 ID
 → recommendation_policy 执行受控简化判断
 → ACCEPT_AND_SEND_PROFILE / REJECT_RECOMMENDATION / DENY
-→ action_service 原子创建唯一动作
+→ recommendation_service 在灰度与双开关允许后原子创建唯一动作
 → maimai_adapter 重新核对招聘人、岗位和唯一“同意/拒绝”控件
 → 点击并回读已发送/已拒绝证据
 → 成功追加审计；未知进入对账
@@ -443,6 +443,10 @@ LIST_READY → OPENING_CONVERSATION → VERIFYING_TARGET → READING_MESSAGES
 点击；它不得判断岗位是否相关。`recommendation_policy` 只根据受控词表、策略黑名单
 和卡片结构化字段决策，不操作页面。普通 `scoring` 模块不为信息不足的推荐卡片生成
 虚假分数。
+
+Worker 仅在 MAIMAI 运行、全局/平台/策略自动化均启用、推荐开关开启且灰度达到第五级
+时执行推荐动作。同意动作还要求推荐简历开关；扫描、判断和动作执行通过稳定推荐 ID
+及 `ActionQueue` 唯一指纹去重，结果未知只能进入只读对账。
 
 ## 13. 第六阶段排期流程
 

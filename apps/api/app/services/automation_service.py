@@ -335,6 +335,14 @@ def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> Auto
             rules.low_score_decline_enabled and row.low_score_decline_enabled
         )
         rules.auto_resume_enabled = rules.auto_resume_enabled and row.auto_resume_enabled
+        rules.maimai_recommendation_enabled = (
+            rules.maimai_recommendation_enabled
+            and row.maimai_recommendation_enabled
+        )
+        rules.maimai_recommendation_resume_enabled = (
+            rules.maimai_recommendation_resume_enabled
+            and row.maimai_recommendation_resume_enabled
+        )
         rules.auto_greet_min_score = max(rules.auto_greet_min_score, row.auto_greet_min_score)
         rules.auto_reply_min_confidence = max(rules.auto_reply_min_confidence, float(row.auto_reply_min_confidence))
         rules.auto_resume_min_score = max(rules.auto_resume_min_score, row.auto_resume_min_score)
@@ -365,6 +373,8 @@ def _rules(row: db.AutomationSetting) -> AutomationRules:
         low_score_decline_enabled=row.low_score_decline_enabled,
         auto_reply_min_confidence=float(row.auto_reply_min_confidence),
         auto_resume_enabled=row.auto_resume_enabled, auto_resume_min_score=row.auto_resume_min_score,
+        maimai_recommendation_enabled=row.maimai_recommendation_enabled,
+        maimai_recommendation_resume_enabled=row.maimai_recommendation_resume_enabled,
         hourly_limit=row.hourly_limit, daily_limit=row.daily_limit,
         emergency_stop=row.emergency_stop,
         job_scan_enabled=row.job_scan_enabled,

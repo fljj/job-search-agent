@@ -226,11 +226,13 @@ users
   `DISCOVERED/DECIDED/EXECUTING/ACCEPTED/REJECTED/OUTCOME_UNKNOWN/FAILED_FINAL`。
 - 推荐判断：
   `ACCEPT_AND_SEND_PROFILE/REJECT_RECOMMENDATION/DENY`。
-- `action_queue` 增加可选 `platform_recommendation_id`；推荐动作类型为
+- `platform_recommendations.action_id` 关联唯一动作；推荐动作类型为
   `PLATFORM_RECOMMENDATION_ACCEPT/PLATFORM_RECOMMENDATION_REJECT`，不能同时绑定普通
-  `draft_id`。
-- 推荐同意成功后追加平台资料/简历发送记录，动作证据保存平台回读文本哈希，不保存
-  无必要的完整个人资料。
+  `draft_id`。不在动作表保存反向外键，避免循环依赖。
+- `automation_settings` 增加 `maimai_recommendation_enabled` 和
+  `maimai_recommendation_resume_enabled`；全局、平台和策略配置按最严格开关合并。
+- 推荐同意是平台原子完成“接受并发送资料”的单个动作；成功后在推荐记录和动作尝试中
+  保存平台回读证据，不保存无必要的完整个人资料。
 - 推荐幂等指纹由平台、外部推荐 ID、招聘人稳定标识、岗位和动作类型生成；同意和拒绝
   只能有一个达到最终成功状态。
 - 普通入站简历发送记录允许 `job_score_id` 为空，但必须保存

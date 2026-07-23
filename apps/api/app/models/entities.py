@@ -552,6 +552,12 @@ class AutomationSetting(TimestampMixin, Base):
     auto_reply_min_confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0.90"))
     auto_resume_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_resume_min_score: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
+    maimai_recommendation_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    maimai_recommendation_resume_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     hourly_limit: Mapped[int] = mapped_column(Integer, default=10)
     daily_limit: Mapped[int] = mapped_column(Integer, default=50)
     emergency_stop: Mapped[bool] = mapped_column(
@@ -627,6 +633,49 @@ class ResumeSendRecord(Base):
     action_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("action_queue.id"))
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     external_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class PlatformRecommendation(TimestampMixin, Base):
+    __tablename__ = "platform_recommendations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "external_recommendation_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE")
+    )
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    platform: Mapped[str] = mapped_column(String(30))
+    external_recommendation_id: Mapped[str] = mapped_column(String(200))
+    recruiter_name: Mapped[str] = mapped_column(String(100))
+    company_name: Mapped[str] = mapped_column(String(200))
+    job_title: Mapped[str] = mapped_column(String(200))
+    location: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    salary_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    description_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    card_hash: Mapped[str] = mapped_column(String(64))
+    decision: Mapped[str] = mapped_column(String(50))
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(30), default="DECIDED")
+    action_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "action_queue.id",
+            ondelete="SET NULL",
+            name="fk_platform_recommendations_action",
+        ),
+        nullable=True,
+    )
+    observed_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class AuditEvent(Base):
