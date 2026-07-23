@@ -15,6 +15,8 @@ class CalendarEventPayload(BaseModel):
 
     @model_validator(mode="after")
     def validate_range(self) -> "CalendarEventPayload":
+        if self.start_at.utcoffset() is None or self.end_at.utcoffset() is None:
+            raise ValueError("日历事件时间必须包含时区")
         if self.end_at <= self.start_at:
             raise ValueError("日历事件结束时间必须晚于开始时间")
         return self
@@ -35,9 +37,14 @@ class ApproveScheduleRequest(BaseModel):
     def validate_selection(self) -> "ApproveScheduleRequest":
         if bool(self.selected_start_at) != bool(self.selected_end_at):
             raise ValueError("候选开始和结束时间必须同时提供")
-        if (self.selected_start_at is not None and self.selected_end_at is not None
-                and self.selected_end_at <= self.selected_start_at):
-            raise ValueError("候选结束时间必须晚于开始时间")
+        if self.selected_start_at is not None and self.selected_end_at is not None:
+            if (
+                self.selected_start_at.utcoffset() is None
+                or self.selected_end_at.utcoffset() is None
+            ):
+                raise ValueError("候选时间必须包含时区")
+            if self.selected_end_at <= self.selected_start_at:
+                raise ValueError("候选结束时间必须晚于开始时间")
         return self
 
 

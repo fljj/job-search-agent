@@ -100,17 +100,12 @@ def dispatch(
         raise ResourceNotFoundError("草稿不存在")
     if draft.conversation_id and draft.conversation_id != conversation.id:
         raise ValueError("草稿与对话不匹配")
+    if payload.action_type != draft.draft_type:
+        raise ValueError("动作类型与草稿类型不匹配")
     job = session.get(db.Job, conversation.job_id)
-    scoreless_inbound = (
-        draft.job_score_id is None
-        and payload.action_type in {"REPLY", "RESUME", "MISMATCH_DECLINE"}
-    )
-    if job is None and not scoreless_inbound:
+    inbound_action = payload.action_type != "GREETING"
+    if job is None and not inbound_action:
         raise ResourceNotFoundError("职位不存在")
-    inbound_action = (
-        payload.action_type in {"RESUME", "MISMATCH_DECLINE"}
-        or scoreless_inbound
-    )
     if inbound_action:
         score = (
             session.get(db.JobScore, conversation.latest_job_score_id)
@@ -135,7 +130,15 @@ def dispatch(
     )
     if original is None:
         raise ValueError("草稿缺少原始策略决策")
-    resume = _resume(session, payload.resume_id, conversation.platform) if payload.action_type == "RESUME" else None
+    if original.action_type != payload.action_type:
+        raise ValueError("动作类型与原始策略决策不匹配")
+    if payload.action_type == "RESUME":
+        expected_resume_id = original.input_snapshot.get("resume_id")
+        if expected_resume_id != str(payload.resume_id):
+            raise ValueError("简历附件与草稿策略决策不匹配")
+        resume = _resume(session, payload.resume_id, conversation.platform)
+    else:
+        resume = None
     counts = _rate_counts(session, conversation.platform)
     context = AutomationContext(
         action_type=payload.action_type,
@@ -190,9 +193,9 @@ def dispatch(
         session,
         conversation,
         job,
-        score,
         strategy_id,
         draft,
+        original,
         policy,
         resume,
         agent_run_id,
@@ -462,8 +465,9 @@ def _rate_counts(session: Session, platform: str) -> tuple[int, int]:
 
 
 def _create_auto_action(session: Session, conversation: db.Conversation, job: db.Job | None,
-                        score: db.JobScore | None, strategy_id: UUID,
+                        strategy_id: UUID,
                         draft: db.GeneratedDraft,
+                        original: db.PolicyDecision,
                         policy: db.PolicyDecision, resume: db.Resume | None,
                         agent_run_id: UUID | None = None) -> db.ActionQueue:
     fingerprint = hashlib.sha256(
@@ -472,13 +476,18 @@ def _create_auto_action(session: Session, conversation: db.Conversation, job: db
     existing = session.scalar(select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == fingerprint))
     if existing:
         return existing
+    evidence = original.input_snapshot.get("evidence_message_ids")
+    evidence_message_ids = (
+        [str(item) for item in evidence]
+        if isinstance(evidence, list)
+        else conversation.qualification_message_ids
+    )
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID, confirmation_task_id=None, policy_decision_id=policy.id,
         strategy_id=strategy_id, authorization_source="AUTO",
-        authorization_basis=(
-            "INBOUND_EXPLICIT_RESUME_REQUEST"
-            if policy.action_type == "RESUME"
-            else (
+        authorization_basis=str(
+            original.input_snapshot.get("authorization_basis")
+            or (
                 "QUALIFICATION_MISMATCH"
                 if policy.action_type == "MISMATCH_DECLINE"
                 else "AUTOMATION_POLICY"
@@ -489,13 +498,19 @@ def _create_auto_action(session: Session, conversation: db.Conversation, job: db
             "evidence": conversation.qualification_evidence,
             "version": conversation.qualification_version,
         },
-        evidence_message_ids=conversation.qualification_message_ids,
+        evidence_message_ids=evidence_message_ids,
         agent_run_id=agent_run_id,
         conversation_id=conversation.id, draft_id=draft.id, resume_id=resume.id if resume else None,
         action_type=policy.action_type, status=ActionStatus.APPROVED.value,
         content=None if resume else draft.content, platform=conversation.platform,
-        target_company=job.company_name if job else "未知公司",
-        target_job_title=job.title if job else "未知岗位",
+        target_company=(
+            job.company_name
+            if job
+            else conversation.observed_company_name or "未知公司"
+        ),
+        target_job_title=(
+            job.title if job else conversation.observed_job_title or "未知岗位"
+        ),
         target_recruiter=conversation.recruiter_name,
         target_conversation_key=conversation.external_conversation_id,
         attachment_name=resume.attachment_name if resume else None,

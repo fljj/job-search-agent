@@ -1,7 +1,7 @@
 from datetime import datetime, time
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class EventType(StrEnum):
@@ -35,6 +35,17 @@ class SchedulingConfig(BaseModel):
     confirmation_ttl_minutes: int = Field(default=120, ge=5, le=1440)
     calendar_snapshot_ttl_minutes: int = Field(default=15, ge=1, le=120)
     suggestion_count: int = Field(default=3, ge=2, le=3)
+
+    @model_validator(mode="after")
+    def validate_availability_window(self) -> "SchedulingConfig":
+        if not (
+            self.workday_start
+            < self.lunch_start
+            < self.lunch_end
+            < self.workday_end
+        ):
+            raise ValueError("工作时间和午休时间必须按开始、午休、结束顺序配置")
+        return self
 
 
 class ParsedInvitation(BaseModel):

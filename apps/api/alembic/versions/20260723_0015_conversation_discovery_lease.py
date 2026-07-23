@@ -14,18 +14,28 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "conversations",
-        sa.Column("processing_lease_owner", sa.String(length=100), nullable=True),
-    )
-    op.add_column(
-        "conversations",
-        sa.Column(
-            "processing_lease_expires_at",
-            sa.DateTime(timezone=True),
-            nullable=True,
-        ),
-    )
+    columns = {
+        column["name"]
+        for column in sa.inspect(op.get_bind()).get_columns("conversations")
+    }
+    if "processing_lease_owner" not in columns:
+        op.add_column(
+            "conversations",
+            sa.Column(
+                "processing_lease_owner",
+                sa.String(length=100),
+                nullable=True,
+            ),
+        )
+    if "processing_lease_expires_at" not in columns:
+        op.add_column(
+            "conversations",
+            sa.Column(
+                "processing_lease_expires_at",
+                sa.DateTime(timezone=True),
+                nullable=True,
+            ),
+        )
 
 
 def downgrade() -> None:

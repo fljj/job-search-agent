@@ -5,5 +5,24 @@
   "missing_fact_reply": "这部分信息我需要确认一下，稍后回复您。",
   "max_greeting_facts": 3,
   "max_greeting_skills": 3,
-  "platform_default_greetings": {}
+  "platform_default_greetings": {},
+  "prohibited_direction_keywords": [
+    "保险销售",
+    "保险代理",
+    "保险增员",
+    "拉人头",
+    "刷单",
+    "交费入职"
+  ],
+  "related_direction_keywords": [
+    "java",
+    "后端",
+    "开发",
+    "架构",
+    "ai",
+    "大模型",
+    "vibe coding",
+    "vibecoding",
+    "直播运营"
+  ]
 }

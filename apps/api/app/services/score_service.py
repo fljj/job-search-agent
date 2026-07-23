@@ -49,6 +49,7 @@ def create_score(
         raise ValueError("已停用策略不能用于新评分")
     if strategy.candidate_profile_id != profile.id:
         raise ValueError("策略与候选人资料不匹配")
+    llm_provider = provider or build_llm_provider(get_settings())
     parsed_record: db.ParsedJobDetail | None
     if request.parsed_job_detail_id:
         parsed_record = get_parsed_entity(session, request.parsed_job_detail_id)
@@ -62,10 +63,18 @@ def create_score(
             .limit(1)
         )
         if parsed_record is None:
-            parsed_response = parse_job(session, job.id, "LLM", provider=provider)
+            parsed_response = parse_job(
+                session, job.id, "LLM", provider=llm_provider
+            )
             parsed_record = get_parsed_entity(session, parsed_response.id)
     assert parsed_record is not None
-    base_fingerprint = _fingerprint(job.id, strategy, profile, parsed_record)
+    base_fingerprint = _fingerprint(
+        job.id,
+        strategy,
+        profile,
+        parsed_record,
+        llm_provider,
+    )
     fingerprint = (
         hashlib.sha256(f"{base_fingerprint}:reassess:{reassessment_key}".encode()).hexdigest()
         if reassessment_key is not None
@@ -88,7 +97,6 @@ def create_score(
     )
     context = ScoringContext(job=to_job_domain(job), parsed_job=to_parsed_domain(parsed_record),
                              candidate=candidate, strategy=strategy_to_domain(strategy))
-    llm_provider = provider or build_llm_provider(get_settings())
     try:
         llm_result = llm_provider.score_job(context)
     except LlmProviderError as exc:
@@ -193,10 +201,16 @@ def list_scores(
     return [_response(session, row) for row in rows], total
 
 
-def _fingerprint(job_id: object, strategy: db.JobStrategy, profile: db.CandidateProfile,
-                 parsed: db.ParsedJobDetail) -> str:
+def _fingerprint(
+    job_id: object,
+    strategy: db.JobStrategy,
+    profile: db.CandidateProfile,
+    parsed: db.ParsedJobDetail,
+    provider: LlmProvider,
+) -> str:
     payload = [str(job_id), str(strategy.id), strategy.version, str(profile.id), profile.version,
-               str(parsed.id), LLM_SCORING_VERSION]
+               str(parsed.id), LLM_SCORING_VERSION, provider.provider_name,
+               provider.model_name, provider.prompt_version("score_job")]
     return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
 

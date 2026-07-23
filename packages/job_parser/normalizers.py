@@ -68,6 +68,19 @@ def parse_salary(text: str | None) -> SalaryRange | None:
             is_pre_tax=False if "税后" in text else True if "税前" in text else None,
         )
 
+    monthly_yuan = re.search(
+        r"(\d{4,6}(?:\.\d+)?)\s*[-~—至]\s*(\d{4,6}(?:\.\d+)?)\s*元(?:/月|每月)?",
+        text,
+    )
+    if monthly_yuan:
+        return SalaryRange(
+            minimum_monthly_k=Decimal(monthly_yuan.group(1)) / Decimal(1000),
+            maximum_monthly_k=Decimal(monthly_yuan.group(2)) / Decimal(1000),
+            salary_months=12,
+            inferred_months=True,
+            is_pre_tax=False if "税后" in text else True if "税前" in text else None,
+        )
+
     annual = re.search(r"(\d+(?:\.\d+)?)\s*[-~—至]\s*(\d+(?:\.\d+)?)\s*[wW万]/?年?", text)
     if annual:
         months_match = re.search(r"(\d{2})\s*薪", text)

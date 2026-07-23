@@ -447,12 +447,20 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "message_id": explicit_message["id"], "calendar_available": True,
     }).json()["data"]
     assert schedule["calendar_status"] == "AVAILABLE"
+    assert schedule["company_name"] == job_payload["company_name"]
+    assert schedule["job_title"] == job_payload["title"]
+    assert schedule["recruiter_name"] == "集成测试招聘人"
+    assert schedule["qualification_status"] == "FULL_MATCH"
     prior_schedule = next(
         item
         for item in client.get("/api/v1/scheduling/requests").json()["data"]["items"]
         if item["id"] == unavailable_schedule.json()["data"]["id"]
     )
     assert prior_schedule["status"] == "SUPERSEDED"
+    unsafe_schedule = client.post(f"/api/v1/scheduling/requests/{schedule['id']}/approve", json={
+        "reply_content": "我的身份证号是 370000000000000000", "create_calendar_event": False,
+    })
+    assert unsafe_schedule.status_code == 400
     approved_schedule = client.post(f"/api/v1/scheduling/requests/{schedule['id']}/approve", json={
         "reply_content": schedule["suggested_reply"], "create_calendar_event": True,
     })
@@ -474,12 +482,27 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     changed_schedule = client.post("/api/v1/scheduling/analyze", json={
         "message_id": changed_message["id"], "calendar_available": True,
     }).json()["data"]
-    client.post(f"/api/v1/scheduling/requests/{changed_schedule['id']}/approve", json={
-        "reply_content": changed_schedule["suggested_reply"], "create_calendar_event": False,
+    selected_slot = (
+        changed_schedule["candidate_slots"][0]
+        if changed_schedule["candidate_slots"]
+        else {
+            "start_at": changed_schedule["start_at"],
+            "end_at": changed_schedule["end_at"],
+        }
+    )
+    selected_start = datetime.fromisoformat(selected_slot["start_at"])
+    selected_end = datetime.fromisoformat(selected_slot["end_at"])
+    changed_approval = client.post(f"/api/v1/scheduling/requests/{changed_schedule['id']}/approve", json={
+        "reply_content": changed_schedule["suggested_reply"],
+        "selected_start_at": selected_slot["start_at"],
+        "selected_end_at": selected_slot["end_at"],
+        "create_calendar_event": False,
     })
+    assert changed_approval.status_code == 200
     client.post("/api/v1/scheduling/calendar-events", json={
         "external_event_id": "new-conflict", "title": "新增忙碌",
-        "start_at": "2026-07-24T14:45:00+08:00", "end_at": "2026-07-24T16:30:00+08:00",
+        "start_at": (selected_start - timedelta(minutes=5)).isoformat(),
+        "end_at": (selected_end + timedelta(minutes=5)).isoformat(),
         "availability": "BUSY",
     })
     blocked_schedule = client.post(
@@ -609,6 +632,20 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     with Session(lease_engine, expire_on_commit=False) as discovery_session:
         run_entity = discovery_session.get(entities.AgentRun, discovery_run_id)
         assert run_entity is not None
+        discovery_session.add(
+            entities.RolloutControl(
+                user_id=run_entity.user_id,
+                platform="BOSS",
+                status="ACTIVE",
+                current_level=4,
+                previous_level=3,
+                stage_started_at=proactive_now - timedelta(hours=24),
+                minimum_stage_hours=24,
+                reply_daily_limit=5,
+                greeting_daily_limit=3,
+            )
+        )
+        discovery_session.flush()
         proactive_counts = process_job_discovery_batch(
             discovery_session,
             run_entity,

@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from sqlalchemy.orm import Session
@@ -108,7 +107,7 @@ def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:
 def test_successful_discovery_records_ready_platform_session() -> None:
     session = MagicMock(spec=Session)
     session.scalar.return_value = None
-    run = SimpleNamespace(platform="BOSS")
+    run = db.AgentRun(platform="BOSS")
 
     record_ready_platform_session(
         session,

@@ -63,6 +63,12 @@ class JobInput(BaseModel):
     source: str = "MOCK"
 
 
+class RuleParserConfig(BaseModel):
+    outsourcing_keywords: list[str] = Field(default_factory=list)
+    headhunter_keywords: list[str] = Field(default_factory=list)
+    internship_keywords: list[str] = Field(default_factory=list)
+
+
 class ParsedJob(BaseModel):
     required_skills: list[str] = Field(default_factory=list)
     preferred_skills: list[str] = Field(default_factory=list)

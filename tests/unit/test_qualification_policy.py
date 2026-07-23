@@ -20,8 +20,12 @@ def context(**changes: object) -> QualificationContext:
         "excluded_industries": ["培训"],
         "blacklisted_companies": ["黑名单公司"],
         "enabled_work_modes": ["REMOTE", "ONSITE"],
-        "allowed_onsite_locations": ["济南"],
+        "allowed_locations": ["济南"],
         "minimum_salary_k": 20,
+        "prohibited_direction_keywords": ["保险销售", "保险增员", "刷单"],
+        "related_direction_keywords": [
+            "Java", "后端", "开发", "Vibe Coding", "直播运营"
+        ],
     }
     values.update(changes)
     return QualificationContext.model_validate(values)
@@ -60,5 +64,40 @@ def test_unknown_job_stays_unknown() -> None:
 def test_known_conflicts_are_mismatch(changes: dict[str, object]) -> None:
     assert (
         evaluate_qualification(context(**changes))[0]
+        is QualificationStatus.MISMATCH
+    )
+
+
+def test_company_blacklist_uses_normalized_exact_match() -> None:
+    assert (
+        evaluate_qualification(
+            context(
+                company_name="黑名单公司技术中心",
+                blacklisted_companies=["黑名单公司"],
+            )
+        )[0]
+        is QualificationStatus.FULL_MATCH
+    )
+
+
+def test_new_message_can_correct_stale_job_direction() -> None:
+    status, _ = evaluate_qualification(
+        context(
+            job_title="产品经理",
+            message_text="现在联系的是 Java后端开发岗位",
+        )
+    )
+    assert status is QualificationStatus.ROUGH_MATCH
+
+
+def test_hybrid_location_and_yuan_salary_are_checked() -> None:
+    assert (
+        evaluate_qualification(
+            context(work_mode="HYBRID", enabled_work_modes=["HYBRID"], location="北京")
+        )[0]
+        is QualificationStatus.MISMATCH
+    )
+    assert (
+        evaluate_qualification(context(salary_text="10000-15000元/月"))[0]
         is QualificationStatus.MISMATCH
     )

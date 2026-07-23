@@ -167,7 +167,7 @@ users
 - `Eligibility`：`ELIGIBLE/FILTERED_OUT`
 - `TitleRuleType`：`INCLUDE/EXCLUDE`
 - `IndustryRuleType`：`PREFERRED/ACCEPTABLE/EXCLUDED`
-- `ParserType`：`RULE/FAKE_LLM/QWEN`
+- `ParserType`：`RULE/FAKE_LLM/QWEN/ZHIPU`
 - `ScoreStatus`：`PENDING/SUCCEEDED/FAILED`
 - `LlmProvider`：`FAKE/QWEN/ZHIPU`
 - `LlmInvocationPurpose`：`JOB_PARSE/JOB_SCORE/INTENT_CLASSIFY/GREETING/REPLY/CONVERSATION_EVALUATE`
@@ -181,8 +181,9 @@ users
 - `resumes`：平台内附件名、适用方向和可用状态；`(user_id, platform, attachment_name)` 唯一。
 - `conversations`：平台对话、可选职位归属、`strategy_id`、可选
   `latest_job_score_id`、`qualification_status`、资格证据、证据消息 ID、资格版本和状态；
+  同时保存页面观察到的公司、职位和外部职位 ID，供尚未绑定正式职位时核对动作目标；
   `(user_id, platform, external_conversation_id)` 唯一。策略、职位绑定和资格成熟度变化
-  必须记录审计。
+  必须记录审计。删除职位时 `job_id` 置空，不级联删除对话历史。
 - `messages`：原始消息、方向、多意图和状态；`(conversation_id, external_message_id)` 唯一。
 - `generated_drafts`：招呼或回复草稿、事实引用、置信度、风险和生成器版本；`input_fingerprint` 唯一。
 - `policy_decisions`：动作类型、权限结果、原因码、策略版本和输入快照。
@@ -243,7 +244,9 @@ users
 
 ### 8.1 第五阶段数据表和字段
 
-- `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；包含独立的 `low_score_decline_enabled`，`(user_id, scope_type, scope_key)` 唯一。
+- `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及
+  小时/每日限额；`low_score_decline_enabled` 仅为历史字段，当前策略引擎不会创建
+  `LOW_SCORE_DECLINE` 动作；`(user_id, scope_type, scope_key)` 唯一。
 - `agent_runs`：保存平台、绑定策略、运行状态、心跳、短租约、游标、处理/动作/失败计数、连续失败数、暂停原因和乐观版本；同一用户和平台通过部分唯一索引最多保留一个 `RUNNING/PAUSED` 运行。
 - `agent_runs.executor_type`：记录实际执行器类型 `UNASSIGNED/REAL_CDP/FAKE`，用于启动自检和审计；正式 BOSS 运行不得记录 `FAKE`。
 - `agent_runs.cursor`：第九阶段保存消息列表分区、虚拟滚动位置、下一游标、最后会话

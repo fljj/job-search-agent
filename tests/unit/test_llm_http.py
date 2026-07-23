@@ -1,4 +1,5 @@
 import io
+from email.message import Message
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -26,7 +27,9 @@ def test_http_status_is_classified(
     monkeypatch: pytest.MonkeyPatch, status: int, expected: type[Exception]
 ) -> None:
     def fail(*args: object, **kwargs: object) -> None:
-        raise HTTPError("https://example.invalid", status, "failed", {}, io.BytesIO())
+        raise HTTPError(
+            "https://example.invalid", status, "failed", Message(), io.BytesIO()
+        )
 
     monkeypatch.setattr("adapters.llm.http.urlopen", fail)
     with pytest.raises(expected):

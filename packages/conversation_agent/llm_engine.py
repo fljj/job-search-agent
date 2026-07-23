@@ -93,7 +93,7 @@ def build_llm_reply(
     )
 
 
-def build_low_score_decline(reason_codes: list[str]) -> DraftResult:
+def build_mismatch_decline(reason_codes: list[str]) -> DraftResult:
     public_reasons: list[str] = []
     if any("LOCATION" in code or "WORK_MODE" in code for code in reason_codes):
         public_reasons.append("工作地点或工作模式与当前计划不太一致")
@@ -106,9 +106,9 @@ def build_low_score_decline(reason_codes: list[str]) -> DraftResult:
         content=f"感谢您的联系。综合考虑后，{reason}，这次先不继续沟通了，祝招聘顺利。",
         intents=[Intent.JOB_DETAIL],
         confidence=1,
-        risk_codes=["LOW_SCORE_DECLINE"],
+        risk_codes=["QUALIFICATION_MISMATCH"],
         decision=Decision.ALLOW_AUTO,
-        reason_codes=["LOW_SCORE_DECLINE_ALLOWED"],
+        reason_codes=["MISMATCH_DECLINE_ALLOWED"],
     )
 
 

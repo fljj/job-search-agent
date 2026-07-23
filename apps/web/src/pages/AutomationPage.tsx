@@ -251,7 +251,7 @@ export function AutomationPage() {
       <Space wrap>
         <Form.Item name="auto_greet_min_score" label="招呼最低分"><InputNumber min={80} max={100} /></Form.Item>
         <Form.Item name="auto_reply_min_confidence" label="回复最低置信度"><InputNumber min={.75} max={1} step={.01} /></Form.Item>
-        <Form.Item name="auto_resume_min_score" label="简历最低分"><InputNumber min={60} max={100} /></Form.Item>
+        <Form.Item name="auto_resume_min_score" label="非入站简历最低分（预留）"><InputNumber min={60} max={100} /></Form.Item>
         <Form.Item name="hourly_limit" label="每小时上限"><InputNumber min={1} max={100} /></Form.Item>
         <Form.Item name="daily_limit" label="每日上限"><InputNumber min={1} max={1000} /></Form.Item>
         <Form.Item name="hourly_scan_limit" label="每小时扫描上限"><InputNumber min={1} max={1000} /></Form.Item>

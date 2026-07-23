@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from packages.conversation_agent.intents import classify_intents
-from packages.job_parser.models import JobInput, ParsedJob
+from packages.job_parser.models import JobInput, ParsedJob, RuleParserConfig
 from packages.job_parser.rule_parser import RuleJobParser
 from packages.llm.models import (
     ConversationEvaluation,
@@ -24,8 +24,11 @@ from packages.scoring.models import ScoringContext
 class FakeLlmJobParser:
     """测试用适配器，不访问任何外部模型。"""
 
+    def __init__(self, config: RuleParserConfig | None = None) -> None:
+        self.config = config or RuleParserConfig()
+
     def parse(self, job: JobInput) -> ParsedJob:
-        parsed = RuleJobParser().parse(job)
+        parsed = RuleJobParser(self.config).parse(job)
         return parsed.model_copy(update={"parser_type": "FAKE_LLM", "parser_version": "fake-1.0.0"})
 
 

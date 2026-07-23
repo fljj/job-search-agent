@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from adapters.browser.fake_actions import FakeActionExecutor
@@ -57,7 +59,14 @@ def test_worker_executor_mode_is_explicitly_isolated() -> None:
         _build_executor("MOCK", "REAL")
 
 
-def test_only_one_worker_can_hold_process_lock() -> None:
+def test_only_one_worker_can_hold_process_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.LOCK_PATH",
+        f"{tmp_path}/agent-worker.lock",
+    )
     with _single_worker_lock(), pytest.raises(RuntimeError, match="已有 Agent Worker"):
         with _single_worker_lock():
             pytest.fail("第二个 Worker 不应取得进程锁")

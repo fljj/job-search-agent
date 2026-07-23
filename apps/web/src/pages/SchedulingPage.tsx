@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Checkbox, Input, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Card, Checkbox, Input, Select, Space, Table, Tag, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
@@ -6,6 +6,8 @@ interface ScheduleRequest {
   id: string; event_type: string; source_text: string; start_at?: string; end_at?: string
   timezone: string; status: string; calendar_status?: string; candidate_slots: Array<{ start_at: string; end_at: string }>
   suggested_reply?: string; create_calendar_event: boolean
+  platform?: string; company_name?: string; job_title?: string; recruiter_name?: string
+  qualification_status?: string; qualification_evidence: string[]
 }
 interface CalendarStatus {
   provider: string; calendar_id: string; configured: boolean; real_provider: boolean
@@ -13,8 +15,9 @@ interface CalendarStatus {
 
 export function SchedulingPage() {
   const [items, setItems] = useState<ScheduleRequest[]>([])
-  const [reply, setReply] = useState('')
-  const [createEvent, setCreateEvent] = useState(false)
+  const [replies, setReplies] = useState<Record<string, string>>({})
+  const [createEvents, setCreateEvents] = useState<Record<string, boolean>>({})
+  const [selectedSlots, setSelectedSlots] = useState<Record<string, number>>({})
   const [calendar, setCalendar] = useState<CalendarStatus>()
   const load = () => api<{ items: ScheduleRequest[] }>('/scheduling/requests').then((data) => setItems(data.items))
   useEffect(() => {
@@ -22,10 +25,19 @@ export function SchedulingPage() {
     void api<CalendarStatus>('/system/calendar-status').then(setCalendar)
   }, [])
   const approve = async (item: ScheduleRequest) => {
-    const content = reply || item.suggested_reply
+    const selectedIndex = selectedSlots[item.id]
+    const selected = selectedIndex === undefined ? undefined : item.candidate_slots[selectedIndex]
+    if (item.calendar_status !== 'AVAILABLE' && item.candidate_slots.length && !selected) {
+      return message.warning('请先选择一个服务端建议的候选时间')
+    }
+    const content = replies[item.id] || (selected
+      ? `原时间不便，${new Date(selected.start_at).toLocaleString()} 是否可以？`
+      : item.suggested_reply)
     if (!content) return message.warning('请填写确认后的回复内容')
     await api(`/scheduling/requests/${item.id}/approve`, { method: 'POST',
-      body: JSON.stringify({ reply_content: content, create_calendar_event: createEvent }) })
+      body: JSON.stringify({ reply_content: content,
+        selected_start_at: selected?.start_at, selected_end_at: selected?.end_at,
+        create_calendar_event: selected ? false : Boolean(createEvents[item.id]) }) })
     await load(); message.success('具体时间已批准，仍需单独执行发送')
   }
   const execute = async (item: ScheduleRequest) => {
@@ -45,19 +57,39 @@ export function SchedulingPage() {
         ? `真实日历 ${calendar.calendar_id}；读取忙闲与创建事件仍是独立操作。`
         : '当前使用本地模拟日历，不代表真实日历空闲。'} />
     <Card title="时间确认任务" extra={<Button onClick={() => void load()}>刷新</Button>}>
-      <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }}>
-        <Input.TextArea value={reply} onChange={(event) => setReply(event.target.value)}
-          placeholder="可选：填写修改后的回复；留空时使用任务建议回复" />
-        <Checkbox checked={createEvent} onChange={(event) => setCreateEvent(event.target.checked)}>
-          发送成功后授权创建日历事件</Checkbox>
-      </Space>
       <Table rowKey="id" dataSource={items} columns={[
+      { title: '目标', render: (_: unknown, item: ScheduleRequest) =>
+        `${item.platform ?? '-'} / ${item.company_name ?? '-'} / ${item.job_title ?? '-'} / ${item.recruiter_name ?? '-'}` },
+      { title: '资格', render: (_: unknown, item: ScheduleRequest) =>
+        <Space direction="vertical" size={0}><Tag>{item.qualification_status ?? 'UNKNOWN'}</Tag>
+          <span>{item.qualification_evidence?.join('、') || '-'}</span></Space> },
       { title: '类型', dataIndex: 'event_type' },
       { title: '原邀请', dataIndex: 'source_text' },
       { title: '解析时间', render: (_: unknown, item: ScheduleRequest) => item.start_at ? `${item.start_at} — ${item.end_at}` : '待澄清' },
       { title: '日历', dataIndex: 'calendar_status', render: (value: string) => <Tag>{value}</Tag> },
+      { title: '候选时间', render: (_: unknown, item: ScheduleRequest) => item.candidate_slots.length
+        ? <Select style={{ width: 220 }} value={selectedSlots[item.id]}
+            placeholder="选择候选时间" onChange={(value) =>
+              setSelectedSlots((current) => ({ ...current, [item.id]: value }))}
+            options={item.candidate_slots.map((slot, index) => ({
+              value: index, label: new Date(slot.start_at).toLocaleString(),
+            }))} />
+        : '-' },
       { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{value}</Tag> },
-      { title: '建议', dataIndex: 'suggested_reply' },
+      { title: '回复与日历', render: (_: unknown, item: ScheduleRequest) =>
+        <Space direction="vertical">
+          <Input.TextArea value={replies[item.id] ?? ''}
+            placeholder={item.suggested_reply || '填写确认后的回复'}
+            onChange={(event) => setReplies((current) => ({
+              ...current, [item.id]: event.target.value,
+            }))} />
+          <Checkbox checked={Boolean(createEvents[item.id])}
+            onChange={(event) => setCreateEvents((current) => ({
+              ...current, [item.id]: event.target.checked,
+            }))}>
+            发送成功后创建日历事件
+          </Checkbox>
+        </Space> },
       { title: '操作', render: (_: unknown, item: ScheduleRequest) => <Space>
         <Button disabled={item.status !== 'PENDING_APPROVAL'} onClick={() => void approve(item)}>确认时间回复</Button>
         <Button disabled={!['PENDING_APPROVAL', 'APPROVED'].includes(item.status)}

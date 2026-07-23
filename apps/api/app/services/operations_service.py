@@ -279,7 +279,10 @@ def operations_status(session: Session) -> dict[str, object]:
     settings = get_settings()
     now = datetime.now(UTC)
     try:
-        revision = session.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        with session.begin_nested():
+            revision = session.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar()
         database_ready = bool(revision)
     except SQLAlchemyError:
         revision = None
@@ -358,9 +361,11 @@ def startup_preflight(session: Session, settings: Settings) -> list[str]:
     if settings.llm_provider != "FAKE" and not settings.llm_configured:
         reasons.append("LLM_NOT_CONFIGURED")
     try:
-        if not session.execute(
-            text("SELECT version_num FROM alembic_version")
-        ).scalar():
+        with session.begin_nested():
+            revision = session.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar()
+        if not revision:
             reasons.append("DATABASE_MIGRATION_MISSING")
     except SQLAlchemyError:
         reasons.append("DATABASE_MIGRATION_MISSING")

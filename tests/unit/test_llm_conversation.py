@@ -5,7 +5,7 @@ from uuid import uuid4
 from packages.conversation_agent.llm_engine import (
     SAFE_SENSITIVE_REPLY,
     build_llm_reply,
-    build_low_score_decline,
+    build_mismatch_decline,
     has_valid_conversation_evidence,
 )
 from packages.conversation_agent.models import ConversationPolicyConfig, Decision, Intent
@@ -140,8 +140,10 @@ def test_low_confidence_uses_safe_template_without_confirmation() -> None:
     assert result.content == ConversationPolicyConfig().missing_fact_reply
 
 
-def test_low_score_decline_hides_score_and_internal_blacklist() -> None:
-    result = build_low_score_decline(["COMPANY_BLACKLISTED", "SALARY_BELOW_MINIMUM"])
+def test_mismatch_decline_hides_internal_blacklist() -> None:
+    result = build_mismatch_decline(
+        ["COMPANY_BLACKLISTED", "SALARY_BELOW_MINIMUM"]
+    )
     assert result.decision is Decision.ALLOW_AUTO
     assert "59" not in result.content
     assert "黑名单" not in result.content

@@ -15,16 +15,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("browser_read_runs", sa.Column("cursor", sa.String(500), nullable=True))
-    op.add_column(
-        "browser_read_runs",
-        sa.Column(
-            "extracted_items",
-            postgresql.JSONB(),
-            nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
-        ),
-    )
+    columns = {
+        column["name"]
+        for column in sa.inspect(op.get_bind()).get_columns("browser_read_runs")
+    }
+    if "cursor" not in columns:
+        op.add_column(
+            "browser_read_runs",
+            sa.Column("cursor", sa.String(500), nullable=True),
+        )
+    if "extracted_items" not in columns:
+        op.add_column(
+            "browser_read_runs",
+            sa.Column(
+                "extracted_items",
+                postgresql.JSONB(),
+                nullable=False,
+                server_default=sa.text("'[]'::jsonb"),
+            ),
+        )
 
 
 def downgrade() -> None:

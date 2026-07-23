@@ -10,7 +10,8 @@ from packages.scoring.models import EffectiveJobStatus, Eligibility, Grade, Scor
 
 def test_engine_sums_dimensions_and_assigns_grade(context: ScoringContext) -> None:
     result = score_job(context)
-    expected = int(sum(result.dimension_scores.values()).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    total = sum(result.dimension_scores.values(), Decimal("0"))
+    expected = int(total.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     assert result.total_score == expected
     assert result.grade == Grade.A
     assert result.eligibility == Eligibility.ELIGIBLE

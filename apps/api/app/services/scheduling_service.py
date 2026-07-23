@@ -18,6 +18,7 @@ from apps.api.app.services.action_service import execute_action
 from apps.api.app.services.errors import ResourceNotFoundError, VersionConflictError
 from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
+from packages.policy_engine.content_check import validate_edited_content
 from packages.policy_engine.state_machine import ActionStatus
 from packages.scheduling.calendar import CalendarGateway, CalendarProviderUnavailable
 from packages.scheduling.engine import check_calendar, parse_invitation, suggest_slots
@@ -83,8 +84,6 @@ def analyze_invitation(session: Session, message_id: UUID,
     conversation = session.get(db.Conversation, message.conversation_id)
     if conversation is None or conversation.user_id != DEFAULT_USER_ID:
         raise ResourceNotFoundError("对话不存在")
-    _supersede_open_requests(session, conversation.id)
-    _supersede_generic_time_confirmations(session, message.id)
     config = _config(session)
     parsed = parse_invitation(message.content, message.received_at, config)
     qualification, _ = refresh_qualification(
@@ -97,6 +96,8 @@ def analyze_invitation(session: Session, message_id: UUID,
     elif qualification.value != "FULL_MATCH":
         session.commit()
         raise ValueError("面试前必须完整了解岗位并达到完全匹配")
+    _supersede_open_requests(session, conversation.id)
+    _supersede_generic_time_confirmations(session, message.id)
     slots = _busy_slots(session)
     if gateway:
         try:
@@ -145,16 +146,36 @@ def list_requests(session: Session) -> list[dict[str, object]]:
 
 def approve_schedule(session: Session, request_id: UUID,
                      payload: ApproveScheduleRequest) -> dict[str, object]:
-    request, _, confirmation = _bundle(session, request_id)
+    request, check, confirmation = _bundle(session, request_id)
     if confirmation.status != "PENDING_APPROVAL":
         raise ValueError("排期任务不在待确认状态")
     if confirmation.expires_at < datetime.now(UTC):
         confirmation.status = "EXPIRED"
         session.commit()
         raise ValueError("排期确认已过期")
+    if validate_edited_content(payload.reply_content):
+        raise ValueError("排期回复包含不允许自动发送的敏感内容")
+    selected_start = payload.selected_start_at or request.start_at
+    selected_end = payload.selected_end_at or request.end_at
+    if selected_start is None or selected_end is None:
+        raise ValueError("必须选择明确的开始和结束时间")
+    if selected_end - selected_start != timedelta(minutes=request.duration_minutes):
+        raise ValueError("选择的时间长度与沟通类型默认时长不一致")
+    if check.status in {
+        CalendarStatus.CONFLICT.value,
+        CalendarStatus.AMBIGUOUS.value,
+        CalendarStatus.INCOMPLETE.value,
+    }:
+        candidates = {
+            (item["start_at"], item["end_at"]) for item in request.candidate_slots
+        }
+        if (selected_start.isoformat(), selected_end.isoformat()) not in candidates:
+            raise ValueError("冲突或不完整任务必须选择服务端建议的候选时间")
+        if payload.create_calendar_event:
+            raise ValueError("对方尚未确认改期候选时间，不能提前创建日历事件")
     confirmation.reply_content = payload.reply_content
-    confirmation.selected_start_at = payload.selected_start_at or request.start_at
-    confirmation.selected_end_at = payload.selected_end_at or request.end_at
+    confirmation.selected_start_at = selected_start
+    confirmation.selected_end_at = selected_end
     confirmation.create_calendar_event = payload.create_calendar_event
     confirmation.status = "APPROVED"
     request.status = "APPROVED"
@@ -197,6 +218,31 @@ def execute_schedule(
         request.status = "EXPIRED"
         session.commit()
         raise ValueError("排期确认已过期")
+    conversation = session.get(db.Conversation, request.conversation_id)
+    message = session.get(db.Message, request.message_id)
+    if conversation is None or message is None:
+        raise ResourceNotFoundError("排期目标对话不存在")
+    qualification, _ = refresh_qualification(
+        session, conversation, message=message
+    )
+    qualification_allowed = (
+        qualification.value in {"ROUGH_MATCH", "FULL_MATCH"}
+        if request.event_type == EventType.PHONE_CALL.value
+        else qualification.value == "FULL_MATCH"
+    )
+    if not qualification_allowed:
+        confirmation.status = "PENDING_APPROVAL"
+        request.status = "PENDING_APPROVAL"
+        _audit(
+            session,
+            "SCHEDULE_QUALIFICATION_CHANGED",
+            confirmation.id,
+            "APPROVED",
+            "PENDING_APPROVAL",
+            [qualification.value],
+        )
+        session.commit()
+        raise ValueError("岗位资格状态已变化，需要重新确认")
     config = _config(session)
     status, slots = _recheck_selected(
         session, request, confirmation, config, gateway, calendar_available
@@ -241,8 +287,14 @@ def _schedule_action(session: Session, request: db.InterviewRequest,
         return existing
     conversation = session.get(db.Conversation, request.conversation_id)
     job = session.get(db.Job, conversation.job_id) if conversation else None
-    if conversation is None or job is None:
+    if conversation is None:
         raise ResourceNotFoundError("排期目标对话不存在")
+    company_name = (
+        job.company_name if job else conversation.observed_company_name
+    )
+    job_title = job.title if job else conversation.observed_job_title
+    if not company_name or not job_title:
+        raise ResourceNotFoundError("排期目标职位身份不完整")
     fingerprint = hashlib.sha256(
         f"{conversation.id}:REPLY:{confirmation.reply_content}".encode()).hexdigest()
     duplicate = session.scalar(select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == fingerprint))
@@ -273,7 +325,7 @@ def _schedule_action(session: Session, request: db.InterviewRequest,
         authorization_source="MANUAL", conversation_id=conversation.id, draft_id=draft.id,
         action_type="REPLY", status=ActionStatus.APPROVED.value,
         content=confirmation.reply_content, platform=conversation.platform,
-        target_company=job.company_name, target_job_title=job.title,
+        target_company=company_name, target_job_title=job_title,
         target_recruiter=conversation.recruiter_name,
         target_conversation_key=conversation.external_conversation_id,
         idempotency_key=f"schedule-action:{confirmation.id}", send_fingerprint=fingerprint,
@@ -452,7 +504,33 @@ def _request_response(session: Session, request: db.InterviewRequest) -> dict[st
                            .order_by(db.CalendarCheck.checked_at.desc()))
     confirmation = session.scalar(select(db.ScheduleConfirmation).where(
         db.ScheduleConfirmation.interview_request_id == request.id))
+    conversation = session.get(db.Conversation, request.conversation_id)
+    job = (
+        session.get(db.Job, conversation.job_id)
+        if conversation and conversation.job_id
+        else None
+    )
     return {"id": request.id, "conversation_id": request.conversation_id,
+            "platform": conversation.platform if conversation else None,
+            "company_name": (
+                job.company_name
+                if job
+                else conversation.observed_company_name if conversation else None
+            ),
+            "job_title": (
+                job.title
+                if job
+                else conversation.observed_job_title if conversation else None
+            ),
+            "recruiter_name": (
+                conversation.recruiter_name if conversation else None
+            ),
+            "qualification_status": (
+                conversation.qualification_status if conversation else None
+            ),
+            "qualification_evidence": (
+                conversation.qualification_evidence if conversation else []
+            ),
             "event_type": request.event_type, "source_text": request.source_text,
             "start_at": request.start_at, "end_at": request.end_at,
             "timezone": request.timezone, "duration_minutes": request.duration_minutes,

@@ -2,7 +2,8 @@
 
 ## 1. 架构目标
 
-项目采用前后端分离的模块化单体架构。第一阶段只建设离线职位策略与评分闭环，后续领域模块按 `development-plan.md` 的阶段逐步加入。
+项目采用前后端分离的模块化单体架构。当前实现已覆盖离线策略与评分、入站沟通、
+浏览器 Worker、灰度治理和排期确认；各阶段边界以 `development-plan.md` 为准。
 
 架构必须保证：
 
@@ -12,7 +13,7 @@
 - 核心决策具有版本、证据和审计记录；
 - 不为尚未进入的阶段创建空模块。
 
-## 2. 第一阶段项目目录
+## 2. 当前项目目录
 
 ```text
 job-search-agent/
@@ -20,69 +21,59 @@ job-search-agent/
 │   ├── api/
 │   │   ├── app/
 │   │   │   ├── api/v1/
-│   │   │   │   ├── profiles.py
-│   │   │   │   ├── strategies.py
+│   │   │   │   ├── actions.py
+│   │   │   │   ├── automation.py
+│   │   │   │   ├── conversations.py
 │   │   │   │   ├── jobs.py
-│   │   │   │   └── scores.py
-│   │   │   ├── core/
-│   │   │   │   ├── config.py
-│   │   │   │   └── database.py
-│   │   │   ├── models/
-│   │   │   ├── repositories/
-│   │   │   ├── schemas/
-│   │   │   ├── services/
+│   │   │   │   ├── recommendations.py
+│   │   │   │   ├── scheduling.py
+│   │   │   │   └── ...
+│   │   │   ├── core/       # 配置、数据库及供应商装配
+│   │   │   ├── models/     # SQLAlchemy 实体
+│   │   │   ├── schemas/    # API 请求和响应模型
+│   │   │   ├── services/   # 事务及业务流程编排
 │   │   │   └── main.py
 │   │   ├── alembic/
 │   │   ├── alembic.ini
-│   │   └── pyproject.toml
+│   │   └── ...
 │   └── web/
 │       ├── src/
 │       │   ├── api/
 │       │   ├── components/
 │       │   ├── pages/
-│       │   │   ├── profile/
-│       │   │   ├── strategies/
-│       │   │   ├── job-import/
-│       │   │   └── jobs/
-│       │   ├── types/
+│       │   │   ├── OverviewPage.tsx
+│       │   │   ├── JobPage.tsx
+│       │   │   ├── MessagePage.tsx
+│       │   │   ├── SchedulingPage.tsx
+│       │   │   └── ...
 │       │   ├── App.tsx
 │       │   └── main.tsx
 │       ├── package.json
-│       ├── tsconfig.json
 │       └── vite.config.ts
 ├── packages/
-│   ├── llm/
-│   │   ├── models.py
-│   │   └── ports.py
+│   ├── audit/
+│   ├── browser_worker/
+│   ├── conversation_agent/
 │   ├── job_parser/
-│   │   ├── models.py
-│   │   ├── normalizers.py
-│   │   ├── rule_parser.py
-│   │   └── service.py
+│   ├── knowledge_base/
+│   ├── llm/
+│   ├── policy_engine/
+│   ├── resume_selector/
+│   ├── scheduling/
 │   └── scoring/
-│       ├── dimensions/
-│       │   ├── experience.py
-│       │   ├── industry.py
-│       │   ├── location.py
-│       │   ├── management.py
-│       │   ├── salary.py
-│       │   ├── skills.py
-│       │   └── title.py
-│       ├── engine.py
-│       ├── hard_filters.py
-│       ├── llm_engine.py
-│       ├── models.py
-│       ├── reasons.py
-│       └── strategy_selector.py
 ├── adapters/
+│   ├── browser/
+│   ├── calendar/
 │   └── llm/
-│       ├── base.py
-│       ├── errors.py
-│       ├── fake.py
-│       ├── http.py
-│       └── qwen.py
-├── config/sample-data/
+├── config/
+│   ├── browser-selectors.json
+│   ├── conversation-policy.json
+│   ├── job-parser.json
+│   ├── recommendation-policy.json
+│   ├── scheduling-policy.json
+│   └── sample-data/
 ├── docs/
+├── scripts/
 ├── tests/
 │   ├── integration/
 │   └── unit/
@@ -93,17 +84,6 @@ job-search-agent/
 
 统一 LLM 领域端口和智谱/千问 OpenAI 兼容适配器已接入职位评分、招呼、入站回复和
 简历反馈判断；当前灰度使用智谱 GLM-5.2，所有模型输出仍需经过领域规则校验。
-
-第二阶段新增目录：
-
-```text
-packages/
-├── knowledge_base/      # 带来源和敏感度的事实检索
-├── conversation_agent/ # 意图、草稿、置信度和权限决策
-└── resume_selector/    # 按职位方向选择可用附件元数据
-config/
-└── conversation-policy.json
-```
 
 ## 3. 模块职责
 
@@ -123,11 +103,11 @@ config/
   校验逐日人工升级，并在指标失败时自动回退或暂停；
 - 不直接解析页面或实现维度评分公式。
 
-### 3.3 Repository 层
+### 3.3 持久化层
 
-- 封装 SQLAlchemy 查询和持久化；
-- 提供必要的锁、唯一约束冲突转换和分页；
-- 不作业务授权决定。
+- 当前由应用服务通过 SQLAlchemy 2 查询和持久化，不额外保留空的 Repository 层；
+- 使用数据库唯一约束、事务和行锁实现一致性；
+- 持久化代码不作浏览器写操作授权决定。
 
 ### 3.4 `job_parser`
 
@@ -151,7 +131,7 @@ config/
 - 适配器负责 Pydantic 结构校验；维度上限、求和和事实证据等业务校验由评分或对话领域在后续阶段执行；
 - 适配器只返回模型结果，不写业务表、不执行浏览器动作；切换供应商不影响领域层。
 
-### 3.7 后续领域模块
+### 3.7 领域模块
 
 - `policy_engine`：统一返回 `ALLOW_AUTO/REQUIRE_CONFIRMATION/DENY`；
 - `knowledge_base`：维护有来源和敏感度的用户事实；
@@ -203,7 +183,7 @@ API → Application Services
 Application Services → Domain Packages + Repositories
 Domain Packages → Domain Models / Ports
 Adapters → Domain Ports
-Repositories → SQLAlchemy Models
+Application Services → SQLAlchemy Models
 ```
 
 禁止的依赖：
@@ -278,7 +258,7 @@ JD、招聘方消息和网页文本均视为不可信数据，不得与系统指
 → 新标签打开详情并复核身份
 → 记录发现项并执行安全字段检查
 → 幂等导入 JD
-→ 千问结构化解析和七维评分
+→ 当前配置的 LLM 结构化解析和七维评分
 → 程序执行硬排除、分值校验、猎头封顶和去重/冷却
 → policy_engine 授权
 → browser_worker 执行并回读平台默认招呼
@@ -321,8 +301,8 @@ JD、招聘方消息和网页文本均视为不可信数据，不得与系统指
 ## 9. 第二阶段草稿流程
 
 ```text
-模拟消息 → LLM 结构化多意图识别 → 读取绑定策略的最新有效职位评分
-→ 更新 UNKNOWN / ROUGH_MATCH / FULL_MATCH / MISMATCH
+入站消息 → 程序初步识别意图 → 更新 UNKNOWN / ROUGH_MATCH / FULL_MATCH / MISMATCH
+→ 在存在有效职位评分和 LLM 时生成事实受限回复，否则使用确定性安全澄清
 → MISMATCH 生成婉拒；否则检索当前有效知识项并继续沟通
 → 生成事实受限草稿或简历发送建议 → 程序执行权限与证据校验
 → 仅电话/面试具体时间创建 PENDING_APPROVAL 确认任务

@@ -3,11 +3,15 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from adapters.browser.fake_actions import FakeActionExecutor
-from adapters.llm.fake import FakeLlmProvider
+from adapters.browser.message_discovery import (
+    DiscoveredConversation,
+    MessageDiscoveryBatch,
+)
+from adapters.llm.errors import LlmConfigurationError
 from apps.api.app.core.database import Base
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AutomationDispatchRequest
@@ -18,8 +22,17 @@ from apps.api.app.services.conversation_service import (
     create_resume_draft,
     import_message,
 )
+from apps.api.app.services.message_discovery_service import persist_discovery_batch
 from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID
+from packages.browser_worker.models import (
+    BrowserConversation,
+    BrowserMessage,
+    PageType,
+    Platform,
+    ReadResult,
+    SessionStatus,
+)
 
 
 @pytest.fixture
@@ -94,15 +107,21 @@ def test_explicit_inbound_resume_request_does_not_require_score(
         recruiter_name="招聘人",
     )
     session.add(conversation)
-    session.add(
-        db.Resume(
-            user_id=DEFAULT_USER_ID,
-            platform="MOCK",
-            attachment_name="Java后端简历.pdf",
-            target_directions=["Java后端"],
-            is_available=True,
-        )
+    primary_resume = db.Resume(
+        user_id=DEFAULT_USER_ID,
+        platform="MOCK",
+        attachment_name="Java后端简历.pdf",
+        target_directions=["Java后端"],
+        is_available=True,
     )
+    other_resume = db.Resume(
+        user_id=DEFAULT_USER_ID,
+        platform="MOCK",
+        attachment_name="其他简历.pdf",
+        target_directions=["产品"],
+        is_available=True,
+    )
+    session.add_all([primary_resume, other_resume])
     session.commit()
     message = import_message(
         session,
@@ -114,9 +133,7 @@ def test_explicit_inbound_resume_request_does_not_require_score(
         ),
     )
 
-    draft = create_resume_draft(
-        session, message.id, provider=FakeLlmProvider()
-    )
+    draft = create_resume_draft(session, message.id)
 
     assert conversation.qualification_status == "ROUGH_MATCH"
     assert draft.decision.value == "ALLOW_AUTO"
@@ -133,6 +150,17 @@ def test_explicit_inbound_resume_request_does_not_require_score(
         )
     )
     session.commit()
+    with pytest.raises(ValueError, match="草稿策略决策不匹配"):
+        dispatch(
+            session,
+            AutomationDispatchRequest(
+                action_type="RESUME",
+                conversation_id=conversation.id,
+                draft_id=draft.id,
+                resume_id=other_resume.id,
+            ),
+            executor=FakeActionExecutor(),
+        )
     sent = dispatch(
         session,
         AutomationDispatchRequest(
@@ -184,7 +212,15 @@ def test_explicit_inbound_resume_request_does_not_require_score(
 
 def test_unbound_inbound_message_gets_safe_clarification(
     session: Session,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def unavailable_provider(_: object) -> None:
+        raise LlmConfigurationError("测试模型未配置")
+
+    monkeypatch.setattr(
+        "apps.api.app.services.conversation_service.build_llm_provider",
+        unavailable_provider,
+    )
     session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
     session.flush()
     profile = db.CandidateProfile(
@@ -226,9 +262,7 @@ def test_unbound_inbound_message_gets_safe_clarification(
         ),
     )
 
-    draft = create_reply_draft(
-        session, message.id, provider=FakeLlmProvider()
-    )
+    draft = create_reply_draft(session, message.id)
 
     assert conversation.qualification_status == "UNKNOWN"
     assert draft.decision.value == "ALLOW_AUTO"
@@ -246,3 +280,118 @@ def test_unbound_inbound_message_gets_safe_clarification(
     )
     with pytest.raises(ValueError, match="大致匹配"):
         analyze_invitation(session, time_message.id, calendar_available=False)
+
+    related_message = import_message(
+        session,
+        conversation.id,
+        MessagePayload(
+            external_message_id="related-message",
+            content="这是一个 Java后端开发岗位，方便了解一下吗？",
+            received_at=datetime.now(UTC),
+        ),
+    )
+    related_draft = create_reply_draft(session, related_message.id)
+    assert conversation.qualification_status == "ROUGH_MATCH"
+    assert related_draft.decision.value == "ALLOW_AUTO"
+    assert related_draft.reason_codes == ["SAFE_JOB_DETAIL_CLARIFICATION"]
+
+
+def test_message_discovery_imports_unbound_scoreless_conversation(
+    session: Session,
+) -> None:
+    session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    session.flush()
+    profile = db.CandidateProfile(
+        user_id=DEFAULT_USER_ID,
+        name="测试候选人",
+        total_years=10,
+        management_years=0,
+        has_architecture_experience=True,
+        has_core_system_experience=True,
+    )
+    session.add(profile)
+    session.flush()
+    strategy = db.JobStrategy(
+        user_id=DEFAULT_USER_ID,
+        candidate_profile_id=profile.id,
+        name="默认策略",
+        enabled=True,
+        priority=1,
+    )
+    session.add(strategy)
+    session.flush()
+    run = db.AgentRun(
+        user_id=DEFAULT_USER_ID,
+        strategy_id=strategy.id,
+        platform="BOSS",
+        executor_type="REAL_CDP",
+        status="RUNNING",
+        cursor={},
+    )
+    session.add(run)
+    session.flush()
+    now = datetime.now(UTC)
+    counts = persist_discovery_batch(
+        session,
+        run,
+        "test-worker",
+        MessageDiscoveryBatch(
+            platform=Platform.BOSS,
+            partition="UNREAD",
+            scroll_position=1,
+            scanned_at=now,
+            exhausted=True,
+            items=[
+                DiscoveredConversation(
+                    summary={
+                        "external_conversation_id": "unbound-chat",
+                        "recruiter_name": "招聘人",
+                        "job_title": "Java后端",
+                        "company_name": "观察公司",
+                        "last_message_id": "unbound-message",
+                        "unread_count": 1,
+                    },
+                    detail=ReadResult(
+                        platform=Platform.BOSS,
+                        status=SessionStatus.SESSION_READY,
+                        page_type=PageType.CONVERSATION,
+                        page_url="https://www.zhipin.com/web/geek/chat",
+                        page_title="消息",
+                        content_hash="a" * 64,
+                        selector_version="fixture",
+                        conversation=BrowserConversation(
+                            external_conversation_id="unbound-chat",
+                            recruiter_name="招聘人",
+                            job_title="Java后端",
+                            company_name="观察公司",
+                            messages=[
+                                BrowserMessage(
+                                    external_message_id="unbound-message",
+                                    content="您好，可以发一份简历吗？",
+                                    received_at=now,
+                                )
+                            ],
+                        ),
+                    ),
+                )
+            ],
+        ),
+    )
+
+    conversation = session.scalar(
+        select(db.Conversation).where(
+            db.Conversation.external_conversation_id == "unbound-chat"
+        )
+    )
+    assert counts == {
+        "discovered": 1,
+        "imported": 1,
+        "paused": 0,
+        "skipped": 0,
+    }
+    assert conversation is not None
+    assert conversation.job_id is None
+    assert conversation.latest_job_score_id is None
+    assert conversation.state == "ACTIVE"
+    assert conversation.observed_company_name == "观察公司"
+    assert conversation.observed_job_title == "Java后端"

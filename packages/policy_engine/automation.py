@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AutomationDecision(StrEnum):
@@ -32,6 +32,12 @@ class AutomationRules(BaseModel):
     work_start_hour: int = Field(default=8, ge=0, le=23)
     work_end_hour: int = Field(default=22, ge=1, le=24)
 
+    @model_validator(mode="after")
+    def validate_work_hours(self) -> "AutomationRules":
+        if self.work_start_hour >= self.work_end_hour:
+            raise ValueError("自动化工作开始时间必须早于结束时间")
+        return self
+
 
 class AutomationContext(BaseModel):
     action_type: str
@@ -47,15 +53,8 @@ class AutomationContext(BaseModel):
     resume_available: bool = False
     resume_already_sent: bool = False
     qualification_status: str = "UNKNOWN"
-    whitelisted_c: bool = False
     hourly_count: int = 0
     daily_count: int = 0
-
-
-SENSITIVE_INTENTS = {
-    "SALARY", "ARRIVAL_DATE", "PHONE_CALL", "INTERVIEW_INVITATION",
-    "INTERVIEW_TIME", "SENSITIVE",
-}
 
 
 def evaluate_automation(
@@ -68,14 +67,6 @@ def evaluate_automation(
         return AutomationDecision.DENY, ["AUTOMATION_DISABLED_OR_PAUSED"]
     if context.hourly_count >= rules.hourly_limit or context.daily_count >= rules.daily_limit:
         return AutomationDecision.DENY, ["RATE_LIMIT_REACHED"]
-    if context.action_type == "LOW_SCORE_DECLINE":
-        if not context.job_open:
-            return AutomationDecision.DENY, ["JOB_NOT_OPEN"]
-        if context.score >= 60:
-            return AutomationDecision.DENY, ["SCORE_NOT_LOW"]
-        if not rules.low_score_decline_enabled:
-            return AutomationDecision.DENY, ["LOW_SCORE_DECLINE_DISABLED"]
-        return AutomationDecision.ALLOW_AUTO, ["LOW_SCORE_DECLINE_POLICY_MATCHED"]
     if context.action_type == "GREETING":
         if not context.eligible or not context.job_open:
             return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
@@ -94,6 +85,11 @@ def evaluate_automation(
             return AutomationDecision.DENY, ["REPLY_NOT_AUTHORIZED"]
         if not rules.auto_reply_enabled:
             return AutomationDecision.DENY, ["AUTO_REPLY_DISABLED"]
+        if (
+            context.action_type == "REPLY"
+            and context.qualification_status == "MISMATCH"
+        ):
+            return AutomationDecision.DENY, ["QUALIFICATION_MISMATCH"]
         if (
             context.action_type == "MISMATCH_DECLINE"
             and context.qualification_status != "MISMATCH"

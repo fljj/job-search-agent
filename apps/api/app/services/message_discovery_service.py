@@ -62,20 +62,10 @@ def persist_discovery_batch(
             continue
         job = _resolve_job(session, batch, item)
         score = _current_score(session, run, job) if job else None
-        if job is None or score is None:
-            _pause_existing_conversation(session, batch, item)
-            _discovery_event(
-                session,
-                run,
-                item,
-                ["JOB_BINDING_NOT_UNIQUE"] if job is None else ["CURRENT_SCORE_MISSING"],
-            )
-            counts["paused"] += 1
-            continue
         conversation_data = create_conversation(
             session,
             ConversationPayload(
-                job_id=job.id,
+                job_id=job.id if job else None,
                 external_conversation_id=item.summary.external_conversation_id,
                 recruiter_name=item.summary.recruiter_name,
                 platform=batch.platform.value,
@@ -96,9 +86,16 @@ def persist_discovery_batch(
         if detail is None:
             counts["paused"] += 1
             continue
-        conversation.job_id = job.id
+        conversation.job_id = job.id if job else None
         conversation.strategy_id = run.strategy_id
-        conversation.latest_job_score_id = score.id
+        conversation.latest_job_score_id = score.id if score else None
+        conversation.observed_company_name = (
+            detail.company_name or item.summary.company_name
+        )
+        conversation.observed_job_title = detail.job_title or item.summary.job_title
+        conversation.observed_external_job_id = (
+            detail.external_job_id or item.summary.external_job_id
+        )
         conversation.state = "ACTIVE"
         _record_state_sequence(session, run, item, ["DECIDING"])
         for message in detail.messages:
@@ -123,7 +120,12 @@ def persist_discovery_batch(
                 counts["imported"] += 1
         conversation.processing_lease_owner = None
         conversation.processing_lease_expires_at = None
-        _discovery_event(session, run, item, ["CONVERSATION_IMPORTED"])
+        reasons = ["CONVERSATION_IMPORTED"]
+        if job is None:
+            reasons.append("JOB_UNBOUND")
+        elif score is None:
+            reasons.append("CURRENT_SCORE_MISSING")
+        _discovery_event(session, run, item, reasons)
         _record_state_sequence(session, run, item, ["RETURNING_TO_LIST"])
     root_cursor = dict(run.cursor or {})
     root_cursor["message_discovery"] = {
@@ -270,23 +272,6 @@ def _acquire_conversation_lease(
     )
     session.flush()
     return claimed is not None
-
-
-def _pause_existing_conversation(
-    session: Session,
-    batch: MessageDiscoveryBatch,
-    item: DiscoveredConversation,
-) -> None:
-    conversation = session.scalar(
-        select(db.Conversation).where(
-            db.Conversation.user_id == DEFAULT_USER_ID,
-            db.Conversation.platform == batch.platform.value,
-            db.Conversation.external_conversation_id
-            == item.summary.external_conversation_id,
-        )
-    )
-    if conversation:
-        conversation.state = "PAUSED"
 
 
 def _discovery_event(

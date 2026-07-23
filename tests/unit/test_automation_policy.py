@@ -107,11 +107,26 @@ def test_emergency_stop_overrides_all_automatic_permissions() -> None:
     assert reasons == ["EMERGENCY_STOP_ACTIVE"]
 
 
-def test_low_score_decline_is_separate_automatic_action() -> None:
+def test_historical_low_score_decline_cannot_be_created() -> None:
     decline = context(
         action_type="LOW_SCORE_DECLINE",
         score=59,
         grade="C",
         eligible=False,
     )
-    assert evaluate_automation(decline, rules())[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(decline, rules())[0] is AutomationDecision.DENY
+
+
+def test_normal_reply_is_denied_after_qualification_becomes_mismatch() -> None:
+    reply = context(
+        action_type="REPLY",
+        qualification_status="MISMATCH",
+    )
+    decision, reasons = evaluate_automation(reply, rules())
+    assert decision is AutomationDecision.DENY
+    assert reasons == ["QUALIFICATION_MISMATCH"]
+
+
+def test_invalid_work_hours_are_rejected() -> None:
+    with pytest.raises(ValueError):
+        rules(work_start_hour=22, work_end_hour=8)

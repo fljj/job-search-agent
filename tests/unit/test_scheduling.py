@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+import pytest
+
+from apps.api.app.schemas.scheduling import ApproveScheduleRequest
 from packages.scheduling.engine import check_calendar, parse_invitation, suggest_slots
 from packages.scheduling.models import CalendarBusySlot, CalendarStatus, EventType, SchedulingConfig
 
@@ -50,6 +53,43 @@ def test_calendar_unavailable_safely_degrades() -> None:
 def test_onsite_without_commute_is_incomplete() -> None:
     parsed = parse_invitation("2026-07-24 10:00 到公司现场面试", datetime.now(UTC), SchedulingConfig())
     assert check_calendar(parsed, [], SchedulingConfig()) is CalendarStatus.INCOMPLETE
+
+
+def test_outside_work_hours_lunch_and_weekend_are_conflicts() -> None:
+    config = SchedulingConfig()
+    for source in (
+        "2026-07-24 08:00 电话沟通",
+        "2026-07-24 12:30 电话沟通",
+        "2026-07-25 10:00 电话沟通",
+    ):
+        parsed = parse_invitation(source, datetime.now(UTC), config)
+        assert check_calendar(parsed, [], config) is CalendarStatus.CONFLICT
+
+
+def test_schedule_selection_requires_a_valid_range() -> None:
+    start = datetime.fromisoformat("2026-07-24T10:00:00+08:00")
+    with pytest.raises(ValueError):
+        ApproveScheduleRequest(
+            reply_content="确认",
+            selected_start_at=start,
+        )
+    with pytest.raises(ValueError):
+        ApproveScheduleRequest(
+            reply_content="确认",
+            selected_start_at=start,
+            selected_end_at=start,
+        )
+    with pytest.raises(ValueError, match="必须包含时区"):
+        ApproveScheduleRequest(
+            reply_content="确认",
+            selected_start_at=datetime(2026, 7, 24, 10),
+            selected_end_at=datetime(2026, 7, 24, 10, 30),
+        )
+
+
+def test_scheduling_config_rejects_invalid_workday_order() -> None:
+    with pytest.raises(ValueError):
+        SchedulingConfig(workday_end=datetime.min.time())
 
 
 def test_conflict_produces_two_or_three_working_hour_candidates() -> None:

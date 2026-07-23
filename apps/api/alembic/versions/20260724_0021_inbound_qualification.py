@@ -15,42 +15,50 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "conversations",
-        sa.Column(
-            "qualification_status",
-            sa.String(20),
-            nullable=False,
-            server_default="UNKNOWN",
-        ),
-    )
-    op.add_column(
-        "conversations",
-        sa.Column(
-            "qualification_evidence",
-            postgresql.JSONB(),
-            nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
-        ),
-    )
-    op.add_column(
-        "conversations",
-        sa.Column(
-            "qualification_message_ids",
-            postgresql.JSONB(),
-            nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
-        ),
-    )
-    op.add_column(
-        "conversations",
-        sa.Column(
-            "qualification_version",
-            sa.Integer(),
-            nullable=False,
-            server_default="1",
-        ),
-    )
+    conversation_columns = {
+        column["name"]
+        for column in sa.inspect(op.get_bind()).get_columns("conversations")
+    }
+    if "qualification_status" not in conversation_columns:
+        op.add_column(
+            "conversations",
+            sa.Column(
+                "qualification_status",
+                sa.String(20),
+                nullable=False,
+                server_default="UNKNOWN",
+            ),
+        )
+    if "qualification_evidence" not in conversation_columns:
+        op.add_column(
+            "conversations",
+            sa.Column(
+                "qualification_evidence",
+                postgresql.JSONB(),
+                nullable=False,
+                server_default=sa.text("'[]'::jsonb"),
+            ),
+        )
+    if "qualification_message_ids" not in conversation_columns:
+        op.add_column(
+            "conversations",
+            sa.Column(
+                "qualification_message_ids",
+                postgresql.JSONB(),
+                nullable=False,
+                server_default=sa.text("'[]'::jsonb"),
+            ),
+        )
+    if "qualification_version" not in conversation_columns:
+        op.add_column(
+            "conversations",
+            sa.Column(
+                "qualification_version",
+                sa.Integer(),
+                nullable=False,
+                server_default="1",
+            ),
+        )
     op.add_column(
         "action_queue",
         sa.Column("authorization_basis", sa.String(80), nullable=True),

@@ -360,7 +360,7 @@ class Conversation(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     job_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
     )
     strategy_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_strategies.id", ondelete="SET NULL"), nullable=True
@@ -371,6 +371,15 @@ class Conversation(TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(30), default="MOCK")
     external_conversation_id: Mapped[str] = mapped_column(String(200))
     recruiter_name: Mapped[str] = mapped_column(String(100))
+    observed_company_name: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+    observed_job_title: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+    observed_external_job_id: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
     state: Mapped[str] = mapped_column(String(30), default="NEW")
     qualification_status: Mapped[str] = mapped_column(
         String(20), default="UNKNOWN", server_default="UNKNOWN"
@@ -517,7 +526,7 @@ class ActionQueue(TimestampMixin, Base):
         JSONB, default=list, server_default=text("'[]'::jsonb")
     )
     job_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
     )
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("conversations.id"), nullable=True

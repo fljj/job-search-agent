@@ -7,18 +7,8 @@ class ApproveRequest(BaseModel):
     conversation_id: UUID | None = None
 
 
-class GreetingConfirmationRequest(BaseModel):
-    draft_id: UUID
-    recruiter_name: str = Field(min_length=1, max_length=100)
-
-
 class ModifyRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10000)
-
-
-class ResumeConfirmationRequest(BaseModel):
-    conversation_id: UUID
-    resume_id: UUID
 
 
 class ExecuteRequest(BaseModel):

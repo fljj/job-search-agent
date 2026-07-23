@@ -47,6 +47,21 @@ def check_calendar(invitation: ParsedInvitation, slots: list[CalendarBusySlot],
     if invitation.event_type is EventType.ONSITE_INTERVIEW and config.onsite_commute_minutes is None:
         return CalendarStatus.INCOMPLETE
     start, end = _protected_range(invitation.start_at, invitation.end_at, invitation.event_type, config)
+    zone = ZoneInfo(config.timezone)
+    local_start = start.astimezone(zone)
+    local_end = end.astimezone(zone)
+    workday_start = datetime.combine(local_start.date(), config.workday_start, zone)
+    workday_end = datetime.combine(local_start.date(), config.workday_end, zone)
+    lunch_start = datetime.combine(local_start.date(), config.lunch_start, zone)
+    lunch_end = datetime.combine(local_start.date(), config.lunch_end, zone)
+    if (
+        local_start.weekday() >= 5
+        or local_end.date() != local_start.date()
+        or local_start < workday_start
+        or local_end > workday_end
+        or (local_start < lunch_end and local_end > lunch_start)
+    ):
+        return CalendarStatus.CONFLICT
     for slot in slots:
         if slot.availability in {"BUSY", "TENTATIVE", "OUT_OF_OFFICE"} and start < slot.end_at and end > slot.start_at:
             return CalendarStatus.CONFLICT

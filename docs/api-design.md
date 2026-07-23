@@ -125,11 +125,12 @@
 
 ```json
 {
-  "mode": "QWEN"
+  "mode": "LLM"
 }
 ```
 
-允许 `QWEN/FAKE_LLM`。`QWEN` 使用服务端环境配置，API 不接收 API Key、基础地址或任意提示词。
+允许 `LLM/RULE`。`LLM` 使用服务端配置的 `ZHIPU/QWEN/FAKE` 供应商；`RULE` 仅用于
+离线兼容。API 不接收 API Key、基础地址或任意提示词。
 
 ### `GET /api/v1/jobs/{job_id}/parsed-details`
 
@@ -245,7 +246,9 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
   `MISMATCH` 返回礼貌婉拒，其他状态返回事实受限的澄清或普通回复。存在正式评分时
   作为上下文使用，但评分不是入站回复前置条件；只有具体时间意图返回确认任务 ID。
 - `POST /api/v1/drafts/greeting`：请求包含 `job_score_id`，仅基于 JD 与已验证知识生成个性化招呼草稿。
-- `POST /api/v1/drafts/resume`：请求包含 `message_id`；模型返回当前对话中的证据消息 UUID，服务端校验评分、硬排除、附件唯一匹配和重复发送后返回 `ALLOW_AUTO/DENY` 及 `resume_id`，不创建普通确认任务。
+- `POST /api/v1/drafts/resume`：请求包含 `message_id`；服务端以该条当前招聘方消息中的
+  明确索要简历意图作为证据，校验入站资格快照、确定性阻断规则、附件唯一匹配和重复
+  发送后返回 `ALLOW_AUTO/DENY` 及 `resume_id`，不要求正式评分，也不创建普通确认任务。
 - `PATCH /api/v1/drafts/{draft_id}`：人工编辑尚未产生动作的草稿；服务端重新执行内容安全检查，创建新草稿和新策略决策并审计，不覆盖原记录。
 - `GET /api/v1/confirmation-tasks`：只查看电话、面试具体时间和日历写操作的待确认数据。
 
@@ -263,24 +266,25 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 - `GET /api/v1/system/llm-status`：返回 `provider/model/configured`，禁止返回 API Key、Base URL 凭证或完整环境配置。
 - `GET /api/v1/automation/runs`：按时间倒序返回 Agent 状态、心跳、计数、租约和暂停原因。
 - `GET /api/v1/automation/actions`：仅返回 `authorization_source=AUTO` 的普通自动动作及发送结果/失败证据。
-- `GET /api/v1/conversations`：返回对话绑定策略、最新评分、最新草稿类型和简历动作证据。
+- `GET /api/v1/conversations`：返回对话绑定策略、可选最新评分、页面观察到的公司/
+  职位、资格成熟度、最新草稿和简历动作证据。
 
 以上接口均为只读展示接口。启动、暂停和恢复仍分别使用既有的
 `POST /automation/runs`、`POST /automation/runs/{id}/pause` 和
 `POST /automation/runs/{id}/resume`，服务端继续执行自动化配置和状态转换校验。
 
 第九阶段的消息列表发现由 BOSS Worker 内部执行，不新增可绕过策略的浏览器导航
-API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回；绑定失败、
-身份不一致和状态转换记录在 Agent 运行事件及会话状态中。
+API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回；职位未绑定
+或缺少评分只记录原因并继续安全入站流程，页面身份不一致仍暂停，状态转换记录在
+Agent 运行事件及会话状态中。
 
 只允许本机 `localhost/127.0.0.1/::1` HTTP(S) CDP 端点且 URL 不得包含凭证。返回会话状态、页面类型、原因码、导入资源 ID、证据 ID 和重复标记。
 
 未登录、验证页、页面结构变化或目标不一致时只保存失败证据，不导入职位或消息。
 
-## 12. 时间确认与执行 API
+## 12. 时间确认、历史确认与动作执行 API
 
 - `GET /api/v1/confirmation-tasks`：返回草稿、动作类型、状态、原因码、置信度和过期时间。
-- `POST /api/v1/confirmation-tasks/greeting`：将已通过 80 分、开放状态、模型建议和事实校验的招呼语转为首次真实联调待确认任务；请求包含草稿 ID 和页面核验到的招聘人。
 - `POST /api/v1/confirmation-tasks/{id}/approve`：必须携带 `Idempotency-Key`，仅生成 `APPROVED` 动作，不立即发送。
 - `POST /api/v1/confirmation-tasks/{id}/modify`：敏感检查后废弃旧任务，创建新的 `PENDING_APPROVAL` 任务。
 - `POST /api/v1/confirmation-tasks/{id}/reject`：将未批准任务终止为 `CANCELLED`。
@@ -293,9 +297,9 @@ API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回
   转为 `FAILED_RETRYABLE`；目标不唯一或仍无法判断时保持 `OUTCOME_UNKNOWN`。
   同一动作使用数据库行锁串行对账。
 
-确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。首次真实
-招呼联调按 `development-plan.md` 要求人工确认；稳定后的普通自动招呼不重复要求确认。
-普通回复、不匹配婉拒和按策略允许的简历发送不使用本组确认 API。
+通用招呼和简历确认创建接口已移除；已有历史任务仍可查询和按原状态处理。新的确认
+任务只由电话/面试具体时间流程创建，普通招呼、回复、不匹配婉拒和按策略允许的简历
+发送不使用本组确认 API。
 
 ## 13. 第五阶段安全自动化 API
 
@@ -383,8 +387,11 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 - `GET/PUT /api/v1/scheduling/settings`：读取或按版本更新时区、工作时间、缓冲、默认时长、通勤和有效期配置。
 - `POST /api/v1/scheduling/calendar-events`：导入本地假日历忙闲事件；重复外部 ID 返回原事件。
 - `POST /api/v1/scheduling/analyze`：按招聘方消息创建幂等排期请求，解析邀请、检查日历并生成确认回复。
-- `GET /api/v1/scheduling/requests`：返回时间确认卡片、冲突状态、候选时间、风险和建议回复。
-- `POST /api/v1/scheduling/requests/{id}/approve`：批准或修改具体时间回复，可独立授权发送成功后创建日历事件。
+- `GET /api/v1/scheduling/requests`：返回时间确认卡片、平台、招聘方、公司、职位、
+  资质状态与证据、冲突状态、候选时间、风险和建议回复。
+- `POST /api/v1/scheduling/requests/{id}/approve`：批准或修改具体时间回复。时间必须
+  携带时区且严格符合该沟通类型的配置时长；冲突、模糊或信息不完整时只能选择服务端
+  返回的候选时间，且招聘方确认改期前不得预先创建日历事件。
 - `POST /api/v1/scheduling/requests/{id}/execute`：验证批准状态、任务有效期和日历快照后发送；新冲突退回待确认。
 - `POST /api/v1/scheduling/requests/{id}/reject`：幂等拒绝待确认或已批准但尚未执行的时间安排。
 - `GET /api/v1/system/calendar-status`：返回供应商、日历 ID 和是否配置，不返回 OAuth 令牌。

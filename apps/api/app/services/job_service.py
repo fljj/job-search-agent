@@ -6,8 +6,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
-from adapters.llm.fake import FakeLlmJobParser
 from apps.api.app.core.config import get_settings
+from apps.api.app.core.job_parser_config import get_job_parser_config
 from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.job import (
@@ -21,7 +21,6 @@ from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.job_parser.models import JobInput, ParsedJob
 from packages.job_parser.rule_parser import RuleJobParser
-from packages.job_parser.service import JobParserService
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
 
@@ -117,8 +116,7 @@ def parse_job(
     domain_job = _domain_job(job)
     normalized_mode = mode.upper()
     if normalized_mode == "RULE":
-        parser = JobParserService(FakeLlmJobParser().parse)
-        parsed = parser.parse(domain_job, "RULE")
+        parsed = RuleJobParser(get_job_parser_config()).parse(domain_job)
     elif normalized_mode == "LLM":
         llm_provider = provider or build_llm_provider(get_settings())
         try:
@@ -141,7 +139,7 @@ def parse_job(
             )
             session.commit()
             raise
-        deterministic_flags = RuleJobParser().parse(domain_job)
+        deterministic_flags = RuleJobParser(get_job_parser_config()).parse(domain_job)
         parsed = llm_result.data.model_copy(
             update={
                 "parser_type": "LLM",

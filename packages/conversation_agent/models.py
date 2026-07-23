@@ -47,3 +47,5 @@ class ConversationPolicyConfig(BaseModel):
     max_greeting_facts: int = Field(default=3, ge=1, le=5)
     max_greeting_skills: int = Field(default=3, ge=1, le=5)
     platform_default_greetings: dict[str, str] = Field(default_factory=dict)
+    prohibited_direction_keywords: list[str] = Field(default_factory=list)
+    related_direction_keywords: list[str] = Field(default_factory=list)
