@@ -16,6 +16,12 @@ from packages.browser_worker.actions import ActionExecutor, ApprovedCommand, Exe
 from packages.policy_engine.content_check import validate_edited_content
 from packages.policy_engine.state_machine import ActionStatus, require_transition
 
+PREWRITE_RETRYABLE_FAILURES = {
+    "APPROVED_TARGET_PAGE_NOT_FOUND",
+    "APPROVED_TARGET_PAGE_AMBIGUOUS",
+    "SUPPORTED_PAGE_ROOT_NOT_FOUND",
+}
+
 
 def create_resume_confirmation(session: Session, conversation_id: UUID, resume_id: UUID) -> UUID:
     conversation, job = _conversation_job(session, conversation_id)
@@ -116,7 +122,7 @@ def create_greeting_confirmation(
             db.PolicyDecision.policy_version == "manual-live-greeting-v1",
         )
     )
-    if existing:
+    if existing and existing.status == ActionStatus.PENDING_APPROVAL.value:
         return existing.id
     decision = db.PolicyDecision(
         user_id=DEFAULT_USER_ID,
@@ -222,7 +228,7 @@ def approve_task(
         target_recruiter=(
             conversation.recruiter_name
             if conversation
-            else str(decision.input_snapshot["recruiter_name"])
+            else _greeting_recruiter(session, decision)
         ),
         target_conversation_key=(
             conversation.external_conversation_id if conversation else None
@@ -271,7 +277,10 @@ def modify_task(session: Session, task_id: UUID, content: str) -> UUID:
         decision="REQUIRE_CONFIRMATION",
         reason_codes=["USER_EDIT_RECHECKED"],
         policy_version="manual-action-v1",
-        input_snapshot={"source_draft_id": str(draft.id)},
+        input_snapshot={
+            **decision.input_snapshot,
+            "source_draft_id": str(draft.id),
+        },
     )
     session.add(new_decision)
     session.flush()
@@ -371,12 +380,24 @@ def execute_action(
 
 def approve_retry(session: Session, action_id: UUID) -> ActionResponse:
     action = _get_action(session, action_id)
-    require_transition(action.status, ActionStatus.APPROVED)
+    if not (
+        action.status == ActionStatus.FAILED_FINAL.value
+        and action.failure_code in PREWRITE_RETRYABLE_FAILURES
+    ):
+        require_transition(action.status, ActionStatus.APPROVED)
     before = action.status
     action.status = ActionStatus.APPROVED.value
     action.failure_code = None
     action.version += 1
-    _audit(session, "ACTION_RETRY_APPROVED", "action", action.id, before, "APPROVED", ["USER_RETRY"])
+    _audit(
+        session,
+        "ACTION_RETRY_APPROVED",
+        "action",
+        action.id,
+        before,
+        "APPROVED",
+        ["USER_RETRY_AFTER_CONFIRMED_PREWRITE_FAILURE"],
+    )
     session.commit()
     session.refresh(action)
     return _response(action)
@@ -487,6 +508,24 @@ def _conversation_job(session: Session, conversation_id: UUID) -> tuple[db.Conve
     if job is None:
         raise ResourceNotFoundError("职位不存在")
     return conversation, job
+
+
+def _greeting_recruiter(session: Session, decision: db.PolicyDecision) -> str:
+    recruiter = decision.input_snapshot.get("recruiter_name")
+    if recruiter:
+        return str(recruiter)
+    source_draft_id = decision.input_snapshot.get("source_draft_id")
+    if source_draft_id:
+        source_decisions = session.scalars(
+            select(db.PolicyDecision)
+            .where(db.PolicyDecision.draft_id == UUID(str(source_draft_id)))
+            .order_by(db.PolicyDecision.created_at.desc())
+        ).all()
+        for source in source_decisions:
+            recruiter = source.input_snapshot.get("recruiter_name")
+            if recruiter:
+                return str(recruiter)
+    raise ValueError("招呼语确认缺少招聘人快照")
 
 
 def _require_eligible_score(session: Session, job_id: UUID) -> None:

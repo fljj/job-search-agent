@@ -276,6 +276,8 @@ SESSION_PAUSED
 - `resume_send_records(conversation_id, resume_id)` 唯一；
 - 只有原子条件更新成功将动作转为 `EXECUTING` 的执行者可以调用外部平台；
 - `OUTCOME_UNKNOWN` 只能对账，不能直接重试；
+- 目标标签页不存在或不唯一属于点击前失败，可以在用户再次确认后重试；该例外必须
+  通过固定失败码白名单判断，不能扩展到点击后的 `FAILED_FINAL`；
 - 每次重试写入新的 `action_attempts`，不得覆盖历史尝试。
 
 ## 10. 审计设计

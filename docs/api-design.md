@@ -278,7 +278,9 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 - `POST /api/v1/confirmation-tasks/{id}/modify`：敏感检查后废弃旧任务，创建新的 `PENDING_APPROVAL` 任务。
 - `POST /api/v1/confirmation-tasks/{id}/reject`：将未批准任务终止为 `CANCELLED`。
 - `POST /api/v1/actions/{id}/execute`：原子占用已批准动作，执行前重新复核页面目标并发送。
-- `POST /api/v1/actions/{id}/retry`：仅允许用户将 `FAILED_RETRYABLE` 重新批准；`OUTCOME_UNKNOWN` 不可重试。
+- `POST /api/v1/actions/{id}/retry`：允许用户将 `FAILED_RETRYABLE` 重新批准；兼容
+  历史上误记为 `FAILED_FINAL` 的点击前页面定位失败白名单。`OUTCOME_UNKNOWN`
+  和任何点击后失败不可重试。
 
 确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。首次真实
 招呼联调按 `development-plan.md` 要求人工确认；稳定后的普通自动招呼不重复要求确认。

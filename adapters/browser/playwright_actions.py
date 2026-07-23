@@ -1,11 +1,20 @@
 import hashlib
+import json
+import time
+from urllib.request import urlopen
 
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import (
+    Browser,
+    Page,
+    sync_playwright,
+)
+from playwright.sync_api import (
+    Error as PlaywrightError,
+)
 
 from adapters.browser.playwright_reader import (
     PlaywrightPageReader,
-    _current_page,
+    RawCdpPageReader,
     validate_local_cdp_url,
 )
 from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome, ExecutionResult
@@ -22,16 +31,217 @@ class PlaywrightActionExecutor:
 
     def execute(self, cdp_url: str, command: ApprovedCommand) -> ExecutionResult:
         validate_local_cdp_url(cdp_url)
+        if command.action_type == "GREETING":
+            return self._execute_greeting_over_raw_cdp(cdp_url, command)
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.connect_over_cdp(cdp_url)
-                page = _current_page(browser)
-                return self.execute_on_page(page, command)
+                return self.execute_on_browser(browser, command)
         except PlaywrightError:
             return ExecutionResult(
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
                 error_code="PLAYWRIGHT_ERROR",
             )
+
+    def _execute_greeting_over_raw_cdp(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        """真实职位页使用原生 CDP，避免 Playwright 附加触发平台页面重定向。"""
+        platform = Platform(command.platform)
+        selectors = self.config.platforms[platform.value]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches: list[str] = []
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(websocket_url) as page:
+                    check = extract_current_page(
+                        page,
+                        platform,
+                        selectors,
+                        self.config.version,
+                    )
+                if (
+                    check.status is SessionStatus.SESSION_READY
+                    and check.job
+                    and command.company in check.job.company_name
+                    and command.job_title in check.job.title
+                    and command.recruiter in (check.job.recruiter_name or "")
+                    and (
+                        not command.external_job_id
+                        or check.job.external_job_id == command.external_job_id
+                    )
+                ):
+                    matches.append(str(websocket_url))
+            if not matches:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="APPROVED_TARGET_PAGE_NOT_FOUND",
+                )
+            if len(matches) > 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="APPROVED_TARGET_PAGE_AMBIGUOUS",
+                )
+            return self._send_greeting_on_raw_page(matches[0], command)
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="RAW_CDP_PREFLIGHT_ERROR",
+            )
+
+    def _send_greeting_on_raw_page(
+        self,
+        websocket_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        selectors = self.config.platforms[command.platform]
+        performed = False
+        try:
+            with RawCdpPageReader(websocket_url) as page:
+                if not command.content:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="EMPTY_CONTENT",
+                    )
+                clicked = page._evaluate(
+                    "(() => { const element = Array.from(document.querySelectorAll("
+                    f"{json.dumps(selectors.job_open_marker)}"
+                    ")).find(item => item.getClientRects().length > 0); "
+                    "if (!element) return false; element.click(); return true; })()"
+                )
+                if not clicked:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="GREETING_TRIGGER_NOT_VISIBLE",
+                    )
+                performed = True
+                for _ in range(30):
+                    if page.exists(selectors.message_composer):
+                        break
+                    time.sleep(0.1)
+                else:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        error_code="COMPOSER_NOT_OBSERVED_AFTER_GREETING_TRIGGER",
+                    )
+                filled = page._evaluate(
+                    "(() => { const element = document.querySelector("
+                    f"{json.dumps(selectors.message_composer)}"
+                    f"); if (!element) return false; const value = {json.dumps(command.content)}; "
+                    "element.focus(); if ('value' in element) { "
+                    "const prototype = element.tagName === 'TEXTAREA' "
+                    "? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; "
+                    "const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set; "
+                    "if (setter) setter.call(element, value); else element.value = value; "
+                    "} else { element.textContent = value; } "
+                    "element.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: "
+                    "'insertText', data: value})); "
+                    "element.dispatchEvent(new Event('change', {bubbles: true})); return true; })()"
+                )
+                if not filled:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        error_code="COMPOSER_FILL_NOT_CONFIRMED",
+                    )
+                sent = page._evaluate(
+                    "(() => { const element = Array.from(document.querySelectorAll("
+                    f"{json.dumps(selectors.message_send_button)}"
+                    ")).find(item => item.getClientRects().length > 0); "
+                    "if (!element) return false; element.click(); return true; })()"
+                )
+                if not sent:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        error_code="SEND_BUTTON_NOT_OBSERVED",
+                    )
+                for _ in range(30):
+                    observed = page._evaluate(
+                        "Array.from(document.querySelectorAll("
+                        f"{json.dumps(selectors.sent_message_items)}"
+                        f")).some(item => (item.textContent || '').includes("
+                        f"{json.dumps(command.content)}))"
+                    )
+                    if observed:
+                        evidence = hashlib.sha256(
+                            f"{page.url}:{command.model_dump_json()}".encode()
+                        ).hexdigest()
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.SUCCEEDED,
+                            evidence_hash=evidence,
+                        )
+                    time.sleep(0.1)
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="RESULT_NOT_OBSERVED",
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=(
+                    ExecutionOutcome.OUTCOME_UNKNOWN
+                    if performed
+                    else ExecutionOutcome.FAILED_RETRYABLE
+                ),
+                error_code="RAW_CDP_ACTION_ERROR",
+            )
+
+    def execute_on_browser(
+        self,
+        browser: Browser,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        """按已批准目标选择唯一标签页，避免多标签环境依赖焦点或页面顺序。"""
+        platform = Platform(command.platform)
+        selectors = self.config.platforms[platform.value]
+        matches: list[Page] = []
+        for page in [item for context in browser.contexts for item in context.pages]:
+            try:
+                check = extract_current_page(
+                    PlaywrightPageReader(page),
+                    platform,
+                    selectors,
+                    self.config.version,
+                )
+            except PlaywrightError:
+                continue
+            if check.status is not SessionStatus.SESSION_READY:
+                continue
+            if command.action_type == "GREETING" and check.job:
+                if (
+                    command.company in check.job.company_name
+                    and command.job_title in check.job.title
+                    and command.recruiter in (check.job.recruiter_name or "")
+                    and (
+                        not command.external_job_id
+                        or check.job.external_job_id == command.external_job_id
+                    )
+                ):
+                    matches.append(page)
+            elif check.conversation:
+                if (
+                    check.conversation.external_conversation_id
+                    == command.conversation_key
+                    and command.recruiter in check.conversation.recruiter_name
+                    and command.company in (check.conversation.company_name or "")
+                    and command.job_title in (check.conversation.job_title or "")
+                ):
+                    matches.append(page)
+        if not matches:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="APPROVED_TARGET_PAGE_NOT_FOUND",
+            )
+        if len(matches) > 1:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="APPROVED_TARGET_PAGE_AMBIGUOUS",
+            )
+        return self.execute_on_page(matches[0], command)
 
     def execute_on_page(self, page: Page, command: ApprovedCommand) -> ExecutionResult:
         """在已打开页面执行单个动作，供受控 CDP 与本地页面夹具共同使用。"""

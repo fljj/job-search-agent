@@ -129,6 +129,51 @@ def test_greeting_target_mismatch_stops_before_click() -> None:
         assert page.locator("[data-testid='chat-panel']").is_hidden()
 
 
+def test_greeting_selects_unique_approved_job_among_multiple_tabs() -> None:
+    with fixture_page("job-detail.html") as job_page:
+        browser = job_page.context.browser
+        assert browser is not None
+        other = browser.new_page()
+        other.route(
+            "https://www.zhipin.com/**",
+            lambda route: route.fulfill(
+                status=200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                body="<div data-testid='user-avatar'>已登录</div><main>首页</main>",
+            ),
+        )
+        other.goto("https://www.zhipin.com/")
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_browser(
+            browser,
+            approved_command(
+                "GREETING",
+                conversation_key=None,
+                external_job_id="boss-job-1",
+                content="您好，希望进一步沟通。",
+            ),
+        )
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert job_page.locator("[data-direction='outbound']").count() == 1
+
+
+def test_missing_approved_job_tab_is_retryable_before_any_click() -> None:
+    with fixture_page("changed-page.html") as page:
+        browser = page.context.browser
+        assert browser is not None
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_browser(
+            browser,
+            approved_command(
+                "GREETING",
+                conversation_key=None,
+                external_job_id="boss-job-1",
+                content="不应发送",
+            ),
+        )
+        assert result.outcome is ExecutionOutcome.FAILED_RETRYABLE
+        assert result.error_code == "APPROVED_TARGET_PAGE_NOT_FOUND"
+        assert page.get_by_text("不应发送").count() == 0
+
+
 def test_selects_unique_existing_resume_and_reads_back_result() -> None:
     with fixture_page("conversation-detail.html") as page:
         result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
