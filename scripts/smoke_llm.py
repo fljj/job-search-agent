@@ -1,4 +1,4 @@
-"""手动千问冒烟；仅在显式执行且配置 API Key 时发起一次请求。"""
+"""手动真实 LLM 冒烟；仅在显式执行且配置 API Key 时发起一次请求。"""
 
 from apps.api.app.core.config import get_settings
 from apps.api.app.core.llm import build_llm_provider

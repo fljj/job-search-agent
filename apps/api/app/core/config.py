@@ -11,10 +11,11 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "postgresql+psycopg://job_agent:job_agent@localhost:55432/job_agent"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
-    llm_provider: str = "QWEN"
+    llm_provider: str = "ZHIPU"
     llm_api_key: SecretStr | None = None
-    llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    llm_model: str = "qwen-plus"
+    zhipu_api_key: SecretStr | None = None
+    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    llm_model: str = "glm-5.2"
     llm_timeout_seconds: int = Field(default=30, ge=1, le=300)
     llm_max_retries: int = Field(default=1, ge=0, le=3)
     agent_lease_seconds: int = Field(default=30, ge=5, le=300)
@@ -32,10 +33,18 @@ class Settings(BaseSettings):
     reconciliation_batch_size: int = Field(default=10, ge=1, le=100)
     audit_retention_days: int = Field(default=365, ge=30, le=3650)
     run_event_retention_days: int = Field(default=90, ge=7, le=3650)
+    agent_log_dir: str = "~/Desktop/job-search-agent-gray/logs"
+    agent_log_max_bytes: int = Field(default=20_000_000, ge=1_000_000)
+    agent_log_backup_count: int = Field(default=14, ge=1, le=100)
 
     @property
     def llm_configured(self) -> bool:
-        return self.llm_api_key is not None and bool(self.llm_api_key.get_secret_value())
+        key = self.selected_llm_api_key
+        return key is not None and bool(key.get_secret_value())
+
+    @property
+    def selected_llm_api_key(self) -> SecretStr | None:
+        return self.zhipu_api_key if self.llm_provider.upper() == "ZHIPU" else self.llm_api_key
 
     @property
     def calendar_configured(self) -> bool:

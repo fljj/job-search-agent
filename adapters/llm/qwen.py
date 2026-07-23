@@ -86,6 +86,7 @@ class QwenLlmProvider:
         model: str,
         timeout_seconds: int = 30,
         max_retries: int = 1,
+        provider_name: str = "QWEN",
         transport: JsonTransport | None = None,
     ) -> None:
         if not api_key.strip():
@@ -93,13 +94,14 @@ class QwenLlmProvider:
         self._api_key = api_key
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self._model = model
+        self._provider_name = provider_name
         self._timeout = timeout_seconds
         self._max_retries = max_retries
         self._transport = transport or UrllibJsonTransport()
 
     @property
     def provider_name(self) -> str:
-        return "QWEN"
+        return self._provider_name
 
     @property
     def model_name(self) -> str:
@@ -186,7 +188,7 @@ class QwenLlmProvider:
         return LlmResult[OutputT](
             data=parsed,
             metadata=LlmCallMetadata(
-                provider="QWEN",
+                provider=self._provider_name,
                 model=self._model,
                 prompt_version=prompt_version,
                 response_id=response_id if isinstance(response_id, str) else None,

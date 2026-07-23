@@ -24,18 +24,19 @@ pip install -e '.[dev]'
 
 项目 PostgreSQL 映射到本机 `55432` 端口，避免与已有本地 PostgreSQL 冲突。
 
-`.env.example` 已预留千问配置。`LLM_PROVIDER=FAKE` 可完全离线运行；使用千问时将
-`LLM_PROVIDER=QWEN` 和 `LLM_API_KEY` 只写入本机 `.env`，不得提交。
+`.env.example` 默认配置智谱 `glm-5.2`。`LLM_PROVIDER=FAKE` 可完全离线运行；使用
+智谱时只将 `ZHIPU_API_KEY` 写入本机 `.env`，不得提交。智谱模式不会读取或发送既有
+千问 `LLM_API_KEY`。
 
 Mac 默认使用 `CALENDAR_PROVIDER=APPLE`，通过系统 Calendar 读取所有日历的忙碌时间，
 并把用户明确授权的面试事件写入 `APPLE_CALENDAR_NAME` 指定的日历。首次访问时 macOS
 会请求“自动化/日历”权限；拒绝权限、目标日历不存在或 Calendar 不可用时，系统统一
 返回日历不可用。也可以改为 `MOCK` 做本地测试，或配置 `GOOGLE` 供应商。
 
-统一 LLM 适配器的默认测试不会访问网络。如需显式执行一次千问消息分类冒烟：
+统一 LLM 适配器的默认测试不会访问网络。配置密钥后可显式执行一次模型消息分类冒烟：
 
 ```bash
-python scripts/smoke_qwen.py
+python scripts/smoke_llm.py
 ```
 
 ### 2. 初始化数据库
@@ -90,7 +91,7 @@ BOSS 平台会通过本机 CDP 自动扫描唯一的消息列表页，按未读�
 招聘人、公司和职位，只有成功绑定当前策略有效评分后才导入消息和执行普通回复。
 列表游标、最后消息标识及最多 500 个去重键保存在 Agent 运行记录中；虚拟滚动会在
 后续轮询继续加载。启用“主动扫描职位”后，Worker 还会读取唯一的 BOSS 职位搜索列表，
-逐个新标签核验详情，并执行导入、千问评分、程序授权、去重/冷却和主动招呼。职位扫描
+逐个新标签核验详情，并执行导入、GLM 评分、程序授权、去重/冷却和主动招呼。职位扫描
 仅在配置的工作时段和限额内运行，紧急停止优先阻断所有自动动作。Worker 使用本机进程
 锁避免重复启动，并记录执行器类型。专用浏览器需同时保留一个消息列表页和一个职位
 搜索列表页：
@@ -102,6 +103,9 @@ python scripts/run_agent_worker.py
 Worker 启动时检查数据库迁移、LLM、选择器、执行器，以及真实运行需要的 CDP 和登录
 会话；同时登记 PID、心跳和停止状态。结果未知动作自动进入只读对账队列，持续未知超过
 配置时限后升级人工处理。Agent 控制台展示自检、Worker、游标、未知动作和审计差异。
+灰度日志默认轮转写入 `~/Desktop/job-search-agent-gray/logs/agent-gray.log`，记录
+Worker 周期、消息/职位扫描数量、动作计数、暂停原因及灰度状态，不记录消息正文、
+Cookie 或密钥。
 
 CDP 地址默认是 `http://127.0.0.1:9222`，需要调整时设置
 `AGENT_CDP_URL`。Worker 不保存浏览器 Cookie 或招聘平台密码。电话和面试具体时间
@@ -182,6 +186,16 @@ RESTORE_DATABASE_URL='postgresql+psycopg://.../job_agent_restore_test' \
   scripts/restore_rehearsal.sh backups/job-search-agent-YYYYMMDD-HHMMSS.dump
 ```
 
+灰度前清理运行历史但保留候选人、策略、知识库、附件简历和自动化配置：
+
+```bash
+python scripts/reset_gray_data.py --confirm-database job_agent
+python scripts/reset_gray_data.py --confirm-database job_agent --execute
+```
+
+第一条命令只预览。第二条会清除职位、评分、会话、动作、审计、Worker、浏览器证据和
+排期历史，并重建暂停的 BOSS 一级灰度。
+
 ## 当前范围限制
 
 - BOSS 已覆盖职位列表/详情、对话列表/详情、文本及站内附件简历的本地夹具；脉脉仍只保留当前页基础适配。
@@ -195,7 +209,7 @@ RESTORE_DATABASE_URL='postgresql+psycopg://.../job_agent_restore_test' \
 - 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。
 - 自动招呼最低分配置不得低于80，自动简历最低分配置不得低于60。
 - 策略可配置最高 79 分的猎头岗位分数封顶，使猎头岗位可接收回复但不主动招呼。
-- 千问已接入职位解析、评分、招呼、入站回复和简历反馈判断。首次真实招呼必须先创建
+- 智谱 GLM-5.2 已接入职位解析、评分、招呼、入站回复和简历反馈判断。首次真实招呼必须先创建
   人工确认任务，批准后再单独执行；执行前会复核职位、公司、招聘人、开放状态和
   外部职位 ID，并使用幂等指纹防止重复发送。
 - BOSS 正式运行只允许 `REAL` 执行器，`MOCK` 离线测试只允许 `FAKE`；两者交叉配置时

@@ -36,6 +36,7 @@ from apps.api.app.services.rollout_service import (
     allows_rollout_job_scan,
     enforce_rollout_health,
 )
+from packages.audit.gray_logging import configure_gray_logging, gray_event
 from packages.audit.redaction import install_redacting_filter
 from packages.browser_worker.actions import ActionExecutor
 from packages.browser_worker.models import Platform
@@ -75,6 +76,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
             select(db.AgentRun.id).where(db.AgentRun.status == "RUNNING")
         ).all()
     for run_id in run_ids:
+        gray_event(logger, "CYCLE_STARTED", worker_id=worker_id, run_id=run_id)
         try:
             with SessionLocal() as session:
                 run = session.get(db.AgentRun, run_id)
@@ -116,6 +118,15 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                         )
                         continue
                     persist_discovery_batch(session, run, worker_id, batch)
+                    gray_event(
+                        logger,
+                        "MESSAGE_SCAN_COMPLETED",
+                        worker_id=worker_id,
+                        run_id=run_id,
+                        scanned_count=len(batch.items),
+                        exhausted=batch.exhausted,
+                        cursor=batch.scroll_position,
+                    )
                     rules = _effective_rules(
                         session, run.platform, run.strategy_id
                     )
@@ -171,17 +182,50 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             executor=executor,
                             cdp_url=cdp_url,
                         )
+                        gray_event(
+                            logger,
+                            "JOB_SCAN_COMPLETED",
+                            worker_id=worker_id,
+                            run_id=run_id,
+                            scanned_count=len(job_batch.items),
+                            exhausted=job_batch.exhausted,
+                            cursor=job_batch.scroll_position,
+                        )
                 run.executor_type = executor_type
                 session.commit()
-                tick_run(
+                result = tick_run(
                     session,
                     run_id,
                     worker_id,
                     executor=executor,
                 )
+                gray_event(
+                    logger,
+                    "CYCLE_COMPLETED",
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    status=result["status"],
+                    processed_count=result["processed_count"],
+                    action_count=result["action_count"],
+                    failure_count=result["failure_count"],
+                    pause_reason_codes=result["pause_reason_codes"],
+                )
         except ValueError as exc:
-            logger.info("Agent tick skipped: run=%s reason=%s", run_id, exc)
+            gray_event(
+                logger,
+                "CYCLE_SKIPPED",
+                worker_id=worker_id,
+                run_id=run_id,
+                reason=type(exc).__name__,
+            )
         except Exception:
+            gray_event(
+                logger,
+                "CYCLE_FAILED",
+                worker_id=worker_id,
+                run_id=run_id,
+                reason="UNEXPECTED_ERROR",
+            )
             logger.exception("Agent tick failed unexpectedly: run=%s", run_id)
 
 
@@ -198,9 +242,19 @@ def _request_stop(_signum: int, _frame: object) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    install_redacting_filter()
     settings = get_settings()
+    log_path = configure_gray_logging(settings)
+    install_redacting_filter()
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
+    gray_event(
+        logger,
+        "WORKER_STARTING",
+        worker_id=worker_id,
+        log_path=log_path,
+        llm_provider=settings.llm_provider,
+        llm_model=settings.llm_model,
+        executor_mode=settings.agent_executor_mode,
+    )
     cdp_url = os.getenv("AGENT_CDP_URL", "http://127.0.0.1:9222")
     signal.signal(signal.SIGINT, _request_stop)
     signal.signal(signal.SIGTERM, _request_stop)
