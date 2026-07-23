@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Protocol
 
 from pydantic import BaseModel
 
@@ -26,3 +27,7 @@ class ExecutionResult(BaseModel):
     error_code: str | None = None
     external_reference: str | None = None
     evidence_hash: str | None = None
+
+
+class ActionExecutor(Protocol):
+    def execute(self, cdp_url: str, command: ApprovedCommand) -> ExecutionResult: ...

@@ -1,17 +1,20 @@
 import os
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.llm.errors import LlmServiceError
 from adapters.llm.fake import FakeLlmProvider
 from apps.api.app.core.database import Base, get_session
 from apps.api.app.main import app
 from apps.api.app.models import entities  # noqa: F401
 from apps.api.app.schemas.browser import BrowserReadRequest
+from apps.api.app.services.agent_service import tick_run
 from apps.api.app.services.browser_service import persist_read_result
 from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
 from packages.browser_worker.models import (
@@ -23,6 +26,14 @@ from packages.browser_worker.models import (
     ReadResult,
     SessionStatus,
 )
+from packages.llm.models import LlmResult, MessageClassification, MessageClassificationRequest
+
+
+class FailingLlmProvider(FakeLlmProvider):
+    def classify_message(
+        self, request: MessageClassificationRequest
+    ) -> LlmResult[MessageClassification]:
+        raise LlmServiceError("测试模型故障")
 
 
 @pytest.fixture
@@ -362,6 +373,129 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     changed_item = next(item for item in client.get("/api/v1/scheduling/requests").json()["data"]["items"]
                         if item["id"] == changed_schedule["id"])
     assert changed_item["status"] == "PENDING_APPROVAL"
+
+    monkeypatch.setattr(
+        "apps.api.app.services.agent_service.build_llm_provider",
+        lambda _: FakeLlmProvider(),
+    )
+    started_run = client.post("/api/v1/automation/runs", json={
+        "platform": "MOCK", "strategy_id": strategy_id,
+    })
+    assert started_run.status_code == 200
+    run_id = started_run.json()["data"]["id"]
+    duplicate_start = client.post("/api/v1/automation/runs", json={
+        "platform": "MOCK", "strategy_id": strategy_id,
+    })
+    assert duplicate_start.json()["data"]["id"] == run_id
+
+    lease_engine = create_engine(os.environ["TEST_DATABASE_URL"])
+    with Session(lease_engine) as lease_session:
+        run_entity = lease_session.get(entities.AgentRun, run_id)
+        assert run_entity is not None
+        run_entity.lease_owner = "dead-worker"
+        run_entity.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        lease_session.commit()
+    first_tick = client.post(
+        f"/api/v1/automation/runs/{run_id}/tick",
+        json={"worker_id": "worker-1"},
+    )
+    assert first_tick.status_code == 200
+    first_action_count = first_tick.json()["data"]["action_count"]
+    assert first_action_count >= 1
+
+    with Session(lease_engine) as lease_session:
+        run_entity = lease_session.get(entities.AgentRun, run_id)
+        assert run_entity is not None
+        run_entity.lease_owner = "worker-other"
+        run_entity.lease_expires_at = datetime.now(UTC) + timedelta(minutes=1)
+        lease_session.commit()
+    blocked_lease = client.post(
+        f"/api/v1/automation/runs/{run_id}/tick",
+        json={"worker_id": "worker-2"},
+    )
+    assert blocked_lease.status_code == 400
+
+    paused_run = client.post(f"/api/v1/automation/runs/{run_id}/pause")
+    assert paused_run.json()["data"]["status"] == "PAUSED"
+    assert client.post(
+        f"/api/v1/automation/runs/{run_id}/tick",
+        json={"worker_id": "worker-1"},
+    ).status_code == 400
+    resumed_run = client.post(f"/api/v1/automation/runs/{run_id}/resume")
+    assert resumed_run.json()["data"]["status"] == "RUNNING"
+    second_tick = client.post(
+        f"/api/v1/automation/runs/{run_id}/tick",
+        json={"worker_id": "worker-2"},
+    )
+    assert second_tick.status_code == 200
+    assert second_tick.json()["data"]["action_count"] == first_action_count
+    with Session(lease_engine) as lease_session:
+        events = lease_session.scalars(
+            select(entities.AgentRunEvent).where(
+                entities.AgentRunEvent.agent_run_id == run_id
+            )
+        ).all()
+        actions = lease_session.scalars(
+            select(entities.ActionQueue).where(entities.ActionQueue.agent_run_id == run_id)
+        ).all()
+        assert events
+        assert len({action.send_fingerprint for action in actions}) == len(actions)
+
+    failing_message = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "external_message_id": "agent-llm-failure",
+            "content": "请介绍一个尚未处理的问题",
+            "received_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    assert failing_message.status_code == 200
+    for attempt in range(3):
+        with Session(lease_engine, expire_on_commit=False) as agent_session:
+            failed_tick = tick_run(
+                agent_session,
+                run_id,
+                f"failure-worker-{attempt}",
+                provider=FailingLlmProvider(),
+                executor=FakeActionExecutor(),
+            )
+    assert failed_tick["status"] == "PAUSED"
+    assert failed_tick["pause_reason_codes"] == ["CONSECUTIVE_LLM_FAILURES"]
+    assert client.post(f"/api/v1/automation/runs/{run_id}/resume").status_code == 200
+
+    safety_conversation = client.post("/api/v1/conversations", json={
+        "job_id": job_id,
+        "external_conversation_id": "agent-safety-conversation",
+        "recruiter_name": "安全异常招聘人",
+        "platform": "MOCK",
+    }).json()["data"]
+    safety_message = client.post(
+        f"/api/v1/conversations/{safety_conversation['id']}/messages",
+        json={
+            "external_message_id": "agent-safety-failure",
+            "content": "请继续介绍 Java 技术栈",
+            "received_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    assert safety_message.status_code == 200
+    with Session(lease_engine, expire_on_commit=False) as agent_session:
+        safety_tick = tick_run(
+            agent_session,
+            run_id,
+            "safety-worker",
+            provider=FakeLlmProvider(),
+            executor=FakeActionExecutor(
+                [
+                    ExecutionResult(
+                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        error_code="RESULT_NOT_OBSERVED",
+                    )
+                ]
+            ),
+        )
+    assert safety_tick["status"] == "PAUSED"
+    assert safety_tick["pause_reason_codes"] == ["RESULT_NOT_OBSERVED"]
+    lease_engine.dispose()
 
 
 def test_browser_read_persistence_is_idempotent(client: TestClient) -> None:

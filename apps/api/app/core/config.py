@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     llm_model: str = "qwen-plus"
     llm_timeout_seconds: int = Field(default=30, ge=1, le=300)
     llm_max_retries: int = Field(default=1, ge=0, le=3)
+    agent_lease_seconds: int = Field(default=30, ge=5, le=300)
+    agent_tick_batch_size: int = Field(default=10, ge=1, le=100)
+    agent_failure_threshold: int = Field(default=3, ge=1, le=20)
+    agent_poll_interval_seconds: int = Field(default=10, ge=1, le=300)
 
     @property
     def llm_configured(self) -> bool:

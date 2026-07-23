@@ -10,6 +10,7 @@ from apps.api.app.schemas.automation import AutomationDispatchRequest, Automatio
 from apps.api.app.services.action_service import execute_action
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
+from packages.browser_worker.actions import ActionExecutor
 from packages.policy_engine.automation import (
     AutomationContext,
     AutomationDecision,
@@ -52,7 +53,13 @@ def list_settings(session: Session) -> list[dict[str, object]]:
     ).all()]
 
 
-def dispatch(session: Session, payload: AutomationDispatchRequest) -> dict[str, object]:
+def dispatch(
+    session: Session,
+    payload: AutomationDispatchRequest,
+    *,
+    executor: ActionExecutor | None = None,
+    agent_run_id: UUID | None = None,
+) -> dict[str, object]:
     conversation = session.get(db.Conversation, payload.conversation_id)
     draft = session.get(db.GeneratedDraft, payload.draft_id)
     if conversation is None or conversation.user_id != DEFAULT_USER_ID:
@@ -111,7 +118,9 @@ def dispatch(session: Session, payload: AutomationDispatchRequest) -> dict[str, 
         _audit(session, "AUTOMATION_DECIDED", policy.id, None, decision.value, reasons)
         session.commit()
         return {"decision": decision.value, "reason_codes": reasons}
-    action = _create_auto_action(session, conversation, job, score, draft, policy, resume)
+    action = _create_auto_action(
+        session, conversation, job, score, draft, policy, resume, agent_run_id
+    )
     pending_task = session.scalar(select(db.ConfirmationTask).where(
         db.ConfirmationTask.decision_id == original.id,
         db.ConfirmationTask.status == "PENDING_APPROVAL",
@@ -119,11 +128,12 @@ def dispatch(session: Session, payload: AutomationDispatchRequest) -> dict[str, 
     if pending_task:
         pending_task.status = "SUPERSEDED"
     session.commit()
-    result = execute_action(session, action.id, payload.cdp_url)
+    result = execute_action(session, action.id, payload.cdp_url, executor)
     if result.status in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
         _pause_platform(session, conversation.platform, result.failure_code or result.status)
     return {"decision": decision.value, "reason_codes": reasons,
-            "action_id": result.id, "action_status": result.status}
+            "action_id": result.id, "action_status": result.status,
+            "failure_code": result.failure_code}
 
 
 def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> AutomationRules:
@@ -201,7 +211,8 @@ def _rate_counts(session: Session, platform: str) -> tuple[int, int]:
 
 def _create_auto_action(session: Session, conversation: db.Conversation, job: db.Job,
                         score: db.JobScore, draft: db.GeneratedDraft,
-                        policy: db.PolicyDecision, resume: db.Resume | None) -> db.ActionQueue:
+                        policy: db.PolicyDecision, resume: db.Resume | None,
+                        agent_run_id: UUID | None = None) -> db.ActionQueue:
     fingerprint = hashlib.sha256(
         f"{conversation.id}:{policy.action_type}:{draft.content}:{resume.id if resume else ''}".encode()
     ).hexdigest()
@@ -211,6 +222,7 @@ def _create_auto_action(session: Session, conversation: db.Conversation, job: db
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID, confirmation_task_id=None, policy_decision_id=policy.id,
         strategy_id=score.strategy_id, authorization_source="AUTO",
+        agent_run_id=agent_run_id,
         conversation_id=conversation.id, draft_id=draft.id, resume_id=resume.id if resume else None,
         action_type=policy.action_type, status=ActionStatus.APPROVED.value,
         content=None if resume else draft.content, platform=conversation.platform,

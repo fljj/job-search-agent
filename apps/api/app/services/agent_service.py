@@ -1,0 +1,375 @@
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
+
+from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.llm.errors import LlmProviderError
+from apps.api.app.core.config import get_settings
+from apps.api.app.core.llm import build_llm_provider
+from apps.api.app.models import entities as db
+from apps.api.app.schemas.automation import AgentRunStartRequest, AutomationDispatchRequest
+from apps.api.app.services.automation_service import _effective_rules, dispatch
+from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
+from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
+from packages.browser_worker.actions import ActionExecutor
+from packages.llm.ports import LlmProvider
+
+SAFETY_FAILURE_CODES = {
+    "CAPTCHA_REQUIRED",
+    "LOGIN_REQUIRED",
+    "SESSION_INVALID",
+    "PAGE_STRUCTURE_CHANGED",
+    "CONVERSATION_TARGET_MISMATCH",
+    "JOB_TARGET_MISMATCH",
+    "RESULT_NOT_OBSERVED",
+}
+
+
+def start_run(session: Session, payload: AgentRunStartRequest) -> dict[str, object]:
+    ensure_default_user(session)
+    strategy = session.get(db.JobStrategy, payload.strategy_id)
+    if strategy is None or strategy.user_id != DEFAULT_USER_ID or not strategy.enabled:
+        raise ResourceNotFoundError("启用的策略不存在")
+    build_llm_provider(get_settings())
+    rules = _effective_rules(session, payload.platform, strategy.id)
+    if not rules.enabled or rules.paused:
+        raise ValueError("自动化未启用或已暂停")
+    existing = session.scalar(
+        select(db.AgentRun).where(
+            db.AgentRun.user_id == DEFAULT_USER_ID,
+            db.AgentRun.platform == payload.platform,
+            db.AgentRun.status.in_(["RUNNING", "PAUSED"]),
+        )
+    )
+    if existing:
+        return _response(existing)
+    run = db.AgentRun(
+        user_id=DEFAULT_USER_ID,
+        platform=payload.platform,
+        strategy_id=strategy.id,
+        status="RUNNING",
+        heartbeat_at=datetime.now(UTC),
+    )
+    session.add(run)
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        concurrent = session.scalar(
+            select(db.AgentRun).where(
+                db.AgentRun.user_id == DEFAULT_USER_ID,
+                db.AgentRun.platform == payload.platform,
+                db.AgentRun.status.in_(["RUNNING", "PAUSED"]),
+            )
+        )
+        if concurrent:
+            return _response(concurrent)
+        raise
+    _event(session, run.id, "RUN_STARTED")
+    session.commit()
+    session.refresh(run)
+    return _response(run)
+
+
+def get_run(session: Session, run_id: UUID) -> dict[str, object]:
+    return _response(_get_run(session, run_id))
+
+
+def pause_run(
+    session: Session,
+    run_id: UUID,
+    reason_codes: list[str] | None = None,
+) -> dict[str, object]:
+    run = _get_run(session, run_id)
+    if run.status == "PAUSED":
+        return _response(run)
+    if run.status != "RUNNING":
+        raise ValueError("只有运行中的 Agent 可以暂停")
+    run.status = "PAUSED"
+    run.pause_reason_codes = reason_codes or ["USER_PAUSED"]
+    run.lease_owner = None
+    run.lease_expires_at = None
+    run.version += 1
+    _event(session, run.id, "RUN_PAUSED", reason_codes=run.pause_reason_codes)
+    session.commit()
+    return _response(run)
+
+
+def resume_run(session: Session, run_id: UUID) -> dict[str, object]:
+    run = _get_run(session, run_id)
+    if run.status == "RUNNING":
+        return _response(run)
+    if run.status != "PAUSED":
+        raise ValueError("只有已暂停的 Agent 可以恢复")
+    rules = _effective_rules(session, run.platform, run.strategy_id)
+    if not rules.enabled or rules.paused:
+        raise ValueError("自动化配置仍处于关闭或暂停状态")
+    run.status = "RUNNING"
+    run.pause_reason_codes = []
+    run.consecutive_failure_count = 0
+    run.heartbeat_at = datetime.now(UTC)
+    run.version += 1
+    _event(session, run.id, "RUN_RESUMED")
+    session.commit()
+    return _response(run)
+
+
+def tick_run(
+    session: Session,
+    run_id: UUID,
+    worker_id: str,
+    *,
+    provider: LlmProvider | None = None,
+    executor: ActionExecutor | None = None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    current = now or datetime.now(UTC)
+    run = _acquire_lease(session, run_id, worker_id, current)
+    settings = get_settings()
+    rules = _effective_rules(session, run.platform, run.strategy_id)
+    if not rules.enabled or rules.paused:
+        return pause_run(session, run.id, ["AUTOMATION_DISABLED_OR_PAUSED"])
+    if run.platform != "MOCK":
+        platform_session = session.scalar(
+            select(db.PlatformSession).where(
+                db.PlatformSession.user_id == DEFAULT_USER_ID,
+                db.PlatformSession.platform == run.platform,
+            )
+        )
+        if platform_session is None or platform_session.status != "SESSION_READY":
+            return pause_run(session, run.id, ["PLATFORM_SESSION_NOT_READY"])
+
+    llm_provider = provider or build_llm_provider(settings)
+    action_executor = executor or FakeActionExecutor()
+    processed = 0
+    failure_count_before = run.failure_count
+    messages = session.scalars(
+        select(db.Message)
+        .join(db.Conversation, db.Conversation.id == db.Message.conversation_id)
+        .where(
+            db.Conversation.platform == run.platform,
+            db.Message.direction == "INBOUND",
+            ~select(db.GeneratedDraft.id)
+            .where(db.GeneratedDraft.message_id == db.Message.id)
+            .exists(),
+        )
+        .order_by(db.Message.created_at.asc())
+        .limit(settings.agent_tick_batch_size)
+    ).all()
+    for message in messages:
+        try:
+            draft = create_reply_draft(session, message.id, llm_provider)
+            processed += 1
+            _event(session, run.id, "DRAFT_CREATED", "draft", draft.id)
+            if "RESUME_REQUEST" in [intent.value for intent in draft.intents]:
+                resume = create_resume_draft(session, message.id, llm_provider)
+                _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
+        except LlmProviderError as exc:
+            _record_failure(session, run, exc.code)
+            if run.consecutive_failure_count >= settings.agent_failure_threshold:
+                return _pause_after_failure(session, run, ["CONSECUTIVE_LLM_FAILURES"])
+        except (ValueError, ResourceNotFoundError) as exc:
+            _record_failure(session, run, type(exc).__name__)
+
+    drafts = _pending_drafts(session, run, settings.agent_tick_batch_size)
+    for generated_draft, conversation, resume_id in drafts:
+        if _has_unknown_outcome(session, conversation.id):
+            _event(
+                session,
+                run.id,
+                "ACTION_BLOCKED",
+                "conversation",
+                conversation.id,
+                ["OUTCOME_UNKNOWN"],
+            )
+            continue
+        action_type = generated_draft.draft_type
+        payload = AutomationDispatchRequest(
+            action_type=action_type,
+            conversation_id=conversation.id,
+            draft_id=generated_draft.id,
+            resume_id=resume_id,
+        )
+        result = dispatch(
+            session,
+            payload,
+            executor=action_executor,
+            agent_run_id=run.id,
+        )
+        processed += 1
+        if result.get("action_id"):
+            run.action_count += 1
+            _event(
+                session,
+                run.id,
+                "ACTION_EXECUTED",
+                "action",
+                UUID(str(result["action_id"])),
+                [str(result.get("action_status"))],
+            )
+        if result.get("action_status") in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
+            code = str(result.get("failure_code") or result.get("action_status"))
+            run.failure_count += 1
+            reasons = [code] if code in SAFETY_FAILURE_CODES else [str(result["action_status"])]
+            return _pause_after_failure(session, run, reasons)
+
+    run.processed_count += processed
+    if run.failure_count == failure_count_before:
+        run.consecutive_failure_count = 0
+    run.heartbeat_at = current
+    run.cursor = {"last_tick_at": current.isoformat()}
+    run.lease_owner = None
+    run.lease_expires_at = None
+    run.version += 1
+    _event(session, run.id, "TICK_COMPLETED", metadata={"processed": processed})
+    session.commit()
+    return _response(run)
+
+
+def _acquire_lease(
+    session: Session, run_id: UUID, worker_id: str, now: datetime
+) -> db.AgentRun:
+    lease_seconds = get_settings().agent_lease_seconds
+    claimed = session.scalar(
+        update(db.AgentRun)
+        .where(
+            db.AgentRun.id == run_id,
+            db.AgentRun.user_id == DEFAULT_USER_ID,
+            db.AgentRun.status == "RUNNING",
+            or_(
+                db.AgentRun.lease_expires_at.is_(None),
+                db.AgentRun.lease_expires_at <= now,
+                db.AgentRun.lease_owner == worker_id,
+            ),
+        )
+        .values(
+            lease_owner=worker_id,
+            lease_expires_at=now + timedelta(seconds=lease_seconds),
+            heartbeat_at=now,
+            version=db.AgentRun.version + 1,
+        )
+        .returning(db.AgentRun.id)
+    )
+    if claimed is None:
+        run = _get_run(session, run_id)
+        if run.status != "RUNNING":
+            raise ValueError("Agent 未处于运行状态")
+        raise ValueError("Agent 租约正由其他工作进程持有")
+    session.commit()
+    return _get_run(session, claimed)
+
+
+def _pending_drafts(
+    session: Session, run: db.AgentRun, limit: int
+) -> list[tuple[db.GeneratedDraft, db.Conversation, UUID | None]]:
+    drafts = session.scalars(
+        select(db.GeneratedDraft)
+        .join(db.Conversation, db.Conversation.id == db.GeneratedDraft.conversation_id)
+        .where(db.Conversation.platform == run.platform)
+        .order_by(db.GeneratedDraft.created_at.asc())
+    ).all()
+    result: list[tuple[db.GeneratedDraft, db.Conversation, UUID | None]] = []
+    for draft in drafts:
+        if len(result) >= limit:
+            break
+        score = session.get(db.JobScore, draft.job_score_id) if draft.job_score_id else None
+        if score is None or score.strategy_id != run.strategy_id:
+            continue
+        decision = session.scalar(
+            select(db.PolicyDecision)
+            .where(db.PolicyDecision.draft_id == draft.id)
+            .order_by(db.PolicyDecision.created_at.asc())
+        )
+        if decision is None or decision.decision != "ALLOW_AUTO":
+            continue
+        if session.scalar(select(db.ActionQueue.id).where(db.ActionQueue.draft_id == draft.id)):
+            continue
+        conversation = session.get(db.Conversation, draft.conversation_id)
+        if conversation is None:
+            continue
+        raw_resume_id = decision.input_snapshot.get("resume_id")
+        resume_id = UUID(str(raw_resume_id)) if raw_resume_id else None
+        result.append((draft, conversation, resume_id))
+    return result
+
+
+def _has_unknown_outcome(session: Session, conversation_id: UUID) -> bool:
+    return bool(
+        session.scalar(
+            select(db.ActionQueue.id).where(
+                db.ActionQueue.conversation_id == conversation_id,
+                db.ActionQueue.status == "OUTCOME_UNKNOWN",
+            )
+        )
+    )
+
+
+def _record_failure(session: Session, run: db.AgentRun, code: str) -> None:
+    run.failure_count += 1
+    run.consecutive_failure_count += 1
+    _event(session, run.id, "TICK_FAILURE", reason_codes=[code])
+    session.commit()
+
+
+def _pause_after_failure(
+    session: Session, run: db.AgentRun, reasons: list[str]
+) -> dict[str, object]:
+    run.status = "PAUSED"
+    run.pause_reason_codes = reasons
+    run.lease_owner = None
+    run.lease_expires_at = None
+    run.version += 1
+    _event(session, run.id, "RUN_CIRCUIT_OPENED", reason_codes=reasons)
+    session.commit()
+    return _response(run)
+
+
+def _get_run(session: Session, run_id: UUID) -> db.AgentRun:
+    run = session.get(db.AgentRun, run_id)
+    if run is None or run.user_id != DEFAULT_USER_ID:
+        raise ResourceNotFoundError("Agent 运行不存在")
+    return run
+
+
+def _event(
+    session: Session,
+    run_id: UUID,
+    event_type: str,
+    entity_type: str | None = None,
+    entity_id: UUID | None = None,
+    reason_codes: list[str] | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    session.add(
+        db.AgentRunEvent(
+            agent_run_id=run_id,
+            event_type=event_type,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            reason_codes=reason_codes or [],
+            metadata_json=metadata or {},
+        )
+    )
+
+
+def _response(run: db.AgentRun) -> dict[str, object]:
+    return {
+        "id": run.id,
+        "platform": run.platform,
+        "strategy_id": run.strategy_id,
+        "status": run.status,
+        "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+        "lease_owner": run.lease_owner,
+        "lease_expires_at": run.lease_expires_at.isoformat() if run.lease_expires_at else None,
+        "cursor": run.cursor,
+        "processed_count": run.processed_count,
+        "action_count": run.action_count,
+        "failure_count": run.failure_count,
+        "consecutive_failure_count": run.consecutive_failure_count,
+        "pause_reason_codes": run.pause_reason_codes,
+        "version": run.version,
+    }

@@ -205,9 +205,12 @@ users
 ### 8.1 第五阶段数据表和字段
 
 - `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；包含独立的 `low_score_decline_enabled`，`(user_id, scope_type, scope_key)` 唯一。
+- `agent_runs`：保存平台、绑定策略、运行状态、心跳、短租约、游标、处理/动作/失败计数、连续失败数、暂停原因和乐观版本；同一用户和平台通过部分唯一索引最多保留一个 `RUNNING/PAUSED` 运行。
+- `agent_run_events`：追加保存运行启动、租约轮询、草稿、动作、失败、熔断和恢复事件，不覆盖历史记录。
 - `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
 - `action_queue.policy_decision_id`：自动动作关联“模型建议 + 确定性约束”的最终策略决策。
 - `action_queue.strategy_id`：保存自动动作采用的策略范围。
+- `action_queue.agent_run_id`：将自动动作追溯到产生它的 Agent 运行。
 - 自动动作不创建人工批准，因此 `confirmation_task_id` 可空；人工动作仍必须关联确认任务。
 
 ### 8.2 第六阶段数据表

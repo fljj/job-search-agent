@@ -480,6 +480,9 @@ class ActionQueue(TimestampMixin, Base):
     confirmation_task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("confirmation_tasks.id"), nullable=True)
     policy_decision_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("policy_decisions.id"), nullable=True)
     strategy_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("job_strategies.id"), nullable=True)
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
     authorization_source: Mapped[str] = mapped_column(String(20), default="MANUAL")
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id"))
     draft_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generated_drafts.id"), nullable=True)
@@ -573,6 +576,49 @@ class AuditEvent(Base):
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
     correlation_id: Mapped[str] = mapped_column(String(100))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentRun(TimestampMixin, Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_agent_runs_version"),
+        Index(
+            "uq_agent_runs_active_user_platform",
+            "user_id",
+            "platform",
+            unique=True,
+            postgresql_where=text("status IN ('RUNNING', 'PAUSED')"),
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    platform: Mapped[str] = mapped_column(String(30))
+    strategy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_strategies.id"))
+    status: Mapped[str] = mapped_column(String(30), default="RUNNING")
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cursor: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    processed_count: Mapped[int] = mapped_column(Integer, default=0)
+    action_count: Mapped[int] = mapped_column(Integer, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    pause_reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class AgentRunEvent(Base):
+    __tablename__ = "agent_run_events"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE")
+    )
+    event_type: Mapped[str] = mapped_column(String(60))
+    entity_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SchedulingPreference(TimestampMixin, Base):

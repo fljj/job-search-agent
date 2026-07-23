@@ -275,6 +275,8 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 - `POST /api/v1/automation/dispatch`：对指定评分、草稿、对话和可选网站内简历执行“LLM 建议 + 确定性约束”决策；只有 `ALLOW_AUTO` 才立即复用安全执行链路。
 - `POST /api/v1/automation/runs`：启动指定平台和策略的 Agent 运行；服务端校验模型配置和自动化开关。
 - `POST /api/v1/automation/runs/{id}/pause`：暂停发现、招呼和自动回复。
+- `POST /api/v1/automation/runs/{id}/resume`：自动化配置恢复安全状态后恢复运行。
+- `POST /api/v1/automation/runs/{id}/tick`：由短周期工作进程携带 `worker_id` 执行一次受租约保护的轮询；当前阶段固定使用离线假执行器。
 - `GET /api/v1/automation/runs/{id}`：返回运行状态、最近心跳、动作计数和暂停原因。
 
 `dispatch` 返回 `decision`、`reason_codes`，允许执行时同时返回 `action_id` 和 `action_status`。调用方不能直接指定决策、分数、模型建议、置信度或资格状态，这些数据全部由服务端读取。主动招呼必须同时满足 80 分和模型建议；低于 60 分的入站消息只能进入婉拒；60 分及以上才允许按反馈发送简历。

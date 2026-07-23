@@ -12,7 +12,7 @@ from apps.api.app.models import entities as db
 from apps.api.app.schemas.action import ActionResponse
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.user_service import DEFAULT_USER_ID
-from packages.browser_worker.actions import ApprovedCommand, ExecutionResult
+from packages.browser_worker.actions import ActionExecutor, ApprovedCommand, ExecutionResult
 from packages.policy_engine.content_check import validate_edited_content
 from packages.policy_engine.state_machine import ActionStatus, require_transition
 
@@ -233,7 +233,7 @@ def execute_action(
     session: Session,
     action_id: UUID,
     cdp_url: str,
-    executor: PlaywrightActionExecutor | None = None,
+    executor: ActionExecutor | None = None,
 ) -> ActionResponse:
     action = _get_action(session, action_id)
     if action.status == ActionStatus.SUCCEEDED.value:

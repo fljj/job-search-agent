@@ -24,3 +24,29 @@ class AutomationDecisionResponse(BaseModel):
     reason_codes: list[str]
     action_id: UUID | None = None
     action_status: str | None = None
+
+
+class AgentRunStartRequest(BaseModel):
+    platform: Literal["MOCK", "BOSS", "MAIMAI"]
+    strategy_id: UUID
+
+
+class AgentRunTickRequest(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=100)
+
+
+class AgentRunResponse(BaseModel):
+    id: UUID
+    platform: str
+    strategy_id: UUID
+    status: str
+    heartbeat_at: str | None
+    lease_owner: str | None
+    lease_expires_at: str | None
+    cursor: dict[str, object]
+    processed_count: int
+    action_count: int
+    failure_count: int
+    consecutive_failure_count: int
+    pause_reason_codes: list[str]
+    version: int
