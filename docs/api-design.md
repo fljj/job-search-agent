@@ -267,6 +267,10 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 `POST /automation/runs`、`POST /automation/runs/{id}/pause` 和
 `POST /automation/runs/{id}/resume`，服务端继续执行自动化配置和状态转换校验。
 
+第九阶段的消息列表发现由 BOSS Worker 内部执行，不新增可绕过策略的浏览器导航
+API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回；绑定失败、
+身份不一致和状态转换记录在 Agent 运行事件及会话状态中。
+
 只允许本机 `localhost/127.0.0.1/::1` HTTP(S) CDP 端点且 URL 不得包含凭证。返回会话状态、页面类型、原因码、导入资源 ID、证据 ID 和重复标记。
 
 未登录、验证页、页面结构变化或目标不一致时只保存失败证据，不导入职位或消息。

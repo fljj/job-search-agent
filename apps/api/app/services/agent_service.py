@@ -100,8 +100,7 @@ def pause_run(
         raise ValueError("只有运行中的 Agent 可以暂停")
     run.status = "PAUSED"
     run.pause_reason_codes = reason_codes or ["USER_PAUSED"]
-    run.lease_owner = None
-    run.lease_expires_at = None
+    _release_lease(session, run)
     run.version += 1
     _event(session, run.id, "RUN_PAUSED", reason_codes=run.pause_reason_codes)
     session.commit()
@@ -121,6 +120,7 @@ def resume_run(session: Session, run_id: UUID) -> dict[str, object]:
     run.pause_reason_codes = []
     run.consecutive_failure_count = 0
     run.heartbeat_at = datetime.now(UTC)
+    _release_lease(session, run)
     run.version += 1
     _event(session, run.id, "RUN_RESUMED")
     session.commit()
@@ -137,6 +137,9 @@ def tick_run(
     now: datetime | None = None,
 ) -> dict[str, object]:
     current = now or datetime.now(UTC)
+    requested_run = _get_run(session, run_id)
+    if executor is None and requested_run.platform != "MOCK":
+        raise ValueError("真实平台 Agent 必须显式提供真实执行器")
     run = _acquire_lease(session, run_id, worker_id, current)
     settings = get_settings()
     rules = _effective_rules(session, run.platform, run.strategy_id)
@@ -161,6 +164,13 @@ def tick_run(
         .join(db.Conversation, db.Conversation.id == db.Message.conversation_id)
         .where(
             db.Conversation.platform == run.platform,
+            or_(
+                db.Conversation.strategy_id == run.strategy_id,
+                db.Conversation.strategy_id.is_(None),
+            ),
+            ~db.Conversation.state.in_(
+                ["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]
+            ),
             db.Message.direction == "INBOUND",
             db.Message.status == "RECEIVED",
             ~select(db.GeneratedDraft.id)
@@ -182,6 +192,7 @@ def tick_run(
             _record_failure(session, run, exc.code)
             if run.consecutive_failure_count >= settings.agent_failure_threshold:
                 return _pause_after_failure(session, run, ["CONSECUTIVE_LLM_FAILURES"])
+            return _finish_failed_tick(session, run, current, exc.code)
         except (ValueError, ResourceNotFoundError) as exc:
             _record_failure(session, run, type(exc).__name__)
 
@@ -232,8 +243,7 @@ def tick_run(
         run.consecutive_failure_count = 0
     run.heartbeat_at = current
     run.cursor = {"last_tick_at": current.isoformat()}
-    run.lease_owner = None
-    run.lease_expires_at = None
+    _release_lease(session, run)
     run.version += 1
     _event(session, run.id, "TICK_COMPLETED", metadata={"processed": processed})
     session.commit()
@@ -279,7 +289,12 @@ def _pending_drafts(
     drafts = session.scalars(
         select(db.GeneratedDraft)
         .join(db.Conversation, db.Conversation.id == db.GeneratedDraft.conversation_id)
-        .where(db.Conversation.platform == run.platform)
+        .where(
+            db.Conversation.platform == run.platform,
+            ~db.Conversation.state.in_(
+                ["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]
+            ),
+        )
         .order_by(db.GeneratedDraft.created_at.asc())
     ).all()
     result: list[tuple[db.GeneratedDraft, db.Conversation, UUID | None]] = []
@@ -322,7 +337,7 @@ def _record_failure(session: Session, run: db.AgentRun, code: str) -> None:
     run.failure_count += 1
     run.consecutive_failure_count += 1
     _event(session, run.id, "TICK_FAILURE", reason_codes=[code])
-    session.commit()
+    session.flush()
 
 
 def _pause_after_failure(
@@ -330,12 +345,40 @@ def _pause_after_failure(
 ) -> dict[str, object]:
     run.status = "PAUSED"
     run.pause_reason_codes = reasons
-    run.lease_owner = None
-    run.lease_expires_at = None
+    _release_lease(session, run)
     run.version += 1
     _event(session, run.id, "RUN_CIRCUIT_OPENED", reason_codes=reasons)
     session.commit()
     return _response(run)
+
+
+def _finish_failed_tick(
+    session: Session,
+    run: db.AgentRun,
+    current: datetime,
+    reason: str,
+) -> dict[str, object]:
+    run.heartbeat_at = current
+    _release_lease(session, run)
+    run.version += 1
+    _event(
+        session,
+        run.id,
+        "TICK_COMPLETED_WITH_FAILURE",
+        reason_codes=[reason],
+    )
+    session.commit()
+    return _response(run)
+
+
+def _release_lease(session: Session, run: db.AgentRun) -> None:
+    session.execute(
+        update(db.AgentRun)
+        .where(db.AgentRun.id == run.id)
+        .values(lease_owner=None, lease_expires_at=None)
+    )
+    run.lease_owner = None
+    run.lease_expires_at = None
 
 
 def _get_run(session: Session, run_id: UUID) -> db.AgentRun:

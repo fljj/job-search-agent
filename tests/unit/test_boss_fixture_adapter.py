@@ -79,11 +79,15 @@ def test_reads_conversation_list_and_message_direction() -> None:
         assert result.page_type is PageType.CONVERSATION_LIST
         assert result.cursor == "chat-page-2"
         assert result.conversations[0].unread_count == 2
+        assert result.conversations[0].external_job_id == "boss-job-1"
+        assert result.conversations[0].last_message_id == "message-1"
+        assert result.conversations[0].category == "NEW_GREETING"
 
     with fixture_page("conversation-detail.html") as page:
         result = read_fixture(page)
         assert result.page_type is PageType.CONVERSATION
         assert result.conversation
+        assert result.conversation.external_job_id == "boss-job-1"
         assert result.conversation.messages[0].direction is MessageDirection.INBOUND
 
 

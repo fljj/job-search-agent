@@ -8,6 +8,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.browser.message_discovery import (
+    DiscoveredConversation,
+    MessageDiscoveryBatch,
+)
 from adapters.llm.errors import LlmServiceError
 from adapters.llm.fake import FakeLlmProvider
 from apps.api.app.core.database import Base, get_session
@@ -16,6 +20,7 @@ from apps.api.app.models import entities  # noqa: F401
 from apps.api.app.schemas.browser import BrowserReadRequest
 from apps.api.app.services.agent_service import tick_run
 from apps.api.app.services.browser_service import persist_read_result
+from apps.api.app.services.message_discovery_service import persist_discovery_batch
 from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
 from packages.browser_worker.models import (
     BrowserConversation,
@@ -125,6 +130,7 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "company_name": "集成测试公司", "industry": "互联网", "location": "北京",
         "work_mode": "REMOTE", "salary_text": "40K-45K",
         "description": "5年以上Java、Spring Boot和MySQL经验", "source_status": "OPEN",
+        "source": "BOSS",
     }
     first_import = client.post("/api/v1/jobs/import", json=job_payload)
     duplicate_import = client.post("/api/v1/jobs/import", json=job_payload)
@@ -398,12 +404,89 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     })
     assert started_run.status_code == 200
     run_id = started_run.json()["data"]["id"]
+    lease_engine = create_engine(os.environ["TEST_DATABASE_URL"])
+    discovery_run = client.post("/api/v1/automation/runs", json={
+        "platform": "BOSS", "strategy_id": strategy_id,
+    })
+    assert discovery_run.status_code == 200
+    discovery_run_id = discovery_run.json()["data"]["id"]
+    discovered_items = []
+    for index in range(100):
+        discovered_items.append(DiscoveredConversation(
+            summary={
+                "external_conversation_id": f"discovery-chat-{index}",
+                "recruiter_name": f"招聘人-{index}",
+                "job_title": job_payload["title"],
+                "company_name": job_payload["company_name"],
+                "external_job_id": job_payload["external_job_id"],
+                "last_message_id": f"discovery-message-{index}",
+                "unread_count": 1,
+            },
+            detail=ReadResult(
+                platform=Platform.BOSS,
+                status=SessionStatus.SESSION_READY,
+                page_type=PageType.CONVERSATION,
+                page_url="https://www.zhipin.com/web/geek/chat",
+                page_title="消息",
+                content_hash=f"{index:064d}"[-64:],
+                selector_version="fixture",
+                conversation=BrowserConversation(
+                    external_conversation_id=f"discovery-chat-{index}",
+                    recruiter_name=f"招聘人-{index}",
+                    job_title=job_payload["title"],
+                    company_name=job_payload["company_name"],
+                    external_job_id=job_payload["external_job_id"],
+                    messages=[BrowserMessage(
+                        external_message_id=f"discovery-message-{index}",
+                        content="您好，在看新的工作机会吗？",
+                        received_at=datetime.now(UTC),
+                    )],
+                ),
+            ),
+        ))
+    with Session(lease_engine, expire_on_commit=False) as discovery_session:
+        run_entity = discovery_session.get(entities.AgentRun, discovery_run_id)
+        assert run_entity is not None
+        counts = persist_discovery_batch(
+            discovery_session,
+            run_entity,
+            "discovery-worker",
+            MessageDiscoveryBatch(
+                platform=Platform.BOSS,
+                partition="UNREAD",
+                scroll_position=100,
+                scanned_at=datetime.now(UTC),
+                items=discovered_items,
+                seen_message_keys=[
+                    f"discovery-chat-{index}:discovery-message-{index}"
+                    for index in range(100)
+                ],
+                exhausted=True,
+            ),
+        )
+        assert counts == {
+            "discovered": 100,
+            "imported": 100,
+            "paused": 0,
+            "skipped": 0,
+        }
+        assert run_entity.cursor["scroll_position"] == 0
+        assert discovery_session.scalar(
+            select(entities.Message)
+            .join(entities.Conversation)
+            .where(entities.Conversation.platform == "BOSS")
+            .limit(1)
+        ) is not None
+    unsafe_boss_tick = client.post(
+        f"/api/v1/automation/runs/{discovery_run_id}/tick",
+        json={"worker_id": "api-without-real-executor"},
+    )
+    assert unsafe_boss_tick.status_code == 400
     duplicate_start = client.post("/api/v1/automation/runs", json={
         "platform": "MOCK", "strategy_id": strategy_id,
     })
     assert duplicate_start.json()["data"]["id"] == run_id
 
-    lease_engine = create_engine(os.environ["TEST_DATABASE_URL"])
     with Session(lease_engine) as lease_session:
         run_entity = lease_session.get(entities.AgentRun, run_id)
         assert run_entity is not None

@@ -47,6 +47,24 @@ def extract_current_page(
                     "SUPPORTED_PAGE_ROOT_NOT_FOUND")
 
 
+def extract_conversation_list(
+    page: PageReader,
+    platform: Platform,
+    selectors: PlatformSelectors,
+    selector_version: str,
+) -> ReadResult:
+    """在对话详情与列表共存的页面中显式读取列表区域。"""
+    if not page.exists(selectors.conversation_list_root):
+        return _failure(
+            page,
+            platform,
+            selector_version,
+            SessionStatus.SESSION_PAGE_CHANGED,
+            "CONVERSATION_LIST_NOT_FOUND",
+        )
+    return _extract_conversation_list(page, platform, selectors, selector_version)
+
+
 def _extract_job_list(
     page: PageReader, platform: Platform, selectors: PlatformSelectors, version: str,
 ) -> ReadResult:
@@ -125,6 +143,18 @@ def _extract_conversation_list(
             company_name=_normalize_company_name(
                 element.text(selectors.conversation_list_item_company)
             ),
+            external_job_id=element.attribute(
+                "", selectors.conversation_list_item_job_id_attribute
+            ),
+            last_message_id=element.attribute(
+                "", selectors.conversation_list_item_last_message_id_attribute
+            ),
+            category=(
+                element.attribute(
+                    "", selectors.conversation_list_item_category_attribute
+                )
+                or "ALL"
+            ),
             unread_count=unread_count,
         ))
     if not conversations:
@@ -182,6 +212,9 @@ def _extract_conversation(
                                        job_title=page.text(selectors.conversation_job_title),
                                        company_name=_normalize_company_name(
                                            page.text(selectors.company)
+                                       ),
+                                       external_job_id=page.attribute(
+                                           selectors.conversation_root, "data-job-id"
                                        ),
                                        messages=messages)
     return _success(page, platform, version, PageType.CONVERSATION, conversation=conversation)

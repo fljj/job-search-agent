@@ -61,6 +61,9 @@ class BrowserConversationSummary(BaseModel):
     recruiter_name: str
     job_title: str | None = None
     company_name: str | None = None
+    external_job_id: str | None = None
+    last_message_id: str | None = None
+    category: str = "ALL"
     unread_count: int = 0
 
 
@@ -69,6 +72,7 @@ class BrowserConversation(BaseModel):
     recruiter_name: str
     job_title: str | None = None
     company_name: str | None = None
+    external_job_id: str | None = None
     messages: list[BrowserMessage] = Field(default_factory=list)
 
 

@@ -370,6 +370,12 @@ class Conversation(TimestampMixin, Base):
     external_conversation_id: Mapped[str] = mapped_column(String(200))
     recruiter_name: Mapped[str] = mapped_column(String(100))
     state: Mapped[str] = mapped_column(String(30), default="NEW")
+    processing_lease_owner: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    processing_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Message(Base):

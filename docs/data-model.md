@@ -212,6 +212,11 @@ users
 - `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；包含独立的 `low_score_decline_enabled`，`(user_id, scope_type, scope_key)` 唯一。
 - `agent_runs`：保存平台、绑定策略、运行状态、心跳、短租约、游标、处理/动作/失败计数、连续失败数、暂停原因和乐观版本；同一用户和平台通过部分唯一索引最多保留一个 `RUNNING/PAUSED` 运行。
 - `agent_runs.executor_type`：记录实际执行器类型 `UNASSIGNED/REAL_CDP/FAKE`，用于启动自检和审计；正式 BOSS 运行不得记录 `FAKE`。
+- `agent_runs.cursor`：第九阶段保存消息列表分区、虚拟滚动位置、下一游标、最后会话
+  和消息 ID、扫描时间、是否到末尾及最近 500 个 `conversation_id:last_message_id`
+  去重键；扫描到末尾后滚动位置归零，新消息仍可被发现。
+- `conversations.processing_lease_owner/processing_lease_expires_at`：消息发现的会话级
+  短租约，防止多个执行者同时导入和决策同一对话。
 - `agent_run_events`：追加保存运行启动、租约轮询、草稿、动作、失败、熔断和恢复事件，不覆盖历史记录。
 - `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
 - `action_queue.policy_decision_id`：自动动作关联“模型建议 + 确定性约束”的最终策略决策。
@@ -277,6 +282,8 @@ SESSION_PAUSED
 - `action_queue.idempotency_key` 唯一；
 - `action_queue.send_fingerprint` 按对话、动作类型、内容或简历生成，防止更换幂等键重复发送；
 - `messages(platform, platform_message_id)` 唯一；
+- 实际消息唯一约束为 `messages(conversation_id, external_message_id)`；消息列表游标
+  仅用于减少重复扫描，数据库唯一约束才是最终幂等边界；
 - `resume_send_records(conversation_id, resume_id)` 唯一；
 - 只有原子条件更新成功将动作转为 `EXECUTING` 的执行者可以调用外部平台；
 - `OUTCOME_UNKNOWN` 只能对账，不能直接重试；

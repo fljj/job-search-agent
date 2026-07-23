@@ -3,9 +3,11 @@
   <head><title>BOSS 对话详情夹具</title></head>
   <body>
     <div data-testid="user-avatar">已登录</div>
-    <main data-testid="chat-panel" d-c="boss-chat-1">
+    <main data-testid="chat-panel" d-c="boss-chat-1" data-job-id="boss-job-1">
       <span data-testid="recruiter-name">张招聘</span>
-      <span data-testid="job-title">高级 Python 后端工程师</span>
+      <a data-testid="job-link" href="/job_detail/boss-job-1.html">
+        <span data-testid="job-title">高级 Python 后端工程师</span>
+      </a>
       <span data-testid="company-name">示例科技</span>
       <article data-testid="message-item" data-mid="message-1"
                data-direction="inbound" data-sent-at="2026-07-23T09:00:00+08:00">

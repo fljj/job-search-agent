@@ -11,18 +11,16 @@ from contextlib import contextmanager
 from sqlalchemy import select
 
 from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.browser.message_discovery import BossMessageDiscoveryAdapter
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
-from adapters.browser.playwright_reader import BossReadOnlyAdapter
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.models import entities as db
-from apps.api.app.schemas.browser import BrowserReadRequest
-from apps.api.app.services.agent_service import tick_run
-from apps.api.app.services.browser_service import persist_read_result
-from apps.api.app.services.user_service import DEFAULT_USER_ID
+from apps.api.app.services.agent_service import pause_run, tick_run
+from apps.api.app.services.message_discovery_service import persist_discovery_batch
 from packages.browser_worker.actions import ActionExecutor
-from packages.browser_worker.models import PageType, Platform, SessionStatus
+from packages.browser_worker.models import Platform
 
 logger = logging.getLogger(__name__)
 LOCK_PATH = "/tmp/job-search-agent-worker.lock"
@@ -52,42 +50,6 @@ def _single_worker_lock() -> Iterator[None]:
         yield
 
 
-def _sync_current_boss_conversation(cdp_url: str) -> None:
-    config = get_browser_selectors()
-    result = BossReadOnlyAdapter(config).read_current_page(cdp_url)
-    if (
-        result.status is not SessionStatus.SESSION_READY
-        or result.page_type is not PageType.CONVERSATION
-        or result.conversation is None
-    ):
-        return
-    with SessionLocal() as session:
-        conversation = session.scalar(
-            select(db.Conversation).where(
-                db.Conversation.user_id == DEFAULT_USER_ID,
-                db.Conversation.platform == Platform.BOSS.value,
-                db.Conversation.external_conversation_id
-                == result.conversation.external_conversation_id,
-            )
-        )
-        if conversation is None:
-            logger.info(
-                "Current BOSS conversation is not bound to a scored job: %s",
-                result.conversation.external_conversation_id,
-            )
-            return
-        persist_read_result(
-            session,
-            BrowserReadRequest(
-                platform=Platform.BOSS,
-                cdp_url=cdp_url,
-                job_id=conversation.job_id,
-                expected_recruiter=conversation.recruiter_name,
-            ),
-            result,
-        )
-
-
 def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
     with SessionLocal() as session:
         run_ids = session.scalars(
@@ -103,7 +65,32 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     run.platform, get_settings().agent_executor_mode
                 )
                 if run.platform == Platform.BOSS.value:
-                    _sync_current_boss_conversation(cdp_url)
+                    cursor = run.cursor or {}
+                    raw_position = cursor.get("scroll_position")
+                    raw_seen = cursor.get("seen_message_keys")
+                    try:
+                        batch = BossMessageDiscoveryAdapter(
+                            get_browser_selectors()
+                        ).scan(
+                            cdp_url,
+                            partition=str(cursor.get("partition") or "UNREAD"),
+                            scroll_position=(
+                                raw_position if isinstance(raw_position, int) else 0
+                            ),
+                            seen_message_keys=[
+                                str(item)
+                                for item in (
+                                    raw_seen if isinstance(raw_seen, list) else []
+                                )
+                            ],
+                            limit=get_settings().agent_tick_batch_size,
+                        )
+                    except ValueError:
+                        pause_run(
+                            session, run_id, ["MESSAGE_DISCOVERY_UNAVAILABLE"]
+                        )
+                        continue
+                    persist_discovery_batch(session, run, worker_id, batch)
                 run.executor_type = executor_type
                 session.commit()
                 tick_run(

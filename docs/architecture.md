@@ -353,6 +353,18 @@ Worker 启动时按平台和 `AGENT_EXECUTOR_MODE` 构造执行器：BOSS 只能
 命令和只读回读，不参与评分、回复决策或重试授权。`OUTCOME_UNKNOWN` 由服务层对账
 接口持有动作行锁后调用执行器只读观察，再由服务层决定成功、确认未发送或继续未知。
 
+第九阶段在 Worker 的普通决策循环之前增加消息发现编排：
+
+```text
+LIST_READY → OPENING_CONVERSATION → VERIFYING_TARGET → READING_MESSAGES
+→ BINDING_JOB → DECIDING → RETURNING_TO_LIST
+```
+
+`message_discovery` 适配器只负责列表滚动、点击会话、读取详情、必要时只读打开并关闭
+职位详情标签页。`message_discovery_service` 负责稳定职位 ID/公司标题唯一绑定、当前
+策略评分校验、会话短租约、消息幂等导入、游标和状态审计。身份不一致、职位不能唯一
+绑定、评分版本过期或结果未知时仅暂停当前会话；浏览器适配器无权猜测绑定或发送。
+
 ## 13. 第六阶段排期流程
 
 ```text

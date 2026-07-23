@@ -33,11 +33,15 @@ class PlatformSelectors(BaseModel):
     conversation_list_item_job_title: str
     conversation_list_item_company: str
     conversation_list_item_unread_attribute: str
+    conversation_list_item_job_id_attribute: str
+    conversation_list_item_last_message_id_attribute: str
+    conversation_list_item_category_attribute: str
     conversation_root: str
     conversation_id: str
     conversation_id_attribute: str
     recruiter: str
     conversation_job_title: str
+    conversation_job_link: str
     message_items: str
     message_id_attribute: str
     message_direction_attribute: str
