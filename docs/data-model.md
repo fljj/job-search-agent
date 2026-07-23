@@ -211,6 +211,7 @@ users
 
 - `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；包含独立的 `low_score_decline_enabled`，`(user_id, scope_type, scope_key)` 唯一。
 - `agent_runs`：保存平台、绑定策略、运行状态、心跳、短租约、游标、处理/动作/失败计数、连续失败数、暂停原因和乐观版本；同一用户和平台通过部分唯一索引最多保留一个 `RUNNING/PAUSED` 运行。
+- `agent_runs.executor_type`：记录实际执行器类型 `UNASSIGNED/REAL_CDP/FAKE`，用于启动自检和审计；正式 BOSS 运行不得记录 `FAKE`。
 - `agent_run_events`：追加保存运行启动、租约轮询、草稿、动作、失败、熔断和恢复事件，不覆盖历史记录。
 - `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
 - `action_queue.policy_decision_id`：自动动作关联“模型建议 + 确定性约束”的最终策略决策。
@@ -258,7 +259,7 @@ SESSION_PAUSED
 
 对话状态：`NEW/ACTIVE/WAITING_RECRUITER/WAITING_USER/SCHEDULING/SCHEDULE_CONFIRMED/ENDED`。
 
-消息状态：`RECEIVED/ANALYZING/DRAFT/PENDING_APPROVAL/APPROVED/SENDING/SENT/DECLINED/FAILED/OUTCOME_UNKNOWN`。
+消息状态：`RECEIVED/SUPERSEDED/ANALYZING/DRAFT/PENDING_APPROVAL/APPROVED/SENDING/SENT/DECLINED/FAILED/OUTCOME_UNKNOWN`。同一会话中尚未生成草稿的连续旧入站消息标为 `SUPERSEDED`，仅最新消息触发一次草稿；旧消息仍保留作为模型上下文和审计证据。
 
 对话状态不能替代单条消息或动作状态。
 
@@ -279,6 +280,8 @@ SESSION_PAUSED
 - `resume_send_records(conversation_id, resume_id)` 唯一；
 - 只有原子条件更新成功将动作转为 `EXECUTING` 的执行者可以调用外部平台；
 - `OUTCOME_UNKNOWN` 只能对账，不能直接重试；
+- 对账使用动作行锁串行执行；只有平台明确确认未发送后才转为
+  `FAILED_RETRYABLE`，继续未知时保持原状态；
 - 目标标签页不存在或不唯一属于点击前失败，可以在用户再次确认后重试；该例外必须
   通过固定失败码白名单判断，不能扩展到点击后的 `FAILED_FINAL`；
 - 每次重试写入新的 `action_attempts`，不得覆盖历史尝试。

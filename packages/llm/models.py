@@ -64,10 +64,27 @@ class GreetingRequest(BaseModel):
     facts: list[TrustedFact] = Field(default_factory=list, max_length=5)
 
 
+class ReplyContext(BaseModel):
+    company_name: str
+    job_title: str
+    job_location: str | None = None
+    work_mode: str
+    required_skills: list[str] = Field(default_factory=list, max_length=30)
+    preferred_skills: list[str] = Field(default_factory=list, max_length=30)
+    total_score: int = Field(ge=0, le=100)
+    dimension_scores: dict[str, Decimal] = Field(default_factory=dict)
+    match_reasons: list[str] = Field(default_factory=list, max_length=5)
+    risk_notes: list[str] = Field(default_factory=list, max_length=8)
+    enabled_work_modes: list[str] = Field(default_factory=list)
+    allowed_onsite_locations: list[str] = Field(default_factory=list)
+    remote_preferred: bool = False
+
+
 class ReplyRequest(BaseModel):
     incoming_message: str = Field(min_length=1, max_length=10000)
     recent_messages: list[str] = Field(default_factory=list, max_length=20)
     facts: list[TrustedFact] = Field(default_factory=list, max_length=20)
+    context: ReplyContext
 
 
 class GeneratedMessage(BaseModel):

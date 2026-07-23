@@ -10,6 +10,7 @@ from apps.api.app.schemas.action import (
     ExecuteRequest,
     GreetingConfirmationRequest,
     ModifyRequest,
+    ReconcileRequest,
     ResumeConfirmationRequest,
 )
 from apps.api.app.services.action_service import (
@@ -20,6 +21,7 @@ from apps.api.app.services.action_service import (
     execute_action,
     list_tasks,
     modify_task,
+    reconcile_action,
     reject_task,
 )
 
@@ -89,3 +91,12 @@ def execute(
 @router.post("/actions/{action_id}/retry")
 def retry(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, object]:
     return response(approve_retry(session, action_id))
+
+
+@router.post("/actions/{action_id}/reconcile")
+def reconcile(
+    action_id: UUID,
+    payload: ReconcileRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(reconcile_action(session, action_id, payload.cdp_url))

@@ -74,9 +74,12 @@ npm run dev
 14. 在“电话与面试安排”页解析招聘消息、检查日历、确认具体回复，并独立授权创建日历事件。
 15. 通过 `/api/v1/automation/runs` 启动 Agent，并由 `/runs/{id}/tick` 执行受数据库短租约保护的离线轮询；可暂停、恢复和查看心跳、计数及熔断原因。
 
-本地短轮询 Worker 可独立启动。`MOCK` 平台仍使用离线执行器；BOSS 平台会通过
+本地短轮询 Worker 可独立启动。执行器必须通过 `AGENT_EXECUTOR_MODE` 显式隔离：
+真实 BOSS 使用 `REAL`，离线 `MOCK` 测试使用 `FAKE`，配置交叉时 Worker 拒绝执行。
+BOSS 平台会通过
 本机 CDP 只读同步当前打开且已经绑定评分职位的对话，并使用原生 CDP 执行已授权
-的普通回复。当前版本不会自动遍历整个消息列表，用户需要保持目标对话页打开：
+的普通回复。Worker 使用本机进程锁避免重复启动，并在运行记录保存执行器类型。
+当前版本不会自动遍历整个消息列表，用户需要保持目标对话页打开：
 
 ```bash
 python scripts/run_agent_worker.py
@@ -85,6 +88,9 @@ python scripts/run_agent_worker.py
 CDP 地址默认是 `http://127.0.0.1:9222`，需要调整时设置
 `AGENT_CDP_URL`。Worker 不保存浏览器 Cookie 或招聘平台密码。电话和面试具体时间
 仍只生成确认任务，不会自动发送。
+
+对 `OUTCOME_UNKNOWN` 动作使用 `POST /api/v1/actions/{id}/reconcile` 回读平台。
+只有平台明确确认未发送后，动作才转为可重新批准状态；仍无法判断时保持阻断。
 
 ### 本机浏览器只读接入
 

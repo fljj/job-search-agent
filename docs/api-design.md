@@ -244,6 +244,7 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 - `POST /api/v1/drafts/reply`：请求包含 `message_id`；服务端先读取对话绑定策略的最新有效评分。低于 60 分返回婉拒草稿，60 分及以上返回事实受限回复；只有时间类意图返回确认任务 ID。
 - `POST /api/v1/drafts/greeting`：请求包含 `job_score_id`，仅基于 JD 与已验证知识生成个性化招呼草稿。
 - `POST /api/v1/drafts/resume`：请求包含 `message_id`；模型返回当前对话中的证据消息 UUID，服务端校验评分、硬排除、附件唯一匹配和重复发送后返回 `ALLOW_AUTO/DENY` 及 `resume_id`，不创建普通确认任务。
+- `PATCH /api/v1/drafts/{draft_id}`：人工编辑尚未产生动作的草稿；服务端重新执行内容安全检查，创建新草稿和新策略决策并审计，不覆盖原记录。
 - `GET /api/v1/confirmation-tasks`：只查看电话、面试具体时间和日历写操作的待确认数据。
 
 草稿接口按输入、知识版本和生成器版本幂等。生成草稿和动作授权不代表已经向真实平台执行发送。
@@ -281,6 +282,10 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 - `POST /api/v1/actions/{id}/retry`：允许用户将 `FAILED_RETRYABLE` 重新批准；兼容
   历史上误记为 `FAILED_FINAL` 的点击前页面定位失败白名单。`OUTCOME_UNKNOWN`
   和任何点击后失败不可重试。
+- `POST /api/v1/actions/{id}/reconcile`：请求包含本机 `cdp_url`，仅对
+  `OUTCOME_UNKNOWN` 动作执行只读平台回读。确认已发送转为 `SUCCEEDED`；确认未发送
+  转为 `FAILED_RETRYABLE`；目标不唯一或仍无法判断时保持 `OUTCOME_UNKNOWN`。
+  同一动作使用数据库行锁串行对账。
 
 确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。首次真实
 招呼联调按 `development-plan.md` 要求人工确认；稳定后的普通自动招呼不重复要求确认。

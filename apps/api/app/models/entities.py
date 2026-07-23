@@ -608,6 +608,9 @@ class AgentRun(TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     platform: Mapped[str] = mapped_column(String(30))
     strategy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_strategies.id"))
+    executor_type: Mapped[str] = mapped_column(
+        String(20), default="UNASSIGNED", server_default="UNASSIGNED"
+    )
     status: Mapped[str] = mapped_column(String(30), default="RUNNING")
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_owner: Mapped[str | None] = mapped_column(String(100), nullable=True)

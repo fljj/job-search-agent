@@ -207,16 +207,31 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "recruiter_name": "集成测试招聘人", "platform": "MOCK",
     })
     conversation_id = conversation.json()["data"]["id"]
+    old_greeting = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
+        "external_message_id": "message-old-greeting", "content": "您好，在看机会吗？",
+        "received_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+    }).json()["data"]
     technical_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
         "external_message_id": "message-1", "content": "请介绍 Java 技术栈经验",
         "received_at": datetime.now(UTC).isoformat(),
     })
     message_id = technical_message.json()["data"]["id"]
+    superseded_reply = client.post(
+        "/api/v1/drafts/reply", json={"message_id": old_greeting["id"]}
+    )
+    assert superseded_reply.status_code == 400
     reply = client.post("/api/v1/drafts/reply", json={"message_id": message_id})
     duplicate_reply = client.post("/api/v1/drafts/reply", json={"message_id": message_id})
     assert reply.json()["data"]["decision"] == "ALLOW_AUTO"
     assert duplicate_reply.json()["data"]["id"] == reply.json()["data"]["id"]
     assert reply.json()["data"]["confirmation_task_id"] is None
+    edited_reply = client.patch(
+        f"/api/v1/drafts/{reply.json()['data']['id']}",
+        json={"content": "您好，我有 Java 后端开发经验，请问该岗位主要负责哪些系统？"},
+    )
+    assert edited_reply.status_code == 200
+    assert edited_reply.json()["data"]["id"] != reply.json()["data"]["id"]
+    assert edited_reply.json()["data"]["reason_codes"] == ["USER_EDIT_REVALIDATED"]
 
     resume_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
         "external_message_id": "message-resume", "content": "岗位很合适，请发一份简历",

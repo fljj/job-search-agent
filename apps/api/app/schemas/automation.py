@@ -39,6 +39,7 @@ class AgentRunResponse(BaseModel):
     id: UUID
     platform: str
     strategy_id: UUID
+    executor_type: str
     status: str
     heartbeat_at: str | None
     lease_owner: str | None

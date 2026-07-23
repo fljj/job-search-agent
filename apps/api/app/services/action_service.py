@@ -12,7 +12,12 @@ from apps.api.app.models import entities as db
 from apps.api.app.schemas.action import ActionResponse
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.user_service import DEFAULT_USER_ID
-from packages.browser_worker.actions import ActionExecutor, ApprovedCommand, ExecutionResult
+from packages.browser_worker.actions import (
+    ActionExecutor,
+    ApprovedCommand,
+    ExecutionOutcome,
+    ExecutionResult,
+)
 from packages.policy_engine.content_check import validate_edited_content
 from packages.policy_engine.state_machine import ActionStatus, require_transition
 
@@ -369,24 +374,75 @@ def execute_action(
     session.add(attempt)
     session.commit()
     session.refresh(action)
-    job = session.get(db.Job, action.job_id) if action.job_id else None
-    command = ApprovedCommand(
-        action_type=action.action_type,
-        platform=action.platform,
-        conversation_key=action.target_conversation_key,
-        external_job_id=job.external_job_id if job else None,
-        company=action.target_company,
-        job_title=action.target_job_title,
-        recruiter=action.target_recruiter,
-        content=action.content,
-        delivery_mode=action.delivery_mode,
-        expected_platform_content=action.expected_platform_content,
-        attachment_name=action.attachment_name,
-    )
+    command = _approved_command(session, action)
     result = (executor or PlaywrightActionExecutor(get_browser_selectors())).execute(
         cdp_url, command
     )
     _finish(session, action, attempt, result)
+    return _response(action)
+
+
+def reconcile_action(
+    session: Session,
+    action_id: UUID,
+    cdp_url: str,
+    observer: PlaywrightActionExecutor | None = None,
+) -> ActionResponse:
+    action = session.scalar(
+        select(db.ActionQueue)
+        .where(db.ActionQueue.id == action_id)
+        .with_for_update()
+    )
+    if action is None:
+        raise ResourceNotFoundError("动作不存在")
+    if action.status != ActionStatus.OUTCOME_UNKNOWN.value:
+        raise ValueError("只有结果不明确的动作可以对账")
+    result = (observer or PlaywrightActionExecutor(get_browser_selectors())).observe(
+        cdp_url, _approved_command(session, action)
+    )
+    before = action.status
+    attempt_number = (
+        session.scalar(select(func.count()).where(db.ActionAttempt.action_id == action.id)) or 0
+    ) + 1
+    attempt = db.ActionAttempt(
+        action_id=action.id,
+        attempt_number=attempt_number,
+        status=result.outcome.value,
+        error_code=result.error_code,
+        evidence_hash=result.evidence_hash,
+        observed_content=result.observed_content,
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+    session.add(attempt)
+    if result.outcome is ExecutionOutcome.SUCCEEDED:
+        action.status = ActionStatus.SUCCEEDED.value
+        action.failure_code = None
+        action.observed_content = result.observed_content
+        action.finished_at = datetime.now(UTC)
+        reasons = ["PLATFORM_READBACK_CONFIRMED_SENT"]
+    elif (
+        result.outcome is ExecutionOutcome.FAILED_RETRYABLE
+        and result.error_code == "RESULT_CONFIRMED_NOT_SENT"
+    ):
+        action.status = ActionStatus.FAILED_RETRYABLE.value
+        action.failure_code = result.error_code
+        reasons = ["PLATFORM_READBACK_CONFIRMED_NOT_SENT"]
+    else:
+        action.failure_code = result.error_code
+        reasons = [result.error_code or "RECONCILIATION_STILL_UNKNOWN"]
+    action.version += 1
+    _audit(
+        session,
+        "ACTION_RECONCILED",
+        "action",
+        action.id,
+        before,
+        action.status,
+        reasons,
+    )
+    session.commit()
+    session.refresh(action)
     return _response(action)
 
 
@@ -413,6 +469,23 @@ def approve_retry(session: Session, action_id: UUID) -> ActionResponse:
     session.commit()
     session.refresh(action)
     return _response(action)
+
+
+def _approved_command(session: Session, action: db.ActionQueue) -> ApprovedCommand:
+    job = session.get(db.Job, action.job_id) if action.job_id else None
+    return ApprovedCommand(
+        action_type=action.action_type,
+        platform=action.platform,
+        conversation_key=action.target_conversation_key,
+        external_job_id=job.external_job_id if job else None,
+        company=action.target_company,
+        job_title=action.target_job_title,
+        recruiter=action.target_recruiter,
+        content=action.content,
+        delivery_mode=action.delivery_mode,
+        expected_platform_content=action.expected_platform_content,
+        attachment_name=action.attachment_name,
+    )
 
 
 def list_tasks(session: Session) -> list[dict[str, object]]:

@@ -7,6 +7,7 @@ from apps.api.app.api.v1.helpers import response
 from apps.api.app.core.database import get_session
 from apps.api.app.schemas.conversation import (
     ConversationPayload,
+    DraftEditRequest,
     GreetingRequest,
     MessagePayload,
     ReplyRequest,
@@ -17,6 +18,7 @@ from apps.api.app.services.conversation_service import (
     create_greeting_draft,
     create_reply_draft,
     create_resume_draft,
+    edit_draft,
     import_message,
     list_conversations,
 )
@@ -53,3 +55,12 @@ def greeting(payload: GreetingRequest, session: Session = Depends(get_session)) 
 @router.post("/drafts/resume")
 def resume(payload: ResumeDraftRequest, session: Session = Depends(get_session)) -> dict[str, object]:
     return response(create_resume_draft(session, payload.message_id))
+
+
+@router.patch("/drafts/{draft_id}")
+def edit(
+    draft_id: UUID,
+    payload: DraftEditRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(edit_draft(session, draft_id, payload.content))

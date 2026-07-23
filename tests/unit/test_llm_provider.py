@@ -1,4 +1,6 @@
 import json
+from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
@@ -12,7 +14,12 @@ from adapters.llm.fake import FakeLlmProvider
 from adapters.llm.qwen import PROMPTS, QwenLlmProvider
 from apps.api.app.core.config import Settings
 from apps.api.app.core.llm import build_llm_provider
-from packages.llm.models import MessageClassificationRequest
+from packages.llm.models import (
+    MessageClassificationRequest,
+    ReplyContext,
+    ReplyRequest,
+    TrustedFact,
+)
 
 
 class StubTransport:
@@ -138,3 +145,37 @@ def test_greeting_prompt_requires_candidate_perspective() -> None:
     assert "候选人的第一人称" in prompt
     assert "不得用招聘方口吻" in prompt
     assert "fact_ids中完整列出" in prompt
+
+
+def test_fake_reply_uses_strategy_context_without_treating_it_as_candidate_fact() -> None:
+    fact = TrustedFact(id=uuid4(), content="候选人有 Java 后端开发经验")
+    result = FakeLlmProvider().generate_reply(
+        ReplyRequest(
+            incoming_message="您好，看看这个机会吗？",
+            facts=[fact],
+            context=ReplyContext(
+                company_name="测试公司",
+                job_title="Java 开发",
+                job_location="杭州",
+                work_mode="UNKNOWN",
+                total_score=82,
+                dimension_scores={"location": Decimal("8")},
+                enabled_work_modes=["REMOTE", "ONSITE"],
+                allowed_onsite_locations=["山东省济南市"],
+                remote_preferred=True,
+            ),
+        )
+    )
+
+    assert "远程岗位" in result.data.content
+    assert "山东省济南市本地" in result.data.content
+    assert "是否支持远程办公" in result.data.content
+    assert result.data.fact_ids == [fact.id]
+
+
+def test_reply_prompt_separates_strategy_and_candidate_facts() -> None:
+    version, prompt = PROMPTS["generate_reply"]
+    assert version == "reply-v2"
+    assert "策略上下文" in prompt
+    assert "不能当作候选人经历" in prompt
+    assert "不得承诺电话或面试具体时间" in prompt

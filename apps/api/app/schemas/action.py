@@ -25,6 +25,10 @@ class ExecuteRequest(BaseModel):
     cdp_url: str = "http://127.0.0.1:9222"
 
 
+class ReconcileRequest(BaseModel):
+    cdp_url: str = "http://127.0.0.1:9222"
+
+
 class ActionResponse(BaseModel):
     id: UUID
     confirmation_task_id: UUID | None

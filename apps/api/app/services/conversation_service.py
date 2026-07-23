@@ -41,6 +41,7 @@ from packages.llm.models import (
     LlmResult,
     MessageClassification,
     MessageClassificationRequest,
+    ReplyContext,
     TrustedFact,
 )
 from packages.llm.models import (
@@ -50,6 +51,7 @@ from packages.llm.models import (
     ReplyRequest as LlmReplyRequest,
 )
 from packages.llm.ports import LlmProvider
+from packages.policy_engine.content_check import validate_edited_content
 from packages.resume_selector.selector import ResumeCandidate, select_resume
 
 POLICY_VERSION = "conversation-policy-v1"
@@ -81,6 +83,18 @@ def import_message(session: Session, conversation_id: object, payload: MessagePa
     ))
     if existing:
         return _message_response(existing)
+    previous = session.scalars(
+        select(db.Message).where(
+            db.Message.conversation_id == conversation.id,
+            db.Message.direction == "INBOUND",
+            db.Message.status == "RECEIVED",
+            ~select(db.GeneratedDraft.id)
+            .where(db.GeneratedDraft.message_id == db.Message.id)
+            .exists(),
+        )
+    ).all()
+    for item in previous:
+        item.status = "SUPERSEDED"
     intents = classify_intents(payload.content)
     message = db.Message(conversation_id=conversation.id, direction="INBOUND",
                          intents=[intent.value for intent in intents], **payload.model_dump())
@@ -149,6 +163,8 @@ def create_reply_draft(
     message = session.get(db.Message, message_id)
     if message is None:
         raise ResourceNotFoundError("消息不存在")
+    if message.status == "SUPERSEDED":
+        raise ValueError("消息已被同一会话中的后续消息聚合")
     conversation = _get_conversation(session, message.conversation_id)
     llm_provider = provider or build_llm_provider(get_settings())
     score = _bind_current_score(session, conversation, llm_provider)
@@ -184,7 +200,15 @@ def create_reply_draft(
         result.decision = Decision.DENY
         result.reason_codes = ["JOB_NOT_ELIGIBLE_OR_OPEN"]
     else:
-        facts = _knowledge_facts(session)
+        job = get_job_entity(session, conversation.job_id)
+        parsed = get_parsed_entity(session, score.parsed_job_detail_id)
+        strategy = session.get(db.JobStrategy, score.strategy_id)
+        profile = session.get(db.CandidateProfile, score.candidate_profile_id)
+        if strategy is None or profile is None:
+            raise ValueError("回复上下文缺少策略或候选人资料")
+        facts = _profile_facts(
+            profile, parsed.required_skills + parsed.preferred_skills
+        ) + _knowledge_facts(session)
         recent = session.scalars(
             select(db.Message)
             .where(db.Message.conversation_id == conversation.id)
@@ -212,7 +236,7 @@ def create_reply_draft(
             and fact.allowed_for_auto_reply
             and fact.sensitivity.value == "NORMAL"
             and fact.is_current(datetime.now(UTC))
-        ]
+        ][:20]
         generated: GeneratedMessage | None = None
         if usable and not {"SENSITIVE", "INTERVIEW_TIME"}.intersection(message.intents):
             generated = _call_llm(
@@ -230,6 +254,7 @@ def create_reply_draft(
                             for fact in usable
                             if fact.id
                         ],
+                        context=_reply_context(job, parsed, score, strategy),
                     )
                 ),
             ).data
@@ -430,6 +455,99 @@ def create_resume_draft(
     )
 
 
+def edit_draft(session: Session, draft_id: object, content: str) -> DraftResponse:
+    original = session.get(db.GeneratedDraft, draft_id)
+    if original is None or original.user_id != DEFAULT_USER_ID:
+        raise ResourceNotFoundError("草稿不存在")
+    if session.scalar(
+        select(db.ActionQueue.id).where(db.ActionQueue.draft_id == original.id)
+    ):
+        raise ValueError("草稿已经创建动作，不能直接修改")
+    risks = validate_edited_content(content)
+    if risks:
+        raise ValueError("修改后的内容未通过敏感信息检查")
+    original_decision = session.scalar(
+        select(db.PolicyDecision)
+        .where(db.PolicyDecision.draft_id == original.id)
+        .order_by(db.PolicyDecision.created_at.asc())
+        .limit(1)
+    )
+    if original_decision is None:
+        raise RuntimeError("草稿缺少策略决策")
+    fingerprint = _fingerprint("USER_EDIT", original.id, content)
+    existing = session.scalar(
+        select(db.GeneratedDraft).where(
+            db.GeneratedDraft.input_fingerprint == fingerprint
+        )
+    )
+    if existing:
+        return _draft_response(session, existing)
+    edited = db.GeneratedDraft(
+        user_id=DEFAULT_USER_ID,
+        conversation_id=original.conversation_id,
+        message_id=original.message_id,
+        job_score_id=original.job_score_id,
+        draft_type=original.draft_type,
+        content=content,
+        intents=original.intents,
+        fact_ids=original.fact_ids,
+        confidence=original.confidence,
+        risk_codes=["USER_EDITED_CONTENT"],
+        input_fingerprint=fingerprint,
+        generator_version="manual-user-edit-v1",
+    )
+    session.add(edited)
+    session.flush()
+    decision = db.PolicyDecision(
+        user_id=DEFAULT_USER_ID,
+        draft_id=edited.id,
+        action_type=original_decision.action_type,
+        decision=original_decision.decision,
+        reason_codes=["USER_EDIT_REVALIDATED"],
+        policy_version=POLICY_VERSION,
+        input_snapshot={
+            **original_decision.input_snapshot,
+            "supersedes_draft_id": str(original.id),
+        },
+    )
+    session.add(decision)
+    session.flush()
+    if decision.decision == Decision.REQUIRE_CONFIRMATION.value:
+        policy = get_conversation_policy()
+        session.add(db.ConfirmationTask(
+            user_id=DEFAULT_USER_ID,
+            decision_id=decision.id,
+            expires_at=datetime.now(UTC) + timedelta(
+                hours=policy.confirmation_ttl_hours
+            ),
+        ))
+    prior_tasks = session.scalars(
+        select(db.ConfirmationTask)
+        .join(db.PolicyDecision, db.PolicyDecision.id == db.ConfirmationTask.decision_id)
+        .where(
+            db.PolicyDecision.draft_id == original.id,
+            db.ConfirmationTask.status == "PENDING_APPROVAL",
+        )
+    ).all()
+    for task in prior_tasks:
+        task.status = "SUPERSEDED"
+    session.add(db.AuditEvent(
+        user_id=DEFAULT_USER_ID,
+        actor_type="USER",
+        event_type="DRAFT_EDITED",
+        entity_type="draft",
+        entity_id=edited.id,
+        before_state="DRAFT",
+        after_state="DRAFT",
+        reason_codes=["USER_EDIT_REVALIDATED"],
+        metadata_json={"supersedes_draft_id": str(original.id)},
+        correlation_id=str(edited.id),
+    ))
+    session.commit()
+    session.refresh(edited)
+    return _draft_response(session, edited)
+
+
 def list_confirmation_tasks(session: Session) -> list[dict[str, object]]:
     rows = session.scalars(select(db.ConfirmationTask).where(
         db.ConfirmationTask.user_id == DEFAULT_USER_ID
@@ -515,6 +633,56 @@ def _knowledge_facts(session: Session) -> list[KnowledgeFact]:
 
 def _knowledge_versions(session: Session) -> list[tuple[str, int]]:
     return sorted((str(item.id), item.version) for item in get_knowledge_entities(session))
+
+
+def _reply_context(
+    job: db.Job,
+    parsed: db.ParsedJobDetail,
+    score: db.JobScore,
+    strategy: db.JobStrategy,
+) -> ReplyContext:
+    enabled_modes = [
+        item.work_mode for item in strategy.work_mode_rules if item.enabled
+    ]
+    onsite_locations = [
+        location.location_name
+        for item in strategy.work_mode_rules
+        if item.enabled and item.work_mode == "ONSITE"
+        for location in item.locations
+    ]
+    return ReplyContext(
+        company_name=job.company_name,
+        job_title=job.title,
+        job_location=job.location,
+        work_mode=job.work_mode,
+        required_skills=parsed.required_skills,
+        preferred_skills=parsed.preferred_skills,
+        total_score=score.total_score,
+        dimension_scores={
+            "title": score.title_score,
+            "skills": score.skill_score,
+            "experience": score.experience_score,
+            "location": score.location_score,
+            "salary": score.salary_score,
+            "industry": score.industry_score,
+            "management": score.management_score,
+        },
+        match_reasons=score.match_reasons,
+        risk_notes=score.risk_notes,
+        enabled_work_modes=enabled_modes,
+        allowed_onsite_locations=onsite_locations,
+        remote_preferred=any(
+            item.enabled
+            and item.work_mode == "REMOTE"
+            and all(
+                not other.enabled
+                or other.work_mode == "REMOTE"
+                or item.location_score >= other.location_score
+                for other in strategy.work_mode_rules
+            )
+            for item in strategy.work_mode_rules
+        ),
+    )
 
 
 def _profile_facts(

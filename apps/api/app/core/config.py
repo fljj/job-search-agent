@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     agent_tick_batch_size: int = Field(default=10, ge=1, le=100)
     agent_failure_threshold: int = Field(default=3, ge=1, le=20)
     agent_poll_interval_seconds: int = Field(default=10, ge=1, le=300)
+    agent_executor_mode: Literal["REAL", "FAKE"] = "REAL"
 
     @property
     def llm_configured(self) -> bool:

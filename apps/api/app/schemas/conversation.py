@@ -82,3 +82,7 @@ class ReplyRequest(BaseModel):
 
 class ResumeDraftRequest(BaseModel):
     message_id: UUID
+
+
+class DraftEditRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=10000)

@@ -371,6 +371,7 @@ def _response(run: db.AgentRun) -> dict[str, object]:
         "id": run.id,
         "platform": run.platform,
         "strategy_id": run.strategy_id,
+        "executor_type": run.executor_type,
         "status": run.status,
         "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
         "lease_owner": run.lease_owner,

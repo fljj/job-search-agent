@@ -13,6 +13,7 @@ from packages.llm.models import (
     LlmResult,
     MessageClassification,
     MessageClassificationRequest,
+    ReplyContext,
     ReplyRequest,
     ScoreDimension,
 )
@@ -92,9 +93,23 @@ class FakeLlmProvider:
         )
 
     def generate_reply(self, request: ReplyRequest) -> LlmResult[GeneratedMessage]:
+        content = "感谢您的消息，我会结合已确认的信息回复您。"
+        context: ReplyContext = request.context
+        if (
+            context.work_mode == "UNKNOWN"
+            and context.job_location
+            and context.job_location not in context.allowed_onsite_locations
+            and "REMOTE" in context.enabled_work_modes
+        ):
+            locations = "、".join(context.allowed_onsite_locations)
+            onsite = f"或{locations}本地" if locations else ""
+            content = (
+                f"您好，我目前主要考虑远程岗位{onsite}机会。"
+                f"这个岗位工作地点在{context.job_location}，请问是否支持远程办公？"
+            )
         return self._result(
             GeneratedMessage(
-                content="感谢您的消息，我会结合已确认的信息回复您。",
+                content=content,
                 fact_ids=[fact.id for fact in request.facts],
                 confidence=Decimal("1"),
             ),

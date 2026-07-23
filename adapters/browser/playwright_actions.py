@@ -186,14 +186,22 @@ class PlaywrightActionExecutor:
                         error_code="COMPOSER_FILL_NOT_CONFIRMED",
                     )
                 performed = True
-                sent = page._evaluate(
-                    "(() => { const element = Array.from(document.querySelectorAll("
-                    f"{json.dumps(selectors.message_send_button)}"
-                    ")).find(item => item.getClientRects().length > 0 "
-                    "&& !item.classList.contains('disabled')); "
-                    "if (!element) return false; element.click(); return true; })()"
-                )
-                if not sent:
+                for _ in range(30):
+                    sent = page._evaluate(
+                        "(() => { const composer = document.querySelector("
+                        f"{json.dumps(selectors.message_composer)}"
+                        f"); if ((composer?.textContent || '').trim() !== "
+                        f"{json.dumps(command.content)}) return false; "
+                        "const element = Array.from(document.querySelectorAll("
+                        f"{json.dumps(selectors.message_send_button)}"
+                        ")).find(item => item.getClientRects().length > 0 "
+                        "&& !item.classList.contains('disabled')); "
+                        "if (!element) return false; element.click(); return true; })()"
+                    )
+                    if sent:
+                        break
+                    time.sleep(0.1)
+                else:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                         error_code="SEND_BUTTON_NOT_READY",
@@ -226,6 +234,71 @@ class PlaywrightActionExecutor:
                     else ExecutionOutcome.FAILED_RETRYABLE
                 ),
                 error_code="RAW_CDP_ACTION_ERROR",
+            )
+
+    def observe(self, cdp_url: str, command: ApprovedCommand) -> ExecutionResult:
+        """只读对账文本动作；确认唯一目标页后判断精确内容是否已经出现。"""
+        validate_local_cdp_url(cdp_url)
+        if command.action_type not in {"REPLY", "LOW_SCORE_DECLINE"}:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_NOT_SUPPORTED",
+            )
+        platform = Platform(command.platform)
+        selectors = self.config.platforms[platform.value]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches: list[str] = []
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(websocket_url) as page:
+                    check = extract_current_page(
+                        page, platform, selectors, self.config.version
+                    )
+                if (
+                    check.status is SessionStatus.SESSION_READY
+                    and check.conversation
+                    and check.conversation.external_conversation_id
+                    == command.conversation_key
+                    and command.recruiter in check.conversation.recruiter_name
+                    and command.job_title in (check.conversation.job_title or "")
+                ):
+                    matches.append(str(websocket_url))
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code=(
+                        "APPROVED_TARGET_PAGE_NOT_FOUND"
+                        if not matches
+                        else "APPROVED_TARGET_PAGE_AMBIGUOUS"
+                    ),
+                )
+            with RawCdpPageReader(matches[0]) as page:
+                observed = bool(page._evaluate(
+                    "Array.from(document.querySelectorAll("
+                    f"{json.dumps(selectors.sent_message_items)}"
+                    f")).some(item => (item.textContent || '').includes("
+                    f"{json.dumps(command.content)}))"
+                ))
+                if observed:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.SUCCEEDED,
+                        evidence_hash=hashlib.sha256(
+                            f"{page.url}:{command.model_dump_json()}".encode()
+                        ).hexdigest(),
+                        observed_content=command.content,
+                    )
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="RESULT_CONFIRMED_NOT_SENT",
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_READ_ERROR",
             )
 
     def _send_greeting_on_raw_page(
