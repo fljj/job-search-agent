@@ -23,7 +23,14 @@ pip install -e '.[dev]'
 
 项目 PostgreSQL 映射到本机 `55432` 端口，避免与已有本地 PostgreSQL 冲突。
 
-`.env.example` 已预留千问配置。阶段一只校验和保存无密钥配置状态，不会调用真实模型；`LLM_API_KEY` 必须只写入本机 `.env`，不得提交。
+`.env.example` 已预留千问配置。`LLM_PROVIDER=FAKE` 可完全离线运行；使用千问时将
+`LLM_PROVIDER=QWEN` 和 `LLM_API_KEY` 只写入本机 `.env`，不得提交。
+
+统一 LLM 适配器的默认测试不会访问网络。如需显式执行一次千问消息分类冒烟：
+
+```bash
+python scripts/smoke_qwen.py
+```
 
 ### 2. 初始化数据库
 
@@ -114,6 +121,6 @@ PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQ
 - 不接入日历。
 - 当前评分仍是标记为 `legacy` 的旧规则评分，不能授权新的自动动作。
 - 自动招呼最低分配置不得低于80，自动简历最低分配置不得低于60。
-- 千问真实调用将在下一阶段通过统一 LLM 适配器接入；本阶段不会调用真实大模型。
+- 已提供千问 OpenAI 兼容适配器，但尚未接入职位评分和对话业务链路；只有手动冒烟命令会调用真实模型。
 
 完整设计见 `docs/`。

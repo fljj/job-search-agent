@@ -51,6 +51,9 @@ job-search-agent/
 │       ├── tsconfig.json
 │       └── vite.config.ts
 ├── packages/
+│   ├── llm/
+│   │   ├── models.py
+│   │   └── ports.py
 │   ├── job_parser/
 │   │   ├── models.py
 │   │   ├── normalizers.py
@@ -72,7 +75,10 @@ job-search-agent/
 ├── adapters/
 │   └── llm/
 │       ├── base.py
-│       └── fake.py
+│       ├── errors.py
+│       ├── fake.py
+│       ├── http.py
+│       └── qwen.py
 ├── config/sample-data/
 ├── docs/
 ├── tests/
@@ -83,7 +89,7 @@ job-search-agent/
 └── docker-compose.yml
 ```
 
-`conversation_agent`、`knowledge_base` 和 `resume_selector` 已在第二阶段实现。`browser_worker` 及 BOSS/脉脉只读适配器已在第三阶段实现；`scheduling` 和平台写操作适配器仍属后续阶段。
+统一 LLM 领域端口和千问适配器已实现，但尚未切换评分与对话业务链路。
 
 第二阶段新增目录：
 
@@ -134,9 +140,9 @@ config/
 
 ### 3.6 LLM 适配器
 
-- 定义统一的解析、评分、消息意图、招呼和回复端口；
+- `packages/llm` 定义供应商无关的解析、评分、消息意图、招呼、回复和对话评估端口；
 - 开发测试阶段提供千问 OpenAI 兼容适配器及本地假实现；
-- 任何输出必须通过 Pydantic 模型、维度上限和事实证据校验；
+- 适配器负责 Pydantic 结构校验；维度上限、求和和事实证据等业务校验由评分或对话领域在后续阶段执行；
 - 适配器只返回模型结果，不写业务表、不执行浏览器动作；切换智谱不影响领域层。
 
 ### 3.7 后续领域模块

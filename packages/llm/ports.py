@@ -1,0 +1,33 @@
+from typing import Protocol
+
+from packages.job_parser.models import JobInput, ParsedJob
+from packages.llm.models import (
+    ConversationEvaluation,
+    ConversationEvaluationRequest,
+    GeneratedMessage,
+    GreetingRequest,
+    JobScoreOutput,
+    LlmResult,
+    MessageClassification,
+    MessageClassificationRequest,
+    ReplyRequest,
+)
+from packages.scoring.models import ScoringContext
+
+
+class LlmProvider(Protocol):
+    def parse_job(self, request: JobInput) -> LlmResult[ParsedJob]: ...
+
+    def score_job(self, request: ScoringContext) -> LlmResult[JobScoreOutput]: ...
+
+    def classify_message(
+        self, request: MessageClassificationRequest
+    ) -> LlmResult[MessageClassification]: ...
+
+    def generate_greeting(self, request: GreetingRequest) -> LlmResult[GeneratedMessage]: ...
+
+    def generate_reply(self, request: ReplyRequest) -> LlmResult[GeneratedMessage]: ...
+
+    def evaluate_conversation(
+        self, request: ConversationEvaluationRequest
+    ) -> LlmResult[ConversationEvaluation]: ...
