@@ -15,6 +15,7 @@ from adapters.browser.message_discovery import (
 )
 from adapters.llm.errors import LlmServiceError
 from adapters.llm.fake import FakeLlmProvider
+from apps.api.app.core.config import Settings
 from apps.api.app.core.database import Base, get_session
 from apps.api.app.main import app
 from apps.api.app.models import entities  # noqa: F401
@@ -67,6 +68,13 @@ def client() -> Iterator[TestClient]:
 
 
 def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_settings = Settings(_env_file=None, calendar_provider="MOCK")
+    monkeypatch.setattr(
+        "apps.api.app.api.v1.scheduling.get_settings", lambda: mock_settings
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.agent_service.build_calendar_gateway", lambda _: None
+    )
     monkeypatch.setattr(
         "apps.api.app.services.score_service.build_llm_provider",
         lambda _: FakeLlmProvider(),

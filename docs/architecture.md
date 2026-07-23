@@ -171,6 +171,8 @@ config/
 ### 3.9 第十一阶段日历与后半程沟通
 
 - `packages/scheduling/calendar.py`：定义忙闲查询和事件创建的供应商无关端口。
+- `adapters/calendar/apple.py`：通过 macOS JXA 调用系统 Calendar；只返回忙闲区间，
+  事件写入需要上层已经取得独立授权。
 - `adapters/calendar/google.py`：调用 Google Calendar FreeBusy 和 Events API；不参与
   邀请解析、冲突判断或确认授权。
 - `scheduling_service`：解析邀请、合并本地/真实忙碌时段、创建确认任务、处理替代/拒绝，
@@ -411,9 +413,9 @@ LIST_READY → OPENING_CONVERSATION → VERIFYING_TARGET → READING_MESSAGES
 → 复用第四阶段浏览器安全发送 → 成功后按独立授权创建日历事件
 ```
 
-日历默认使用数据库中的本地假事件；配置 Google Calendar 后通过供应商适配器查询忙闲
-和创建已授权事件。日历读取和写入均由应用服务编排；时间解析器和冲突引擎不依赖
-FastAPI、浏览器或具体日历供应商。
+Mac 默认通过 Apple Calendar 适配器查询忙闲和创建已授权事件；也可以切换为 Google
+Calendar 或数据库中的本地假事件。日历读取和写入均由应用服务编排；时间解析器和
+冲突引擎不依赖 FastAPI、浏览器或具体日历供应商。
 
 ## 13. 第七阶段前端控制台
 

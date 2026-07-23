@@ -1,3 +1,4 @@
+import sys
 from functools import lru_cache
 from typing import Literal
 
@@ -21,7 +22,8 @@ class Settings(BaseSettings):
     agent_failure_threshold: int = Field(default=3, ge=1, le=20)
     agent_poll_interval_seconds: int = Field(default=10, ge=1, le=300)
     agent_executor_mode: Literal["REAL", "FAKE"] = "REAL"
-    calendar_provider: Literal["MOCK", "GOOGLE"] = "MOCK"
+    calendar_provider: Literal["APPLE", "GOOGLE", "MOCK"] = "APPLE"
+    apple_calendar_name: str = "求职面试"
     google_calendar_access_token: SecretStr | None = None
     google_calendar_id: str = "primary"
     calendar_timeout_seconds: int = Field(default=10, ge=1, le=60)
@@ -34,6 +36,8 @@ class Settings(BaseSettings):
     def calendar_configured(self) -> bool:
         if self.calendar_provider == "MOCK":
             return True
+        if self.calendar_provider == "APPLE":
+            return sys.platform == "darwin" and bool(self.apple_calendar_name.strip())
         token = self.google_calendar_access_token
         return token is not None and bool(token.get_secret_value())
 

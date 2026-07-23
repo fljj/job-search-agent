@@ -26,10 +26,10 @@ pip install -e '.[dev]'
 `.env.example` 已预留千问配置。`LLM_PROVIDER=FAKE` 可完全离线运行；使用千问时将
 `LLM_PROVIDER=QWEN` 和 `LLM_API_KEY` 只写入本机 `.env`，不得提交。
 
-日历默认使用 `CALENDAR_PROVIDER=MOCK`，仅用于本地测试，不代表真实空闲。接入 Google
-Calendar 时配置 `CALENDAR_PROVIDER=GOOGLE`、`GOOGLE_CALENDAR_ACCESS_TOKEN` 和
-`GOOGLE_CALENDAR_ID`。访问令牌只写入本机 `.env`；忙闲查询只读取时间范围，事件写入
-仍需用户在时间确认卡片中独立授权。令牌缺失或失效时系统返回日历不可用。
+Mac 默认使用 `CALENDAR_PROVIDER=APPLE`，通过系统 Calendar 读取所有日历的忙碌时间，
+并把用户明确授权的面试事件写入 `APPLE_CALENDAR_NAME` 指定的日历。首次访问时 macOS
+会请求“自动化/日历”权限；拒绝权限、目标日历不存在或 Calendar 不可用时，系统统一
+返回日历不可用。也可以改为 `MOCK` 做本地测试，或配置 `GOOGLE` 供应商。
 
 统一 LLM 适配器的默认测试不会访问网络。如需显式执行一次千问消息分类冒烟：
 
@@ -160,7 +160,8 @@ PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQ
   及后续阶段验收。
 - 控制台默认联调限速为每小时 1 次、每日 3 次；真实联调必须按 `docs/development-plan.md` 的顺序逐步人工放行。
 - 简历仅能从已登记且平台页面中唯一匹配的附件中选择，不上传本地文件。
-- 默认不连接真实日历；可选接入 Google Calendar，OAuth 凭证缺失时安全降级为不可用。
+- Mac 默认接入 Apple Calendar；Google Calendar 和本地 `MOCK` 可通过环境变量切换。
+  Apple 目标写入日历不存在或系统权限未授予时安全降级为不可用。
 - 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。
 - 自动招呼最低分配置不得低于80，自动简历最低分配置不得低于60。
 - 策略可配置最高 79 分的猎头岗位分数封顶，使猎头岗位可接收回复但不主动招呼。

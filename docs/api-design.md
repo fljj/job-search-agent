@@ -330,8 +330,8 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 - `GET /api/v1/system/calendar-status`：返回供应商、日历 ID 和是否配置，不返回 OAuth 令牌。
 
 `calendar_available=false` 只用于当前本地假适配器模拟供应商不可用，此时必须返回 `UNAVAILABLE`，不得声称日历空闲。批准接口不直接发送；执行接口仍复用浏览器目标复核和动作幂等保护。
-配置真实 Google Calendar 后，客户端提交的 `calendar_available` 不再生效，服务端以真实
-FreeBusy 结果为准；供应商不可用时安全降级为 `UNAVAILABLE`。
+配置 Apple 或 Google 真实日历后，客户端提交的 `calendar_available` 不再生效，服务端
+以供应商查询结果为准；供应商不可用时安全降级为 `UNAVAILABLE`。
 
 ## 15. 当前明确不提供的 API
 

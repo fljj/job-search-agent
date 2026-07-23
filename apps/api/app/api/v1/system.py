@@ -23,10 +23,15 @@ def llm_status() -> dict[str, object]:
 def calendar_status() -> dict[str, object]:
     """返回不含 OAuth 凭证的日历配置摘要。"""
     settings = get_settings()
+    calendar_id = (
+        settings.apple_calendar_name
+        if settings.calendar_provider == "APPLE"
+        else settings.google_calendar_id
+    )
     return response(
         {
             "provider": settings.calendar_provider,
-            "calendar_id": settings.google_calendar_id,
+            "calendar_id": calendar_id,
             "configured": settings.calendar_configured,
             "real_provider": settings.calendar_provider != "MOCK",
         }
