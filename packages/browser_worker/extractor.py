@@ -1,4 +1,6 @@
 import hashlib
+import json
+import re
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
@@ -132,20 +134,48 @@ def _extract_conversation_list(
 ) -> ReadResult:
     conversations: list[BrowserConversationSummary] = []
     for element in page.elements(selectors.conversation_list_items):
-        external_id = (
+        external_id = _stable_id(
             element.attribute("", selectors.conversation_list_item_id_attribute)
-            or element.attribute("", "d-c")
+            or element.attribute("", "d-c"),
+            selectors.conversation_list_item_id_json_key,
         )
         recruiter = element.text(selectors.conversation_list_item_recruiter)
         if not external_id or not recruiter:
             return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
                             "REQUIRED_CONVERSATION_LIST_FIELD_MISSING")
         unread = element.attribute("", selectors.conversation_list_item_unread_attribute)
-        try:
-            unread_count = max(0, int(unread or "0"))
-        except ValueError:
-            return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,
-                            "INVALID_UNREAD_COUNT")
+        if not unread and selectors.conversation_list_item_unread_selector:
+            unread = element.text(selectors.conversation_list_item_unread_selector)
+        unread_count = _unread_count(unread)
+        if unread_count is None:
+            return _failure(
+                page,
+                platform,
+                version,
+                SessionStatus.SESSION_PAGE_CHANGED,
+                "INVALID_UNREAD_COUNT",
+            )
+        last_message_text = (
+            element.text(selectors.conversation_list_item_last_message)
+            if selectors.conversation_list_item_last_message
+            else None
+        )
+        last_message_id = element.attribute(
+            "", selectors.conversation_list_item_last_message_id_attribute
+        )
+        if not last_message_id and last_message_text:
+            last_message_id = _hash(f"{external_id}:{last_message_text}")
+        if (
+            selectors.conversation_list_requires_last_message_id
+            and not last_message_id
+        ):
+            return _failure(
+                page,
+                platform,
+                version,
+                SessionStatus.SESSION_PAGE_CHANGED,
+                "REQUIRED_LAST_MESSAGE_ID_MISSING",
+            )
         conversations.append(BrowserConversationSummary(
             external_conversation_id=external_id,
             recruiter_name=recruiter,
@@ -156,9 +186,8 @@ def _extract_conversation_list(
             external_job_id=element.attribute(
                 "", selectors.conversation_list_item_job_id_attribute
             ),
-            last_message_id=element.attribute(
-                "", selectors.conversation_list_item_last_message_id_attribute
-            ),
+            last_message_id=last_message_id,
+            last_message_text=last_message_text,
             category=(
                 element.attribute(
                     "", selectors.conversation_list_item_category_attribute
@@ -181,8 +210,9 @@ def _extract_conversation(
     page: PageReader, platform: Platform, selectors: PlatformSelectors, version: str,
     expected_recruiter: str | None,
 ) -> ReadResult:
-    conversation_id = page.attribute(
-        selectors.conversation_id, selectors.conversation_id_attribute
+    conversation_id = _stable_id(
+        page.attribute(selectors.conversation_id, selectors.conversation_id_attribute),
+        selectors.conversation_id_json_key,
     )
     recruiter = page.text(selectors.recruiter)
     if not conversation_id or not recruiter:
@@ -217,12 +247,13 @@ def _extract_conversation(
             received_at=received_at,
             direction=direction,
         ))
+    company = page.text(selectors.conversation_company or selectors.company)
+    if company and selectors.conversation_company_separator:
+        company = company.split(selectors.conversation_company_separator, 1)[0]
     conversation = BrowserConversation(external_conversation_id=conversation_id,
                                        recruiter_name=recruiter,
                                        job_title=page.text(selectors.conversation_job_title),
-                                       company_name=_normalize_company_name(
-                                           page.text(selectors.company)
-                                       ),
+                                       company_name=_normalize_company_name(company),
                                        external_job_id=page.attribute(
                                            selectors.conversation_root, "data-job-id"
                                        ),
@@ -256,6 +287,27 @@ def _evidence_hash(page: PageReader, *values: object) -> str:
 
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _stable_id(raw_value: str | None, json_key: str | None) -> str | None:
+    if not raw_value:
+        return None
+    if not json_key:
+        return raw_value
+    try:
+        value = json.loads(raw_value).get(json_key)
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return str(value) if value is not None else None
+
+
+def _unread_count(raw_value: str | None) -> int | None:
+    if not raw_value:
+        return 0
+    match = re.search(r"\d+", raw_value)
+    if match:
+        return max(0, int(match.group(0)))
+    return 1 if raw_value.strip() else 0
 
 
 def _normalize_work_mode(value: str | None) -> str:

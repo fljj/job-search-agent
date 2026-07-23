@@ -126,6 +126,29 @@ def test_extracts_real_boss_conversation_list_id_from_d_c() -> None:
     assert result.conversations[0].external_conversation_id == "boss-chat-1"
 
 
+def test_maimai_conversation_list_requires_stable_last_message_identity() -> None:
+    selectors = get_browser_selectors().platforms["MAIMAI"]
+    page = FakePage(url="https://maimai.cn/web/feed_im")
+    page.visible = {selectors.login_marker, selectors.conversation_list_root}
+    page.element_lists = {
+        selectors.conversation_list_items: [
+            FakeElement(
+                texts={selectors.conversation_list_item_recruiter: "李招聘"},
+                attributes={
+                    ("", selectors.conversation_list_item_id_attribute): (
+                        '{"mid":"maimai-chat-1"}'
+                    ),
+                },
+            )
+        ]
+    }
+
+    result = extract_current_page(page, Platform.MAIMAI, selectors, "v1")
+
+    assert result.status is SessionStatus.SESSION_PAGE_CHANGED
+    assert result.reason_codes == ["REQUIRED_LAST_MESSAGE_ID_MISSING"]
+
+
 def test_extracts_real_boss_conversation_dom_shape() -> None:
     selectors = get_browser_selectors().platforms["BOSS"]
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")

@@ -11,15 +11,21 @@ from contextlib import contextmanager
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from adapters.browser.fake_actions import FakeActionExecutor
 from adapters.browser.job_discovery import BossJobDiscoveryAdapter
-from adapters.browser.message_discovery import BossMessageDiscoveryAdapter
+from adapters.browser.message_discovery import (
+    BossMessageDiscoveryAdapter,
+    MaimaiMessageDiscoveryAdapter,
+    MessageDiscoveryAdapter,
+)
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.core.llm import build_llm_provider
+from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
 from apps.api.app.services.agent_service import pause_run, tick_run
 from apps.api.app.services.automation_service import _effective_rules
@@ -66,6 +72,95 @@ def _build_executor(platform: str, mode: str) -> tuple[ActionExecutor, str]:
     raise ValueError(f"平台 {platform} 尚无正式执行器")
 
 
+def _discover_messages(
+    session: Session,
+    run: db.AgentRun,
+    worker_id: str,
+    cdp_url: str,
+    adapter: MessageDiscoveryAdapter,
+) -> bool:
+    raw_cursor = (run.cursor or {}).get("message_discovery")
+    cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
+    raw_position = cursor.get("scroll_position")
+    raw_seen = cursor.get("seen_message_keys")
+    try:
+        batch = adapter.scan(
+            cdp_url,
+            partition=str(cursor.get("partition") or "UNREAD"),
+            scroll_position=raw_position if isinstance(raw_position, int) else 0,
+            seen_message_keys=[
+                str(item)
+                for item in (raw_seen if isinstance(raw_seen, list) else [])
+            ],
+            limit=get_settings().agent_tick_batch_size,
+        )
+    except (OSError, TimeoutError, ValueError):
+        pause_run(session, run.id, ["MESSAGE_DISCOVERY_UNAVAILABLE"])
+        return False
+    record_ready_platform_session(session, run, cdp_url)
+    counts = persist_discovery_batch(session, run, worker_id, batch)
+    gray_event(
+        logger,
+        "MESSAGE_SCAN_COMPLETED",
+        worker_id=worker_id,
+        run_id=run.id,
+        platform=run.platform,
+        scanned_count=len(batch.items),
+        imported_count=counts["imported"],
+        paused_count=counts["paused"],
+        exhausted=batch.exhausted,
+        cursor=batch.scroll_position,
+    )
+    return True
+
+
+def _process_maimai_recommendations(
+    session: Session,
+    run: db.AgentRun,
+    worker_id: str,
+    cdp_url: str,
+    executor: ActionExecutor,
+) -> bool:
+    rules = _effective_rules(session, run.platform, run.strategy_id)
+    if (
+        not rules.enabled
+        or rules.paused
+        or rules.emergency_stop
+        or not rules.maimai_recommendation_enabled
+    ):
+        return True
+    try:
+        recommendations = scan_recommendations(
+            session,
+            run,
+            cdp_url,
+            limit=get_settings().agent_tick_batch_size,
+        )
+    except (OSError, TimeoutError, ValueError):
+        pause_run(
+            session,
+            run.id,
+            ["RECOMMENDATION_DISCOVERY_UNAVAILABLE"],
+        )
+        return False
+    for recommendation in recommendations:
+        if recommendation["action_status"] == "APPROVED":
+            dispatch_recommendation(
+                session,
+                UUID(str(recommendation["id"])),
+                cdp_url,
+                executor=executor,
+            )
+    gray_event(
+        logger,
+        "RECOMMENDATION_SCAN_COMPLETED",
+        worker_id=worker_id,
+        run_id=run.id,
+        scanned_count=len(recommendations),
+    )
+    return True
+
+
 @contextmanager
 def _single_worker_lock() -> Iterator[None]:
     with open(LOCK_PATH, "w", encoding="utf-8") as lock_file:
@@ -94,48 +189,14 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     run.platform, get_settings().agent_executor_mode
                 )
                 if run.platform == Platform.BOSS.value:
-                    root_cursor = run.cursor or {}
-                    raw_message_cursor = root_cursor.get("message_discovery")
-                    cursor = (
-                        raw_message_cursor
-                        if isinstance(raw_message_cursor, dict)
-                        else {}
-                    )
-                    raw_position = cursor.get("scroll_position")
-                    raw_seen = cursor.get("seen_message_keys")
-                    try:
-                        batch = BossMessageDiscoveryAdapter(
-                            get_browser_selectors()
-                        ).scan(
-                            cdp_url,
-                            partition=str(cursor.get("partition") or "UNREAD"),
-                            scroll_position=(
-                                raw_position if isinstance(raw_position, int) else 0
-                            ),
-                            seen_message_keys=[
-                                str(item)
-                                for item in (
-                                    raw_seen if isinstance(raw_seen, list) else []
-                                )
-                            ],
-                            limit=get_settings().agent_tick_batch_size,
-                        )
-                    except ValueError:
-                        pause_run(
-                            session, run_id, ["MESSAGE_DISCOVERY_UNAVAILABLE"]
-                        )
+                    if not _discover_messages(
+                        session,
+                        run,
+                        worker_id,
+                        cdp_url,
+                        BossMessageDiscoveryAdapter(get_browser_selectors()),
+                    ):
                         continue
-                    record_ready_platform_session(session, run, cdp_url)
-                    persist_discovery_batch(session, run, worker_id, batch)
-                    gray_event(
-                        logger,
-                        "MESSAGE_SCAN_COMPLETED",
-                        worker_id=worker_id,
-                        run_id=run_id,
-                        scanned_count=len(batch.items),
-                        exhausted=batch.exhausted,
-                        cursor=batch.scroll_position,
-                    )
                     rules = _effective_rules(
                         session, run.platform, run.strategy_id
                     )
@@ -178,7 +239,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                                     rules.hourly_scan_limit,
                                 ),
                             )
-                        except ValueError:
+                        except (OSError, TimeoutError, ValueError):
                             pause_run(
                                 session, run_id, ["JOB_DISCOVERY_UNAVAILABLE"]
                             )
@@ -201,34 +262,21 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             cursor=job_batch.scroll_position,
                         )
                 elif run.platform == Platform.MAIMAI.value:
-                    try:
-                        recommendations = scan_recommendations(
-                            session,
-                            run,
-                            cdp_url,
-                            limit=get_settings().agent_tick_batch_size,
-                        )
-                    except ValueError:
-                        pause_run(
-                            session, run_id, ["RECOMMENDATION_DISCOVERY_UNAVAILABLE"]
-                        )
+                    if not _discover_messages(
+                        session,
+                        run,
+                        worker_id,
+                        cdp_url,
+                        MaimaiMessageDiscoveryAdapter(
+                            get_browser_selectors(),
+                            get_recommendation_rules(),
+                        ),
+                    ):
                         continue
-                    record_ready_platform_session(session, run, cdp_url)
-                    for recommendation in recommendations:
-                        if recommendation["action_status"] == "APPROVED":
-                            dispatch_recommendation(
-                                session,
-                                UUID(str(recommendation["id"])),
-                                cdp_url,
-                                executor=executor,
-                            )
-                    gray_event(
-                        logger,
-                        "RECOMMENDATION_SCAN_COMPLETED",
-                        worker_id=worker_id,
-                        run_id=run_id,
-                        scanned_count=len(recommendations),
-                    )
+                    if not _process_maimai_recommendations(
+                        session, run, worker_id, cdp_url, executor
+                    ):
+                        continue
                 run.executor_type = executor_type
                 session.commit()
                 result = tick_run(

@@ -296,8 +296,17 @@ def test_unbound_inbound_message_gets_safe_clarification(
     assert related_draft.reason_codes == ["SAFE_JOB_DETAIL_CLARIFICATION"]
 
 
+@pytest.mark.parametrize(
+    ("platform", "page_url"),
+    [
+        (Platform.BOSS, "https://www.zhipin.com/web/geek/chat"),
+        (Platform.MAIMAI, "https://maimai.cn/chat"),
+    ],
+)
 def test_message_discovery_imports_unbound_scoreless_conversation(
     session: Session,
+    platform: Platform,
+    page_url: str,
 ) -> None:
     session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
     session.flush()
@@ -323,7 +332,7 @@ def test_message_discovery_imports_unbound_scoreless_conversation(
     run = db.AgentRun(
         user_id=DEFAULT_USER_ID,
         strategy_id=strategy.id,
-        platform="BOSS",
+        platform=platform.value,
         executor_type="REAL_CDP",
         status="RUNNING",
         cursor={},
@@ -331,12 +340,14 @@ def test_message_discovery_imports_unbound_scoreless_conversation(
     session.add(run)
     session.flush()
     now = datetime.now(UTC)
+    conversation_key = f"{platform.value.lower()}-unbound-chat"
+    message_key = f"{platform.value.lower()}-unbound-message"
     counts = persist_discovery_batch(
         session,
         run,
         "test-worker",
         MessageDiscoveryBatch(
-            platform=Platform.BOSS,
+            platform=platform,
             partition="UNREAD",
             scroll_position=1,
             scanned_at=now,
@@ -344,29 +355,29 @@ def test_message_discovery_imports_unbound_scoreless_conversation(
             items=[
                 DiscoveredConversation(
                     summary={
-                        "external_conversation_id": "unbound-chat",
+                        "external_conversation_id": conversation_key,
                         "recruiter_name": "招聘人",
                         "job_title": "Java后端",
                         "company_name": "观察公司",
-                        "last_message_id": "unbound-message",
+                        "last_message_id": message_key,
                         "unread_count": 1,
                     },
                     detail=ReadResult(
-                        platform=Platform.BOSS,
+                        platform=platform,
                         status=SessionStatus.SESSION_READY,
                         page_type=PageType.CONVERSATION,
-                        page_url="https://www.zhipin.com/web/geek/chat",
+                        page_url=page_url,
                         page_title="消息",
                         content_hash="a" * 64,
                         selector_version="fixture",
                         conversation=BrowserConversation(
-                            external_conversation_id="unbound-chat",
+                            external_conversation_id=conversation_key,
                             recruiter_name="招聘人",
                             job_title="Java后端",
                             company_name="观察公司",
                             messages=[
                                 BrowserMessage(
-                                    external_message_id="unbound-message",
+                                    external_message_id=message_key,
                                     content="您好，可以发一份简历吗？",
                                     received_at=now,
                                 )
@@ -380,7 +391,7 @@ def test_message_discovery_imports_unbound_scoreless_conversation(
 
     conversation = session.scalar(
         select(db.Conversation).where(
-            db.Conversation.external_conversation_id == "unbound-chat"
+            db.Conversation.external_conversation_id == conversation_key
         )
     )
     assert counts == {

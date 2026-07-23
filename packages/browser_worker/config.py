@@ -29,17 +29,24 @@ class PlatformSelectors(BaseModel):
     conversation_list_root: str
     conversation_list_items: str
     conversation_list_item_id_attribute: str
+    conversation_list_item_id_json_key: str | None = None
     conversation_list_item_recruiter: str
     conversation_list_item_job_title: str
     conversation_list_item_company: str
     conversation_list_item_unread_attribute: str
+    conversation_list_item_unread_selector: str | None = None
     conversation_list_item_job_id_attribute: str
     conversation_list_item_last_message_id_attribute: str
+    conversation_list_item_last_message: str | None = None
+    conversation_list_requires_last_message_id: bool = False
     conversation_list_item_category_attribute: str
     conversation_root: str
     conversation_id: str
     conversation_id_attribute: str
+    conversation_id_json_key: str | None = None
     recruiter: str
+    conversation_company: str | None = None
+    conversation_company_separator: str | None = None
     conversation_job_title: str
     conversation_job_link: str
     message_items: str

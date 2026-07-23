@@ -1,6 +1,7 @@
 import json
 import time
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from pydantic import BaseModel, Field
@@ -18,6 +19,7 @@ from packages.browser_worker.models import (
     ReadResult,
     SessionStatus,
 )
+from packages.policy_engine.recommendation import RecommendationRules
 
 
 class DiscoveredConversation(BaseModel):
@@ -38,12 +40,15 @@ class MessageDiscoveryBatch(BaseModel):
     exhausted: bool = False
 
 
-class BossMessageDiscoveryAdapter:
+class MessageDiscoveryAdapter:
     """只进行列表导航与读取，不生成回复，也不执行平台写操作。"""
 
-    def __init__(self, config: BrowserSelectorsConfig) -> None:
+    def __init__(
+        self, platform: Platform, config: BrowserSelectorsConfig
+    ) -> None:
+        self.platform = platform
         self.config = config
-        self.selectors = config.platforms[Platform.BOSS.value]
+        self.selectors = config.platforms[platform.value]
 
     def scan(
         self,
@@ -58,14 +63,15 @@ class BossMessageDiscoveryAdapter:
         websocket_url = self._find_list_target(cdp_url)
         with RawCdpPageReader(websocket_url) as page:
             listing = extract_conversation_list(
-                page, Platform.BOSS, self.selectors, self.config.version
+                page, self.platform, self.selectors, self.config.version
             )
             if listing.status is not SessionStatus.SESSION_READY:
-                raise ValueError("BOSS 对话列表结构不可用")
+                raise ValueError(f"{self.platform.value} 对话列表结构不可用")
             eligible = [
                 item
                 for item in listing.conversations
                 if _matches_partition(item, partition)
+                and self._include_summary(item)
             ]
             candidates = select_discovery_candidates(
                 eligible,
@@ -88,7 +94,7 @@ class BossMessageDiscoveryAdapter:
             ]]
             exhausted = next_position >= len(eligible) and not listing.cursor
             return MessageDiscoveryBatch(
-                platform=Platform.BOSS,
+                platform=self.platform,
                 partition=partition,
                 scroll_position=next_position,
                 next_cursor=listing.cursor,
@@ -108,17 +114,24 @@ class BossMessageDiscoveryAdapter:
                 continue
             try:
                 with RawCdpPageReader(str(websocket_url)) as page:
-                    if page.exists(self.selectors.conversation_list_root):
+                    host = (urlparse(page.url).hostname or "").lower()
+                    if (
+                        host in self.selectors.allowed_hosts
+                        and page.exists(self.selectors.conversation_list_root)
+                    ):
                         matches.append(str(websocket_url))
             except (OSError, TimeoutError, ValueError):
                 continue
         if len(matches) != 1:
             raise ValueError(
-                "未找到唯一 BOSS 消息列表页"
+                f"未找到唯一 {self.platform.value} 消息列表页"
                 if not matches
-                else "检测到多个 BOSS 消息列表页"
+                else f"检测到多个 {self.platform.value} 消息列表页"
             )
         return matches[0]
+
+    def _include_summary(self, _summary: BrowserConversationSummary) -> bool:
+        return True
 
     def _open_and_read(
         self,
@@ -130,9 +143,13 @@ class BossMessageDiscoveryAdapter:
             "(() => { const selector = "
             f"{json.dumps(self.selectors.conversation_list_items)}; "
             f"const attribute = {json.dumps(self.selectors.conversation_list_item_id_attribute)}; "
+            f"const jsonKey = {json.dumps(self.selectors.conversation_list_item_id_json_key)}; "
             f"const expected = {json.dumps(summary.external_conversation_id)}; "
             "const matches = Array.from(document.querySelectorAll(selector)).filter("
-            "item => (item.getAttribute(attribute) || item.getAttribute('d-c')) === expected); "
+            "item => { const raw = item.getAttribute(attribute) || item.getAttribute('d-c'); "
+            "if (!raw) return false; if (!jsonKey) return raw === expected; "
+            "try { return String(JSON.parse(raw)[jsonKey]) === expected; } "
+            "catch { return false; } }); "
             "if (matches.length !== 1 || matches[0].getClientRects().length === 0) return false; "
             "matches[0].click(); return true; })()"
         )
@@ -144,7 +161,7 @@ class BossMessageDiscoveryAdapter:
         for _ in range(30):
             detail = extract_current_page(
                 page,
-                Platform.BOSS,
+                self.platform,
                 self.selectors,
                 self.config.version,
                 expected_recruiter=summary.recruiter_name,
@@ -194,7 +211,7 @@ class BossMessageDiscoveryAdapter:
                         try:
                             result = extract_current_page(
                                 job_page,
-                                Platform.BOSS,
+                                self.platform,
                                 self.selectors,
                                 self.config.version,
                             )
@@ -205,6 +222,34 @@ class BossMessageDiscoveryAdapter:
                     continue
             time.sleep(0.1)
         return None
+
+
+class BossMessageDiscoveryAdapter(MessageDiscoveryAdapter):
+    def __init__(self, config: BrowserSelectorsConfig) -> None:
+        super().__init__(Platform.BOSS, config)
+
+
+class MaimaiMessageDiscoveryAdapter(MessageDiscoveryAdapter):
+    """读取脉脉普通私信；系统推荐和官方账号仍由独立流程处理。"""
+
+    def __init__(
+        self,
+        config: BrowserSelectorsConfig,
+        recommendation_rules: RecommendationRules,
+    ) -> None:
+        super().__init__(Platform.MAIMAI, config)
+        self.recommendation_rules = recommendation_rules
+
+    def _include_summary(self, summary: BrowserConversationSummary) -> bool:
+        if summary.recruiter_name in self.recommendation_rules.official_accounts:
+            return False
+        if summary.category in {"OFFICIAL", "RECOMMENDATION", "SYSTEM_RECOMMENDATION"}:
+            return False
+        preview = summary.last_message_text or ""
+        return not any(
+            marker in preview
+            for marker in self.recommendation_rules.recommendation_markers
+        )
 
 
 def _verify_target(

@@ -1,16 +1,32 @@
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
 from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.browser.message_discovery import (
+    MessageDiscoveryAdapter,
+    MessageDiscoveryBatch,
+)
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
+from apps.api.app.models import entities as db
 from packages.browser_worker.actions import (
     ApprovedCommand,
     ExecutionOutcome,
     ExecutionResult,
 )
-from scripts.run_agent_worker import _build_executor, _single_worker_lock
+from packages.browser_worker.models import Platform
+from packages.policy_engine.automation import AutomationRules
+from scripts.run_agent_worker import (
+    _build_executor,
+    _discover_messages,
+    _process_maimai_recommendations,
+    _single_worker_lock,
+)
 
 
 def command() -> ApprovedCommand:
@@ -70,6 +86,118 @@ def test_only_one_worker_can_hold_process_lock(
     with _single_worker_lock(), pytest.raises(RuntimeError, match="已有 Agent Worker"):
         with _single_worker_lock():
             pytest.fail("第二个 Worker 不应取得进程锁")
+
+
+def test_message_discovery_reuses_platform_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    run = db.AgentRun(
+        id=uuid4(),
+        platform="MAIMAI",
+        cursor={
+            "message_discovery": {
+                "partition": "UNREAD",
+                "scroll_position": 20,
+                "seen_message_keys": ["chat-1:message-1"],
+            }
+        },
+    )
+    batch = MessageDiscoveryBatch(
+        platform=Platform.MAIMAI,
+        partition="UNREAD",
+        scroll_position=30,
+        scanned_at=datetime.now(UTC),
+    )
+    adapter = MagicMock(spec=MessageDiscoveryAdapter)
+    adapter.scan.return_value = batch
+    persisted: list[MessageDiscoveryBatch] = []
+
+    def persist(
+        _session: Session,
+        _run: db.AgentRun,
+        _worker: str,
+        value: MessageDiscoveryBatch,
+    ) -> dict[str, int]:
+        persisted.append(value)
+        return {"imported": 0, "paused": 0}
+
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.record_ready_platform_session",
+        lambda *_: None,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_settings",
+        lambda: MagicMock(agent_tick_batch_size=10),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.persist_discovery_batch",
+        persist,
+    )
+    monkeypatch.setattr("scripts.run_agent_worker.gray_event", lambda *_, **__: None)
+
+    assert _discover_messages(
+        session, run, "worker-1", "http://127.0.0.1:9222", adapter
+    )
+    adapter.scan.assert_called_once_with(
+        "http://127.0.0.1:9222",
+        partition="UNREAD",
+        scroll_position=20,
+        seen_message_keys=["chat-1:message-1"],
+        limit=10,
+    )
+    assert persisted == [batch]
+
+
+def test_message_discovery_failure_pauses_only_current_platform_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    maimai_run = db.AgentRun(id=uuid4(), platform="MAIMAI", cursor={})
+    boss_run = db.AgentRun(id=uuid4(), platform="BOSS", cursor={})
+    adapter = MagicMock(spec=MessageDiscoveryAdapter)
+    adapter.scan.side_effect = ValueError("页面变化")
+    paused: list[object] = []
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.pause_run",
+        lambda _session, run_id, _reasons: paused.append(run_id),
+    )
+
+    assert not _discover_messages(
+        session,
+        maimai_run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        adapter,
+    )
+    assert paused == [maimai_run.id]
+    assert boss_run.id not in paused
+
+
+def test_disabled_maimai_recommendations_do_not_block_ordinary_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    run = db.AgentRun(id=uuid4(), platform="MAIMAI")
+    scan = MagicMock()
+    monkeypatch.setattr(
+        "scripts.run_agent_worker._effective_rules",
+        lambda *_: AutomationRules(
+            enabled=True,
+            auto_reply_enabled=True,
+            maimai_recommendation_enabled=False,
+        ),
+    )
+    monkeypatch.setattr("scripts.run_agent_worker.scan_recommendations", scan)
+
+    assert _process_maimai_recommendations(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        FakeActionExecutor(),
+    )
+    scan.assert_not_called()
 
 
 def test_raw_reply_waits_for_button_and_delayed_readback(

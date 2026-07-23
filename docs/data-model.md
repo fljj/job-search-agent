@@ -251,7 +251,8 @@ users
 - `agent_runs.executor_type`：记录实际执行器类型 `UNASSIGNED/REAL_CDP/FAKE`，用于启动自检和审计；正式 BOSS 运行不得记录 `FAKE`。
 - `agent_runs.cursor`：第九阶段保存消息列表分区、虚拟滚动位置、下一游标、最后会话
   和消息 ID、扫描时间、是否到末尾及最近 500 个 `conversation_id:last_message_id`
-  去重键；扫描到末尾后滚动位置归零，新消息仍可被发现。
+  去重键；BOSS 与脉脉运行分别持有自己的游标，扫描到末尾后滚动位置归零，新消息仍
+  可被发现。脉脉缺少平台消息 ID时使用稳定会话 ID和受控消息预览生成内容指纹。
 - `agent_runs.cursor.job_discovery`：第十阶段保存搜索条件键、虚拟滚动位置、下一游标、
   最后/下次扫描时间、是否到末尾及最近 2000 个已见外部职位 ID。消息游标与职位游标
   使用不同子键，轮询心跳更新不得覆盖两者。

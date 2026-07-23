@@ -273,10 +273,10 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 `POST /automation/runs`、`POST /automation/runs/{id}/pause` 和
 `POST /automation/runs/{id}/resume`，服务端继续执行自动化配置和状态转换校验。
 
-第九阶段的消息列表发现由 BOSS Worker 内部执行，不新增可绕过策略的浏览器导航
-API。扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回；职位未绑定
-或缺少评分只记录原因并继续安全入站流程，页面身份不一致仍暂停，状态转换记录在
-Agent 运行事件及会话状态中。
+消息列表发现由 BOSS 和脉脉 Worker 内部执行，不新增可绕过策略的浏览器导航 API。
+各平台扫描进度通过既有 `GET /api/v1/automation/runs` 的 `cursor` 返回；职位未绑定
+或缺少评分只记录原因并继续安全入站流程，页面身份不一致仍暂停当前平台运行，状态
+转换记录在 Agent 运行事件及会话状态中。脉脉系统推荐开关不影响普通入站消息扫描。
 
 只允许本机 `localhost/127.0.0.1/::1` HTTP(S) CDP 端点且 URL 不得包含凭证。返回会话状态、页面类型、原因码、导入资源 ID、证据 ID 和重复标记。
 
