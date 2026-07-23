@@ -180,6 +180,15 @@ config/
 - `agent_service`：时间意图转交排期服务；其他入站消息同时评估明确索要简历和有证据的
   积极反馈。
 
+### 3.10 第十二阶段运行治理
+
+- `operations_service`：Worker 登记/心跳/接管、启动自检、自动对账队列、状态聚合和
+  审计差异检查。
+- `worker_instances` 与本机 `flock` 共同限制单实例；`agent_runs` 短租约限制具体运行
+  的并发处理。
+- `reconciliation_tasks` 只调用浏览器只读观察能力，不能授权或重发动作；超时转人工。
+- `packages/audit/redaction.py`：日志输出前移除 Bearer Token、API Key 和数据库密码。
+
 ## 4. 模块依赖
 
 允许的依赖方向：

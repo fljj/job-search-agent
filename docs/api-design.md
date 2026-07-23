@@ -318,6 +318,16 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 内部编排，不提供绕过策略引擎的公开“扫描并发送”接口。BOSS 运行只允许真实 CDP
 执行器，`MOCK` 运行只允许假执行器。
 
+第十二阶段运行治理 API：
+
+- `GET /api/v1/automation/operations/status`：聚合迁移、LLM、选择器、执行器、日历、
+  Worker、未知动作、待确认、对账任务和审计差异。
+- `GET /api/v1/automation/operations/reconciliation`：查看最近100个对账任务。
+- `POST /api/v1/automation/operations/reconciliation/run`：执行一批只读平台回账；不能
+  直接重发，超时升级 `MANUAL_REQUIRED`。
+- `GET /api/v1/automation/operations/discrepancies`：检查内部来源和状态差异。
+- `POST /api/v1/automation/operations/audit/run`：对近期成功动作执行只读平台抽查。
+
 ## 14. 第六阶段排期 API
 
 - `GET/PUT /api/v1/scheduling/settings`：读取或按版本更新时区、工作时间、缓冲、默认时长、通勤和有效期配置。

@@ -25,6 +25,13 @@ from apps.api.app.services.automation_service import (
     list_settings,
     upsert_setting,
 )
+from apps.api.app.services.operations_service import (
+    audit_discrepancies,
+    list_reconciliation_tasks,
+    operations_status,
+    process_reconciliation_queue,
+    verify_successful_actions,
+)
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
@@ -84,3 +91,38 @@ def tick(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     return response(tick_run(session, run_id, payload.worker_id))
+
+
+@router.get("/operations/status")
+def operation_status(session: Session = Depends(get_session)) -> dict[str, object]:
+    return response(operations_status(session))
+
+
+@router.get("/operations/reconciliation")
+def reconciliation_tasks(
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response({"items": list_reconciliation_tasks(session)})
+
+
+@router.post("/operations/reconciliation/run")
+def run_reconciliation(
+    cdp_url: str = "http://127.0.0.1:9222",
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(process_reconciliation_queue(session, cdp_url))
+
+
+@router.get("/operations/discrepancies")
+def discrepancies(session: Session = Depends(get_session)) -> dict[str, object]:
+    return response({"items": audit_discrepancies(session)})
+
+
+@router.post("/operations/audit/run")
+def run_audit(
+    cdp_url: str = "http://127.0.0.1:9222",
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(
+        {"items": verify_successful_actions(session, cdp_url)}
+    )

@@ -277,6 +277,14 @@ SESSION_PAUSED
 
 对话状态不能替代单条消息或动作状态。
 
+### 8.6 第十二阶段运行治理
+
+- `worker_instances`：保存唯一 Worker 标识、主机、PID、`RUNNING/STALE/STOPPED` 状态、
+  启动/心跳/停止时间及不含凭证的启动元数据。
+- `reconciliation_tasks`：每个动作唯一，保存 `PENDING/IN_PROGRESS/RESOLVED/
+  MANUAL_REQUIRED`、尝试次数、下次尝试、截止时间和最后错误码。
+- 对账任务只能只读回查平台，不能授权或重发 `OUTCOME_UNKNOWN` 动作。
+
 ## 9. 幂等设计
 
 ### 6.1 第一阶段

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     google_calendar_access_token: SecretStr | None = None
     google_calendar_id: str = "primary"
     calendar_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    worker_stale_seconds: int = Field(default=60, ge=15, le=600)
+    reconciliation_timeout_minutes: int = Field(default=60, ge=5, le=1440)
+    reconciliation_batch_size: int = Field(default=10, ge=1, le=100)
+    audit_retention_days: int = Field(default=365, ge=30, le=3650)
+    run_event_retention_days: int = Field(default=90, ge=7, le=3650)
 
     @property
     def llm_configured(self) -> bool:

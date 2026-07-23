@@ -446,6 +446,19 @@ def reconcile_action(
     return _response(action)
 
 
+def observe_action(
+    session: Session,
+    action_id: UUID,
+    cdp_url: str,
+    observer: PlaywrightActionExecutor | None = None,
+) -> ExecutionResult:
+    """只读回查任意动作，不改变动作状态。"""
+    action = _get_action(session, action_id)
+    return (observer or PlaywrightActionExecutor(get_browser_selectors())).observe(
+        cdp_url, _approved_command(session, action)
+    )
+
+
 def approve_retry(session: Session, action_id: UUID) -> ActionResponse:
     action = _get_action(session, action_id)
     if not (

@@ -703,6 +703,45 @@ class JobDiscoveryRecord(Base):
     )
 
 
+class WorkerInstance(Base):
+    __tablename__ = "worker_instances"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    worker_id: Mapped[str] = mapped_column(String(100), unique=True)
+    hostname: Mapped[str] = mapped_column(String(255))
+    pid: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(30), default="RUNNING")
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    stopped_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+
+
+class ReconciliationTask(TimestampMixin, Base):
+    __tablename__ = "reconciliation_tasks"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    action_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("action_queue.id", ondelete="CASCADE"), unique=True
+    )
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class SchedulingPreference(TimestampMixin, Base):
     __tablename__ = "scheduling_preferences"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

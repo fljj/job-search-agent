@@ -22,11 +22,19 @@ interface LlmStatus { provider: string; model: string; configured: boolean }
 interface AgentRun {
   id: string; platform: string; strategy_id: string; status: string; heartbeat_at?: string
   processed_count: number; action_count: number; failure_count: number
-  consecutive_failure_count: number; pause_reason_codes: string[]
+  consecutive_failure_count: number; pause_reason_codes: string[]; cursor: Record<string, unknown>
 }
 interface AutomaticAction {
   id: string; action_type: string; status: string; platform: string; company: string
   job_title: string; recruiter: string; attachment_name?: string; failure_code?: string
+}
+interface OperationsStatus {
+  database_ready: boolean; migration_revision?: string; llm_configured: boolean
+  selector_version: string; executor_mode: string; calendar_provider: string
+  unknown_action_count: number; pending_confirmation_count: number
+  workers: Array<{ worker_id: string; status: string; heartbeat_at: string }>
+  reconciliation_tasks: Array<{ id: string; action_id: string; status: string; attempt_count: number }>
+  discrepancies: Array<{ code: string; action_id: string }>
 }
 
 export function AutomationPage() {
@@ -36,22 +44,25 @@ export function AutomationPage() {
   const [actions, setActions] = useState<AutomaticAction[]>([])
   const [platform, setPlatform] = useState('BOSS')
   const [strategyId, setStrategyId] = useState('')
+  const [operations, setOperations] = useState<OperationsStatus>()
 
   const load = async () => {
-    const [llmStatus, runList, actionList] = await Promise.all([
+    const [llmStatus, runList, actionList, operationStatus] = await Promise.all([
       api<LlmStatus>('/system/llm-status'),
       api<{ items: AgentRun[] }>('/automation/runs'),
       api<{ items: AutomaticAction[] }>('/automation/actions'),
+      api<OperationsStatus>('/automation/operations/status'),
     ])
-    setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
+    setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items); setOperations(operationStatus)
   }
   useEffect(() => {
     Promise.all([
       api<LlmStatus>('/system/llm-status'),
       api<{ items: AgentRun[] }>('/automation/runs'),
       api<{ items: AutomaticAction[] }>('/automation/actions'),
-    ]).then(([llmStatus, runList, actionList]) => {
-      setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
+      api<OperationsStatus>('/automation/operations/status'),
+    ]).then(([llmStatus, runList, actionList, operationStatus]) => {
+      setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items); setOperations(operationStatus)
     })
   }, [])
 
@@ -70,6 +81,10 @@ export function AutomationPage() {
     await api(`/automation/runs/${run.id}/${operation}`, { method: 'POST' })
     await load()
   }
+  const reconcile = async () => {
+    await api('/automation/operations/reconciliation/run', { method: 'POST' })
+    await load(); message.success('已执行一轮安全对账')
+  }
 
   return <Space direction="vertical" style={{ width: '100%' }} size="large">
     <Alert type="warning" showIcon message="真实联调必须逐步人工放行"
@@ -83,6 +98,25 @@ export function AutomationPage() {
           {llm?.configured ? '已配置' : '未配置'}
         </Tag> },
       ]} />
+    </Card>
+
+    <Card title="运行自检与对账">
+      <Descriptions items={[
+        { key: 'db', label: '数据库/迁移', children: <Tag color={operations?.database_ready ? 'green' : 'red'}>
+          {operations?.database_ready ? operations.migration_revision : '不可用'}
+        </Tag> },
+        { key: 'selector', label: '选择器', children: operations?.selector_version ?? '-' },
+        { key: 'executor', label: '执行器', children: operations?.executor_mode ?? '-' },
+        { key: 'calendar', label: '日历', children: operations?.calendar_provider ?? '-' },
+        { key: 'unknown', label: '未知结果', children: operations?.unknown_action_count ?? 0 },
+        { key: 'confirmations', label: '待确认', children: operations?.pending_confirmation_count ?? 0 },
+        { key: 'workers', label: 'Worker', children: operations?.workers.map(
+          (item) => `${item.worker_id}:${item.status}`).join('、') || '无' },
+        { key: 'discrepancies', label: '审计差异', children: operations?.discrepancies.length ?? 0 },
+      ]} />
+      <Button disabled={!operations?.unknown_action_count} onClick={() => void reconcile()}>
+        执行对账
+      </Button>
     </Card>
 
     <Card title="Agent 运行">
@@ -103,6 +137,8 @@ export function AutomationPage() {
         { title: '已处理', dataIndex: 'processed_count' }, { title: '已执行', dataIndex: 'action_count' },
         { title: '失败', render: (_: unknown, run: AgentRun) => `${run.failure_count}（连续 ${run.consecutive_failure_count}）` },
         { title: '暂停原因', dataIndex: 'pause_reason_codes', render: (items: string[]) => items.join('、') || '-' },
+        { title: '游标', dataIndex: 'cursor', render: (value: Record<string, unknown>) =>
+          <code>{JSON.stringify(value)}</code> },
         { title: '操作', render: (_: unknown, run: AgentRun) => <Space>
           <Button danger disabled={run.status !== 'RUNNING'} onClick={() => void changeRun(run, 'pause')}>暂停</Button>
           <Button disabled={run.status !== 'PAUSED'} onClick={() => void changeRun(run, 'resume')}>恢复</Button>

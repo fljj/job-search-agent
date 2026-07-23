@@ -95,6 +95,10 @@ BOSS 平台会通过本机 CDP 自动扫描唯一的消息列表页，按未读�
 python scripts/run_agent_worker.py
 ```
 
+Worker 启动时检查数据库迁移、LLM、选择器、执行器，以及真实运行需要的 CDP 和登录
+会话；同时登记 PID、心跳和停止状态。结果未知动作自动进入只读对账队列，持续未知超过
+配置时限后升级人工处理。Agent 控制台展示自检、Worker、游标、未知动作和审计差异。
+
 CDP 地址默认是 `http://127.0.0.1:9222`，需要调整时设置
 `AGENT_CDP_URL`。Worker 不保存浏览器 Cookie 或招聘平台密码。电话和面试具体时间
 仍只生成确认任务，不会自动发送。
@@ -151,6 +155,21 @@ npm run build
 ```
 
 PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQL 16 实例。
+
+### 备份与恢复演练
+
+备份文件可能包含个人信息，默认目录已被 Git 忽略，文件权限设为仅当前用户：
+
+```bash
+DATABASE_URL='postgresql+psycopg://...' scripts/backup_database.sh
+```
+
+恢复脚本只允许目标数据库名称包含 `_restore_test`：
+
+```bash
+RESTORE_DATABASE_URL='postgresql+psycopg://.../job_agent_restore_test' \
+  scripts/restore_rehearsal.sh backups/job-search-agent-YYYYMMDD-HHMMSS.dump
+```
 
 ## 当前范围限制
 

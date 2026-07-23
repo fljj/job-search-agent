@@ -24,6 +24,15 @@ from apps.api.app.services.agent_service import tick_run
 from apps.api.app.services.browser_service import persist_read_result
 from apps.api.app.services.job_discovery_service import process_job_discovery_batch
 from apps.api.app.services.message_discovery_service import persist_discovery_batch
+from apps.api.app.services.operations_service import (
+    apply_retention,
+    enqueue_unknown_actions,
+    heartbeat_worker,
+    process_reconciliation_queue,
+    register_worker,
+    stop_worker,
+    verify_successful_actions,
+)
 from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
 from packages.browser_worker.models import (
     BrowserConversation,
@@ -723,6 +732,83 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     assert any(item["id"] == run_id and item["status"] == "PAUSED" for item in run_items)
     automatic_actions = client.get("/api/v1/automation/actions").json()["data"]["items"]
     assert automatic_actions
+    with Session(lease_engine, expire_on_commit=False) as operations_session:
+        registered = register_worker(
+            operations_session,
+            "integration-worker-1",
+            "localhost",
+            1001,
+        )
+        heartbeat_worker(operations_session, registered.worker_id)
+        with pytest.raises(RuntimeError, match="已有健康"):
+            register_worker(
+                operations_session,
+                "integration-worker-2",
+                "localhost",
+                1002,
+            )
+        registered.heartbeat_at = datetime.now(UTC) - timedelta(minutes=5)
+        operations_session.commit()
+        replacement = register_worker(
+            operations_session,
+            "integration-worker-2",
+            "localhost",
+            1002,
+        )
+        operations_session.refresh(registered)
+        assert registered.status == "STALE"
+        stop_worker(operations_session, replacement.worker_id)
+        assert enqueue_unknown_actions(operations_session) == 1
+        task = operations_session.scalar(
+            select(entities.ReconciliationTask)
+        )
+        assert task is not None and task.status == "PENDING"
+        task.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
+        operations_session.commit()
+
+        class UnknownObserver:
+            def observe(self, *_: object) -> ExecutionResult:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="RESULT_NOT_OBSERVED",
+                )
+
+        reconciliation = process_reconciliation_queue(
+            operations_session,
+            "http://127.0.0.1:9222",
+            observer=UnknownObserver(),  # type: ignore[arg-type]
+        )
+        assert reconciliation["manual_required"] == 1
+        assert task.status == "MANUAL_REQUIRED"
+
+        class MissingObserver:
+            def observe(self, *_: object) -> ExecutionResult:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="RESULT_CONFIRMED_NOT_SENT",
+                )
+
+        discrepancies = verify_successful_actions(
+            operations_session,
+            "http://127.0.0.1:9222",
+            observer=MissingObserver(),  # type: ignore[arg-type]
+            limit=1,
+        )
+        assert discrepancies[0]["code"] == "PLATFORM_MISSING_DATABASE_SUCCESS"
+        old_event = entities.AgentRunEvent(
+            agent_run_id=run_id,
+            event_type="RETENTION_FIXTURE",
+            reason_codes=[],
+            metadata_json={},
+            created_at=datetime.now(UTC) - timedelta(days=1000),
+        )
+        operations_session.add(old_event)
+        operations_session.commit()
+        retention = apply_retention(operations_session)
+        assert retention["run_events_deleted"] >= 1
+    operation_status = client.get("/api/v1/automation/operations/status")
+    assert operation_status.status_code == 200
+    assert operation_status.json()["data"]["unknown_action_count"] >= 1
     conversation_items = client.get("/api/v1/conversations").json()["data"]["items"]
     assert any(
         item["id"] == conversation_id

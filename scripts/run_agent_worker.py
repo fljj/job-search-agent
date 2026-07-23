@@ -3,8 +3,9 @@
 import fcntl
 import logging
 import os
+import signal
 import socket
-import time
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -23,11 +24,21 @@ from apps.api.app.services.agent_service import pause_run, tick_run
 from apps.api.app.services.automation_service import _effective_rules
 from apps.api.app.services.job_discovery_service import process_job_discovery_batch
 from apps.api.app.services.message_discovery_service import persist_discovery_batch
+from apps.api.app.services.operations_service import (
+    apply_retention,
+    heartbeat_worker,
+    process_reconciliation_queue,
+    register_worker,
+    stop_worker,
+    worker_preflight,
+)
+from packages.audit.redaction import install_redacting_filter
 from packages.browser_worker.actions import ActionExecutor
 from packages.browser_worker.models import Platform
 
 logger = logging.getLogger(__name__)
 LOCK_PATH = "/tmp/job-search-agent-worker.lock"
+STOP_EVENT = threading.Event()
 
 
 def _build_executor(platform: str, mode: str) -> tuple[ActionExecutor, str]:
@@ -166,15 +177,52 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
             logger.exception("Agent tick failed unexpectedly: run=%s", run_id)
 
 
+def maintenance_once(cdp_url: str) -> None:
+    with SessionLocal() as session:
+        process_reconciliation_queue(session, cdp_url)
+        apply_retention(session)
+
+
+def _request_stop(_signum: int, _frame: object) -> None:
+    STOP_EVENT.set()
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    install_redacting_filter()
     settings = get_settings()
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     cdp_url = os.getenv("AGENT_CDP_URL", "http://127.0.0.1:9222")
+    signal.signal(signal.SIGINT, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
     with _single_worker_lock():
-        while True:
-            run_once(worker_id, cdp_url)
-            time.sleep(settings.agent_poll_interval_seconds)
+        with SessionLocal() as session:
+            failures = worker_preflight(session, settings, cdp_url)
+            if failures:
+                raise RuntimeError(f"Worker 启动自检失败：{','.join(failures)}")
+            register_worker(
+                session,
+                worker_id,
+                socket.gethostname(),
+                os.getpid(),
+                metadata={
+                    "executor_mode": settings.agent_executor_mode,
+                    "selector_version": get_browser_selectors().version,
+                },
+            )
+        try:
+            while not STOP_EVENT.is_set():
+                try:
+                    run_once(worker_id, cdp_url)
+                    maintenance_once(cdp_url)
+                    with SessionLocal() as session:
+                        heartbeat_worker(session, worker_id)
+                except Exception:
+                    logger.exception("Worker loop failed; will retry safely")
+                STOP_EVENT.wait(settings.agent_poll_interval_seconds)
+        finally:
+            with SessionLocal() as session:
+                stop_worker(session, worker_id)
 
 
 if __name__ == "__main__":
