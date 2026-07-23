@@ -17,6 +17,7 @@ from apps.api.app.api.v1 import (
     scheduling,
     scores,
     strategies,
+    system,
 )
 from apps.api.app.core.config import get_settings
 from apps.api.app.services.errors import (
@@ -32,7 +33,7 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
 
 for router in (profiles.router, strategies.router, jobs.router, scores.router,
                knowledge.router, resumes.router, conversations.router, browser.router,
-               actions.router, automation.router, scheduling.router):
+               actions.router, automation.router, scheduling.router, system.router):
     app.include_router(router, prefix="/api/v1")
 
 

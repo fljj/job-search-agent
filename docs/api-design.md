@@ -253,6 +253,17 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 
 `read-current` 请求包含 `platform`、`cdp_url`，并可选包含 `job_id/expected_company/expected_job_title/expected_recruiter`。读取对话详情页时 `job_id` 必填。响应通过 `page_type` 区分 `JOB_LIST/JOB/CONVERSATION_LIST/CONVERSATION`；列表页返回 `cursor` 以及 `jobs` 或 `conversations`，重复读取返回首次保存的相同脱敏列表快照。
 
+### 7.8 控制台只读接口
+
+- `GET /api/v1/system/llm-status`：返回 `provider/model/configured`，禁止返回 API Key、Base URL 凭证或完整环境配置。
+- `GET /api/v1/automation/runs`：按时间倒序返回 Agent 状态、心跳、计数、租约和暂停原因。
+- `GET /api/v1/automation/actions`：仅返回 `authorization_source=AUTO` 的普通自动动作及发送结果/失败证据。
+- `GET /api/v1/conversations`：返回对话绑定策略、最新评分、最新草稿类型和简历动作证据。
+
+以上接口均为只读展示接口。启动、暂停和恢复仍分别使用既有的
+`POST /automation/runs`、`POST /automation/runs/{id}/pause` 和
+`POST /automation/runs/{id}/resume`，服务端继续执行自动化配置和状态转换校验。
+
 只允许本机 `localhost/127.0.0.1/::1` HTTP(S) CDP 端点且 URL 不得包含凭证。返回会话状态、页面类型、原因码、导入资源 ID、证据 ID 和重复标记。
 
 未登录、验证页、页面结构变化或目标不一致时只保存失败证据，不导入职位或消息。

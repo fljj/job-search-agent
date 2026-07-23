@@ -4,6 +4,12 @@ import { api } from '../api/client'
 
 interface KnowledgeItem { id: string; category: string; key: string; fact: string; sensitivity: string; version: number }
 interface Resume { id: string; attachment_name: string; platform: string; target_directions: string[] }
+interface ConversationSummary {
+  id: string; platform: string; recruiter_name: string; state: string; company_name?: string
+  job_title?: string; strategy_id?: string; latest_score?: number; latest_grade?: string
+  latest_draft_type?: string; latest_draft_content?: string
+  resume_action_status?: string; resume_attachment_name?: string
+}
 
 const knowledgeTemplate = JSON.stringify({ category: 'TECH_STACK', key: 'Java',
   fact: '拥有 8 年 Java 后端开发经验', source: '用户确认', allowed_for_auto_reply: true,
@@ -16,6 +22,7 @@ export function ConversationPage() {
   const [resumeJson, setResumeJson] = useState(resumeTemplate)
   const [knowledge, setKnowledge] = useState<KnowledgeItem[]>([])
   const [resumes, setResumes] = useState<Resume[]>([])
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [conversationId, setConversationId] = useState('')
   const [conversationJson, setConversationJson] = useState(JSON.stringify({ job_id: '请填写职位 ID',
     external_conversation_id: 'mock-conversation-1', recruiter_name: '模拟招聘人', platform: 'MOCK' }, null, 2))
@@ -23,24 +30,29 @@ export function ConversationPage() {
     content: '请介绍一下你的 Java 技术栈经验', received_at: new Date().toISOString() }, null, 2))
   const [draft, setDraft] = useState<Record<string, unknown>>()
   const load = async () => {
-    const [facts, resumeList] = await Promise.all([
+    const [facts, resumeList, conversationList] = await Promise.all([
       api<{ items: KnowledgeItem[] }>('/knowledge-items'), api<{ items: Resume[] }>('/resumes'),
+      api<{ items: ConversationSummary[] }>('/conversations'),
     ])
-    setKnowledge(facts.items); setResumes(resumeList.items)
+    setKnowledge(facts.items); setResumes(resumeList.items); setConversations(conversationList.items)
   }
   useEffect(() => { Promise.all([
     api<{ items: KnowledgeItem[] }>('/knowledge-items'), api<{ items: Resume[] }>('/resumes'),
-  ]).then(([facts, resumeList]) => { setKnowledge(facts.items); setResumes(resumeList.items) }) }, [])
+    api<{ items: ConversationSummary[] }>('/conversations'),
+  ]).then(([facts, resumeList, conversationList]) => {
+    setKnowledge(facts.items); setResumes(resumeList.items); setConversations(conversationList.items)
+  }) }, [])
   const createKnowledge = async () => { await api('/knowledge-items', { method: 'POST', body: knowledgeJson }); await load(); message.success('知识项已保存') }
   const createResume = async () => { await api('/resumes', { method: 'POST', body: resumeJson }); await load(); message.success('简历元数据已保存') }
   const analyze = async () => {
     if (!conversationId) return message.warning('请填写模拟对话 ID')
     const imported = await api<{ id: string }>(`/conversations/${conversationId}/messages`, { method: 'POST', body: messageJson })
     setDraft(await api<Record<string, unknown>>('/drafts/reply', { method: 'POST', body: JSON.stringify({ message_id: imported.id }) }))
+    await load()
   }
   const createConversation = async () => {
     const created = await api<{ id: string }>('/conversations', { method: 'POST', body: conversationJson })
-    setConversationId(created.id); message.success('模拟对话已创建')
+    setConversationId(created.id); await load(); message.success('模拟对话已创建')
   }
   return <Space direction="vertical" style={{ width: '100%' }}>
     <Card title="候选人知识库"><Input.TextArea rows={8} value={knowledgeJson} onChange={(event) => setKnowledgeJson(event.target.value)} />
@@ -58,5 +70,19 @@ export function ConversationPage() {
       <Input.TextArea rows={6} value={messageJson} onChange={(event) => setMessageJson(event.target.value)} style={{ marginTop: 12 }} />
       <Button type="primary" onClick={() => void analyze()} style={{ marginTop: 12 }}>导入并生成草稿</Button>
       {draft && <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(draft, null, 2)}</pre>}</Card>
+    <Card title="对话评分与发送证据"><Table rowKey="id" dataSource={conversations} columns={[
+      { title: '平台', dataIndex: 'platform' },
+      { title: '公司/职位', render: (_: unknown, item: ConversationSummary) => `${item.company_name ?? '-'} / ${item.job_title ?? '-'}` },
+      { title: '招聘人', dataIndex: 'recruiter_name' },
+      { title: '绑定策略', dataIndex: 'strategy_id', render: (value?: string) => value ?? '未绑定' },
+      { title: '最新评分', render: (_: unknown, item: ConversationSummary) =>
+        item.latest_score === undefined || item.latest_score === null ? '-' : `${item.latest_score} / ${item.latest_grade}` },
+      { title: '最新草稿', render: (_: unknown, item: ConversationSummary) => <Space direction="vertical">
+        {item.latest_draft_type && <Tag color={item.latest_draft_type === 'LOW_SCORE_DECLINE' ? 'orange' : 'blue'}>{item.latest_draft_type}</Tag>}
+        <span>{item.latest_draft_content ?? '-'}</span>
+      </Space> },
+      { title: '简历证据', render: (_: unknown, item: ConversationSummary) =>
+        item.resume_action_status ? `${item.resume_attachment_name ?? '-'} / ${item.resume_action_status}` : '-' },
+    ]} /></Card>
   </Space>
 }

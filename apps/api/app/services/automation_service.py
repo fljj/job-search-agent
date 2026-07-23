@@ -19,6 +19,34 @@ from packages.policy_engine.automation import (
 )
 from packages.policy_engine.state_machine import ActionStatus
 
+
+def list_automatic_actions(session: Session) -> list[dict[str, object]]:
+    rows = session.scalars(
+        select(db.ActionQueue)
+        .where(
+            db.ActionQueue.user_id == DEFAULT_USER_ID,
+            db.ActionQueue.authorization_source == "AUTO",
+        )
+        .order_by(db.ActionQueue.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "agent_run_id": row.agent_run_id,
+            "action_type": row.action_type,
+            "status": row.status,
+            "platform": row.platform,
+            "company": row.target_company,
+            "job_title": row.target_job_title,
+            "recruiter": row.target_recruiter,
+            "content": row.content,
+            "attachment_name": row.attachment_name,
+            "failure_code": row.failure_code,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in rows
+    ]
+
 POLICY_VERSION = "automation-policy-v1"
 
 

@@ -90,6 +90,57 @@ def import_message(session: Session, conversation_id: object, payload: MessagePa
     return _message_response(message)
 
 
+def list_conversations(session: Session) -> list[dict[str, object]]:
+    conversations = session.scalars(
+        select(db.Conversation)
+        .where(db.Conversation.user_id == DEFAULT_USER_ID)
+        .order_by(db.Conversation.created_at.desc())
+    ).all()
+    items: list[dict[str, object]] = []
+    for conversation in conversations:
+        job = session.get(db.Job, conversation.job_id)
+        score = (
+            session.get(db.JobScore, conversation.latest_job_score_id)
+            if conversation.latest_job_score_id
+            else None
+        )
+        draft = session.scalar(
+            select(db.GeneratedDraft)
+            .where(db.GeneratedDraft.conversation_id == conversation.id)
+            .order_by(db.GeneratedDraft.created_at.desc())
+            .limit(1)
+        )
+        resume_action = session.scalar(
+            select(db.ActionQueue)
+            .where(
+                db.ActionQueue.conversation_id == conversation.id,
+                db.ActionQueue.action_type == "RESUME",
+            )
+            .order_by(db.ActionQueue.created_at.desc())
+            .limit(1)
+        )
+        items.append(
+            {
+                "id": conversation.id,
+                "platform": conversation.platform,
+                "recruiter_name": conversation.recruiter_name,
+                "state": conversation.state,
+                "company_name": job.company_name if job else None,
+                "job_title": job.title if job else None,
+                "strategy_id": conversation.strategy_id,
+                "latest_score": score.total_score if score else None,
+                "latest_grade": score.grade if score else None,
+                "latest_draft_type": draft.draft_type if draft else None,
+                "latest_draft_content": draft.content if draft else None,
+                "resume_action_status": resume_action.status if resume_action else None,
+                "resume_attachment_name": (
+                    resume_action.attachment_name if resume_action else None
+                ),
+            }
+        )
+    return items
+
+
 def create_reply_draft(
     session: Session,
     message_id: object,

@@ -13,12 +13,18 @@ from apps.api.app.schemas.automation import (
 )
 from apps.api.app.services.agent_service import (
     get_run,
+    list_runs,
     pause_run,
     resume_run,
     start_run,
     tick_run,
 )
-from apps.api.app.services.automation_service import dispatch, list_settings, upsert_setting
+from apps.api.app.services.automation_service import (
+    dispatch,
+    list_automatic_actions,
+    list_settings,
+    upsert_setting,
+)
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
@@ -44,6 +50,16 @@ def run(payload: AutomationDispatchRequest,
 def start(payload: AgentRunStartRequest,
           session: Session = Depends(get_session)) -> dict[str, object]:
     return response(start_run(session, payload))
+
+
+@router.get("/runs")
+def runs(session: Session = Depends(get_session)) -> dict[str, object]:
+    return response({"items": list_runs(session)})
+
+
+@router.get("/actions")
+def actions(session: Session = Depends(get_session)) -> dict[str, object]:
+    return response({"items": list_automatic_actions(session)})
 
 
 @router.get("/runs/{run_id}")

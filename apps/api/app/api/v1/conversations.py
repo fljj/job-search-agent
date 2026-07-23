@@ -18,9 +18,15 @@ from apps.api.app.services.conversation_service import (
     create_reply_draft,
     create_resume_draft,
     import_message,
+    list_conversations,
 )
 
 router = APIRouter(tags=["conversations"])
+
+
+@router.get("/conversations")
+def list_all(session: Session = Depends(get_session)) -> dict[str, object]:
+    return response({"items": list_conversations(session)})
 
 
 @router.post("/conversations")

@@ -495,6 +495,17 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         )
     assert safety_tick["status"] == "PAUSED"
     assert safety_tick["pause_reason_codes"] == ["RESULT_NOT_OBSERVED"]
+    run_items = client.get("/api/v1/automation/runs").json()["data"]["items"]
+    assert any(item["id"] == run_id and item["status"] == "PAUSED" for item in run_items)
+    automatic_actions = client.get("/api/v1/automation/actions").json()["data"]["items"]
+    assert automatic_actions
+    conversation_items = client.get("/api/v1/conversations").json()["data"]["items"]
+    assert any(
+        item["id"] == conversation_id
+        and item["strategy_id"] == strategy_id
+        and item["latest_score"] is not None
+        for item in conversation_items
+    )
     lease_engine.dispose()
 
 

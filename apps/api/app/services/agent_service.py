@@ -79,6 +79,15 @@ def get_run(session: Session, run_id: UUID) -> dict[str, object]:
     return _response(_get_run(session, run_id))
 
 
+def list_runs(session: Session) -> list[dict[str, object]]:
+    rows = session.scalars(
+        select(db.AgentRun)
+        .where(db.AgentRun.user_id == DEFAULT_USER_ID)
+        .order_by(db.AgentRun.created_at.desc())
+    ).all()
+    return [_response(row) for row in rows]
+
+
 def pause_run(
     session: Session,
     run_id: UUID,
