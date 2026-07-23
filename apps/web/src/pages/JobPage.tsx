@@ -1,9 +1,11 @@
-import { Alert, Button, Card, Descriptions, Drawer, Input, List, Progress, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Drawer, List, Progress, Select, Space, Table, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
 interface Job { id: string; title: string; company_name: string; work_mode: string; location?: string;
-  latest_score?: { total_score: number; grade: string; eligibility: string; hard_rejected: boolean } }
+  salary_text?: string; source: string; latest_score?: { id: string; total_score: number; grade: string;
+    eligibility: string; hard_rejected: boolean; effective_job_status: string } }
+interface Strategy { id: string; name: string; enabled: boolean }
 interface ScoreDetail { dimension: string; score: number | string; max_score: number | string;
   explanation: string; evidence_refs: string[]; rule_code: string }
 interface ScoreResult {
@@ -14,14 +16,10 @@ interface ScoreResult {
   details: ScoreDetail[]; match_reasons: string[]; risk_notes: string[]
 }
 
-const template = JSON.stringify({ title: '高级Java后端工程师', company_name: '示例科技', industry: '互联网',
-  location: '北京', work_mode: 'REMOTE', salary_text: '35K-40K', description: '5年以上Java经验，熟悉Spring Boot、MySQL、Redis', source_status: 'OPEN' }, null, 2)
-
 export function JobPage() {
-  const [value, setValue] = useState(template)
   const [jobs, setJobs] = useState<Job[]>([])
+  const [strategies, setStrategies] = useState<Strategy[]>([])
   const [strategyId, setStrategyId] = useState('')
-  const [profileId, setProfileId] = useState('')
   const [workMode, setWorkMode] = useState<string>()
   const [grade, setGrade] = useState<string>()
   const [score, setScore] = useState<ScoreResult>()
@@ -33,23 +31,22 @@ export function JobPage() {
     return api<{ items: Job[] }>(`/jobs?${query}`).then((data) => setJobs(data.items))
   }
   useEffect(() => {
-    api<{ items: Job[] }>('/jobs').then((data) => setJobs(data.items))
+    void Promise.all([
+      api<{ items: Job[] }>('/jobs'),
+      api<{ items: Strategy[] }>('/strategies'),
+    ]).then(([jobData, strategyData]) => {
+      setJobs(jobData.items); setStrategies(strategyData.items)
+      const enabled = strategyData.items.find((item) => item.enabled)
+      if (enabled) setStrategyId(enabled.id)
+    })
   }, [])
-  const importJob = async () => { await api('/jobs/import', { method: 'POST', body: value }); message.success('JD 已导入'); await load() }
-  const scoreJob = async (jobId: string) => {
-    if (!strategyId || !profileId) return message.warning('请先填写策略 ID 和候选人资料 ID')
-    const parsed = await api<{ id: string }>(`/jobs/${jobId}/parse`, { method: 'POST', body: JSON.stringify({ mode: 'RULE' }) })
-    const result = await api<ScoreResult>(`/jobs/${jobId}/scores`, { method: 'POST', body: JSON.stringify({
-      strategy_id: strategyId, candidate_profile_id: profileId, parsed_job_detail_id: parsed.id,
-    }) })
-    setScore(result)
-  }
+  const openScore = async (scoreId: string) => setScore(await api<ScoreResult>(`/scores/${scoreId}`))
   return <Space direction="vertical" style={{ width: '100%' }}>
-    <Card title="导入模拟 JD"><Input.TextArea value={value} onChange={(event) => setValue(event.target.value)} rows={10} />
-      <Button type="primary" onClick={importJob} style={{ marginTop: 12 }}>导入</Button></Card>
-    <Card title="职位列表"><Space style={{ marginBottom: 16 }}>
-      <Input placeholder="候选人资料 ID" value={profileId} onChange={(event) => setProfileId(event.target.value)} />
-      <Input placeholder="策略 ID" value={strategyId} onChange={(event) => setStrategyId(event.target.value)} />
+    <Alert type="info" showIcon message="职位由 Agent 自动发现、解析和评分"
+      description="此处只展示监控结果；硬性排除、未评分和未达到80分的职位不会被主动沟通。" />
+    <Card title="职位流水线"><Space wrap style={{ marginBottom: 16 }}>
+      <Select allowClear placeholder="求职策略" value={strategyId || undefined} onChange={(value) => setStrategyId(value ?? '')}
+        style={{ minWidth: 220 }} options={strategies.map((item) => ({ value: item.id, label: item.name }))} />
       <Select allowClear placeholder="工作模式" value={workMode} onChange={setWorkMode} options={
         ['REMOTE', 'ONSITE', 'HYBRID', 'UNKNOWN'].map((value) => ({ value, label: value }))} />
       <Select allowClear placeholder="等级" value={grade} onChange={setGrade} options={
@@ -59,9 +56,16 @@ export function JobPage() {
       { title: '职位', dataIndex: 'title' }, { title: '公司', dataIndex: 'company_name' },
       { title: '模式', dataIndex: 'work_mode', render: (mode: string) => <Tag>{mode}</Tag> },
       { title: '地点', dataIndex: 'location' },
+      { title: '薪资', dataIndex: 'salary_text', render: (value?: string) => value ?? '-' },
       { title: '评分', render: (_: unknown, job: Job) => job.latest_score
-        ? `${job.latest_score.total_score} / ${job.latest_score.grade}` : '-' },
-      { title: '操作', render: (_: unknown, job: Job) => <Button onClick={() => void scoreJob(job.id)}>解析并评分</Button> },
+        ? <Tag color={job.latest_score.total_score >= 80 ? 'green' : 'blue'}>
+          {job.latest_score.total_score} / {job.latest_score.grade}</Tag> : <Tag>待评分</Tag> },
+      { title: '资格', render: (_: unknown, job: Job) => job.latest_score
+        ? <Tag color={job.latest_score.hard_rejected ? 'red' : 'green'}>
+          {job.latest_score.hard_rejected ? '硬性排除' : job.latest_score.eligibility}</Tag> : '-' },
+      { title: '操作', render: (_: unknown, job: Job) => <Button
+        disabled={!job.latest_score} onClick={() => job.latest_score && void openScore(job.latest_score.id)}>
+        查看评分证据</Button> },
     ]} /></Card>
     <Drawer title="评分详情" width={720} open={Boolean(score)} onClose={() => setScore(undefined)}>
       {score && <Space direction="vertical" size="large" style={{ width: '100%' }}>

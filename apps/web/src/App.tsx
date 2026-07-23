@@ -1,43 +1,49 @@
 import { lazy, Suspense, useState } from 'react'
-import { Layout, Spin, Tabs, Typography } from 'antd'
+import { Layout, Menu, Spin, Typography } from 'antd'
 
 const pages = {
-  profile: lazy(() => import('./pages/ProfilePage').then(({ ProfilePage }) => ({ default: ProfilePage }))),
-  strategy: lazy(() => import('./pages/StrategyPage').then(({ StrategyPage }) => ({ default: StrategyPage }))),
+  overview: lazy(() => import('./pages/OverviewPage').then(({ OverviewPage }) => ({ default: OverviewPage }))),
   jobs: lazy(() => import('./pages/JobPage').then(({ JobPage }) => ({ default: JobPage }))),
-  conversation: lazy(() => import('./pages/ConversationPage').then(({ ConversationPage }) => ({ default: ConversationPage }))),
-  browser: lazy(() => import('./pages/BrowserPage').then(({ BrowserPage }) => ({ default: BrowserPage }))),
-  actions: lazy(() => import('./pages/ActionPage').then(({ ActionPage }) => ({ default: ActionPage }))),
-  automation: lazy(() => import('./pages/AutomationPage').then(({ AutomationPage }) => ({ default: AutomationPage }))),
+  messages: lazy(() => import('./pages/MessagePage').then(({ MessagePage }) => ({ default: MessagePage }))),
   scheduling: lazy(() => import('./pages/SchedulingPage').then(({ SchedulingPage }) => ({ default: SchedulingPage }))),
+  strategy: lazy(() => import('./pages/StrategyPage').then(({ StrategyPage }) => ({ default: StrategyPage }))),
+  profile: lazy(() => import('./pages/ProfilePage').then(({ ProfilePage }) => ({ default: ProfilePage }))),
+  settings: lazy(() => import('./pages/AutomationPage').then(({ AutomationPage }) => ({ default: AutomationPage }))),
 }
 
 type PageKey = keyof typeof pages
 
 const labels: Record<PageKey, string> = {
-  profile: '候选人资料',
+  overview: '总览',
+  jobs: '职位中心',
+  messages: '消息中心',
+  scheduling: '面试确认',
   strategy: '求职策略',
-  jobs: '模拟 JD 与职位',
-  conversation: '知识库与模拟沟通',
-  browser: '招聘网站读取',
-  actions: '普通人工确认',
-  automation: 'Agent 运行控制台',
-  scheduling: '电话与面试确认',
+  profile: '候选人中心',
+  settings: '系统设置',
 }
 
 export default function App() {
-  const [activeKey, setActiveKey] = useState<PageKey>('profile')
+  const [activeKey, setActiveKey] = useState<PageKey>('overview')
   const ActivePage = pages[activeKey]
   return <Layout style={{ minHeight: '100vh' }}>
-    <Layout.Header>
-      <Typography.Title level={3} style={{ color: 'white', margin: 16 }}>半自动求职 Agent</Typography.Title>
-    </Layout.Header>
-    <Layout.Content style={{ padding: 24 }}>
-      <Tabs activeKey={activeKey} onChange={(key) => setActiveKey(key as PageKey)}
+    <Layout.Sider width={220} breakpoint="lg" collapsedWidth={0}>
+      <Typography.Title level={4} style={{ color: 'white', margin: 20 }}>
+        无人值守求职 Agent
+      </Typography.Title>
+      <Menu theme="dark" mode="inline" selectedKeys={[activeKey]}
+        onClick={({ key }) => setActiveKey(key as PageKey)}
         items={(Object.keys(labels) as PageKey[]).map((key) => ({ key, label: labels[key] }))} />
-      <Suspense fallback={<Spin tip="页面加载中" />}>
-        <ActivePage />
-      </Suspense>
-    </Layout.Content>
+    </Layout.Sider>
+    <Layout>
+      <Layout.Header style={{ background: '#fff', padding: '0 24px' }}>
+        <Typography.Title level={3} style={{ margin: '16px 0' }}>{labels[activeKey]}</Typography.Title>
+      </Layout.Header>
+      <Layout.Content style={{ padding: 24 }}>
+        <Suspense fallback={<Spin tip="页面加载中" />}>
+          <ActivePage />
+        </Suspense>
+      </Layout.Content>
+    </Layout>
   </Layout>
 }

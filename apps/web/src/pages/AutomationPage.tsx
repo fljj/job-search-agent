@@ -42,6 +42,7 @@ interface RolloutStatus {
   remaining_hours: number; reply_daily_limit: number; greeting_daily_limit: number
   safety_metrics: Record<string, number>; version: number
 }
+interface StrategyOption { id: string; name: string; enabled: boolean }
 
 export function AutomationPage() {
   const [form] = Form.useForm<SettingForm>()
@@ -52,17 +53,20 @@ export function AutomationPage() {
   const [strategyId, setStrategyId] = useState('')
   const [operations, setOperations] = useState<OperationsStatus>()
   const [rollout, setRollout] = useState<RolloutStatus>()
+  const [strategies, setStrategies] = useState<StrategyOption[]>([])
 
   const load = async () => {
-    const [llmStatus, runList, actionList, operationStatus, rolloutList] = await Promise.all([
+    const [llmStatus, runList, actionList, operationStatus, rolloutList, strategyList] = await Promise.all([
       api<LlmStatus>('/system/llm-status'),
       api<{ items: AgentRun[] }>('/automation/runs'),
       api<{ items: AutomaticAction[] }>('/automation/actions'),
       api<OperationsStatus>('/automation/operations/status'),
       api<{ items: RolloutStatus[] }>('/automation/rollouts'),
+      api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
     ])
     setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
     setOperations(operationStatus); setRollout(rolloutList.items.find((item) => item.platform === 'BOSS'))
+    setStrategies(strategyList.items)
   }
   useEffect(() => {
     Promise.all([
@@ -71,9 +75,12 @@ export function AutomationPage() {
       api<{ items: AutomaticAction[] }>('/automation/actions'),
       api<OperationsStatus>('/automation/operations/status'),
       api<{ items: RolloutStatus[] }>('/automation/rollouts'),
-    ]).then(([llmStatus, runList, actionList, operationStatus, rolloutList]) => {
+      api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
+    ]).then(([llmStatus, runList, actionList, operationStatus, rolloutList, strategyList]) => {
       setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
       setOperations(operationStatus); setRollout(rolloutList.items.find((item) => item.platform === 'BOSS'))
+      setStrategies(strategyList.items)
+      if (strategyList.items.length === 1) setStrategyId(strategyList.items[0].id)
     })
   }, [])
 
@@ -116,8 +123,8 @@ export function AutomationPage() {
   }
 
   return <Space direction="vertical" style={{ width: '100%' }} size="large">
-    <Alert type="warning" showIcon message="真实联调必须逐步人工放行"
-      description="控制台加载、保存配置和启动运行均不会自动扩大真实联调范围。请依次完成单次 LLM、单职位只读、一次手动招呼、1次/小时且3次/日自动招呼、单对话回复、单次简历和时间确认验证。" />
+    <Alert type="info" showIcon message="无人值守运行仍受服务端安全门禁控制"
+      description="Agent 自动发现职位和消息、评分、沟通及按条件发送简历；灰度升级、平台验证异常、未知结果和电话面试时间仍按安全规则处理。" />
 
     <Card title="LLM 配置状态">
       <Descriptions items={[
@@ -181,8 +188,10 @@ export function AutomationPage() {
           { value: 'BOSS', label: 'BOSS' }, { value: 'MAIMAI', label: '脉脉' },
           { value: 'MOCK', label: '本地模拟' },
         ]} />
-        <Input style={{ width: 360 }} value={strategyId} onChange={(event) => setStrategyId(event.target.value)}
-          placeholder="已启用的策略 ID" />
+        <Select style={{ width: 360 }} value={strategyId || undefined} onChange={setStrategyId}
+          placeholder="选择已启用策略" options={strategies.map((item) => ({
+            value: item.id, label: item.name,
+          }))} />
         <Button type="primary" onClick={() => void start()}>启动</Button>
         <Button onClick={() => void load()}>刷新</Button>
       </Space>
@@ -202,7 +211,7 @@ export function AutomationPage() {
       ]} />
     </Card>
 
-    <Card title="普通自动动作（无需时间确认）">
+    <Card title="自动动作审计（无需逐条确认）">
       <Table rowKey="id" dataSource={actions} columns={[
         { title: '类型', dataIndex: 'action_type' }, { title: '平台', dataIndex: 'platform' },
         { title: '公司/职位', render: (_: unknown, item: AutomaticAction) => `${item.company} / ${item.job_title}` },

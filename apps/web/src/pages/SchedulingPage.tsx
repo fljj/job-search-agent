@@ -13,22 +13,14 @@ interface CalendarStatus {
 
 export function SchedulingPage() {
   const [items, setItems] = useState<ScheduleRequest[]>([])
-  const [messageId, setMessageId] = useState('')
   const [reply, setReply] = useState('')
-  const [calendarAvailable, setCalendarAvailable] = useState(true)
   const [createEvent, setCreateEvent] = useState(false)
-  const [cdpUrl, setCdpUrl] = useState('http://127.0.0.1:9222')
   const [calendar, setCalendar] = useState<CalendarStatus>()
   const load = () => api<{ items: ScheduleRequest[] }>('/scheduling/requests').then((data) => setItems(data.items))
   useEffect(() => {
     void load()
     void api<CalendarStatus>('/system/calendar-status').then(setCalendar)
   }, [])
-  const analyze = async () => {
-    if (!messageId) return message.warning('请填写招聘方消息 ID')
-    await api('/scheduling/analyze', { method: 'POST', body: JSON.stringify({ message_id: messageId, calendar_available: calendarAvailable }) })
-    await load()
-  }
   const approve = async (item: ScheduleRequest) => {
     const content = reply || item.suggested_reply
     if (!content) return message.warning('请填写确认后的回复内容')
@@ -37,7 +29,7 @@ export function SchedulingPage() {
     await load(); message.success('具体时间已批准，仍需单独执行发送')
   }
   const execute = async (item: ScheduleRequest) => {
-    await api(`/scheduling/requests/${item.id}/execute`, { method: 'POST', body: JSON.stringify({ cdp_url: cdpUrl }) })
+    await api(`/scheduling/requests/${item.id}/execute`, { method: 'POST', body: '{}' })
     await load()
   }
   const reject = async (item: ScheduleRequest) => {
@@ -52,16 +44,14 @@ export function SchedulingPage() {
       description={calendar?.real_provider
         ? `真实日历 ${calendar.calendar_id}；读取忙闲与创建事件仍是独立操作。`
         : '当前使用本地模拟日历，不代表真实日历空闲。'} />
-    <Card title="分析邀请"><Space direction="vertical" style={{ width: '100%' }}>
-      <Input value={messageId} onChange={(event) => setMessageId(event.target.value)} placeholder="招聘方消息 ID" />
-      {!calendar?.real_provider && <Checkbox checked={calendarAvailable}
-        onChange={(event) => setCalendarAvailable(event.target.checked)}>模拟日历当前可用</Checkbox>}
-      <Button onClick={() => void analyze()}>解析并检查日历</Button>
-      <Input.TextArea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="确认或修改后的时间回复" />
-      <Checkbox checked={createEvent} onChange={(event) => setCreateEvent(event.target.checked)}>发送成功后单独授权创建日历事件</Checkbox>
-      <Input value={cdpUrl} onChange={(event) => setCdpUrl(event.target.value)} />
-    </Space></Card>
-    <Card title="时间确认任务"><Table rowKey="id" dataSource={items} columns={[
+    <Card title="时间确认任务" extra={<Button onClick={() => void load()}>刷新</Button>}>
+      <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }}>
+        <Input.TextArea value={reply} onChange={(event) => setReply(event.target.value)}
+          placeholder="可选：填写修改后的回复；留空时使用任务建议回复" />
+        <Checkbox checked={createEvent} onChange={(event) => setCreateEvent(event.target.checked)}>
+          发送成功后授权创建日历事件</Checkbox>
+      </Space>
+      <Table rowKey="id" dataSource={items} columns={[
       { title: '类型', dataIndex: 'event_type' },
       { title: '原邀请', dataIndex: 'source_text' },
       { title: '解析时间', render: (_: unknown, item: ScheduleRequest) => item.start_at ? `${item.start_at} — ${item.end_at}` : '待澄清' },
