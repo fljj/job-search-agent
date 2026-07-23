@@ -58,6 +58,12 @@ def persist_read_result(
         extracted_items=(
             [item.model_dump(mode="json") for item in result.jobs]
             or [item.model_dump(mode="json") for item in result.conversations]
+            or ([result.job.model_dump(mode="json")] if result.job else [])
+            or (
+                [result.conversation.model_dump(mode="json")]
+                if result.conversation
+                else []
+            )
         ),
     )
     session.add(run)

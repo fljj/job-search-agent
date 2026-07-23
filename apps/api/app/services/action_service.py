@@ -93,8 +93,71 @@ def create_resume_confirmation(session: Session, conversation_id: UUID, resume_i
     return task.id
 
 
+def create_greeting_confirmation(
+    session: Session,
+    draft_id: UUID,
+    recruiter_name: str,
+) -> UUID:
+    draft = session.get(db.GeneratedDraft, draft_id)
+    if (
+        draft is None
+        or draft.user_id != DEFAULT_USER_ID
+        or draft.draft_type != "GREETING"
+        or draft.job_score_id is None
+    ):
+        raise ResourceNotFoundError("招呼语草稿不存在")
+    score, job = _require_greeting_score(session, draft.job_score_id)
+    existing = session.scalar(
+        select(db.ConfirmationTask)
+        .join(db.PolicyDecision, db.PolicyDecision.id == db.ConfirmationTask.decision_id)
+        .where(
+            db.PolicyDecision.draft_id == draft.id,
+            db.PolicyDecision.action_type == "GREETING",
+            db.PolicyDecision.policy_version == "manual-live-greeting-v1",
+        )
+    )
+    if existing:
+        return existing.id
+    decision = db.PolicyDecision(
+        user_id=DEFAULT_USER_ID,
+        draft_id=draft.id,
+        action_type="GREETING",
+        decision="REQUIRE_CONFIRMATION",
+        reason_codes=["FIRST_LIVE_GREETING_REQUIRES_APPROVAL"],
+        policy_version="manual-live-greeting-v1",
+        input_snapshot={
+            "job_id": str(job.id),
+            "job_score_id": str(score.id),
+            "recruiter_name": recruiter_name.strip(),
+        },
+    )
+    session.add(decision)
+    session.flush()
+    task = db.ConfirmationTask(
+        user_id=DEFAULT_USER_ID,
+        decision_id=decision.id,
+        expires_at=_confirmation_expiry(),
+    )
+    session.add(task)
+    session.flush()
+    _audit(
+        session,
+        "CONFIRMATION_CREATED",
+        "confirmation_task",
+        task.id,
+        None,
+        "PENDING_APPROVAL",
+        ["FIRST_LIVE_GREETING_REQUIRES_APPROVAL"],
+    )
+    session.commit()
+    return task.id
+
+
 def approve_task(
-    session: Session, task_id: UUID, conversation_id: UUID, idempotency_key: str
+    session: Session,
+    task_id: UUID,
+    conversation_id: UUID | None,
+    idempotency_key: str,
 ) -> ActionResponse:
     existing = session.scalar(
         select(db.ActionQueue).where(db.ActionQueue.idempotency_key == idempotency_key)
@@ -109,9 +172,20 @@ def approve_task(
         session.commit()
         raise ValueError("确认任务已过期")
     require_transition(task.status, ActionStatus.APPROVED)
-    conversation, job = _conversation_job(session, conversation_id)
-    if draft.conversation_id and draft.conversation_id != conversation.id:
-        raise ValueError("草稿与对话不匹配")
+    conversation = None
+    score = None
+    if decision.action_type == "GREETING":
+        if draft.job_score_id is None:
+            raise ValueError("招呼语草稿缺少评分")
+        score, job = _require_greeting_score(session, draft.job_score_id)
+        if conversation_id is not None:
+            raise ValueError("首次招呼尚未建立对话")
+    else:
+        if conversation_id is None:
+            raise ValueError("当前动作必须指定对话")
+        conversation, job = _conversation_job(session, conversation_id)
+        if draft.conversation_id and draft.conversation_id != conversation.id:
+            raise ValueError("草稿与对话不匹配")
     resume = None
     if decision.action_type == "RESUME":
         resume_id = UUID(str(decision.input_snapshot["resume_id"]))
@@ -120,7 +194,10 @@ def approve_task(
             raise ValueError("简历附件不可用")
         _require_eligible_score(session, job.id)
     send_fingerprint = hashlib.sha256(
-        f"{conversation.id}:{decision.action_type}:{draft.content}:{resume.id if resume else ''}".encode()
+        (
+            f"{conversation.id if conversation else job.id}:{decision.action_type}:"
+            f"{draft.content}:{resume.id if resume else ''}"
+        ).encode()
     ).hexdigest()
     duplicate = session.scalar(
         select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == send_fingerprint)
@@ -130,17 +207,26 @@ def approve_task(
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID,
         confirmation_task_id=task.id,
-        conversation_id=conversation.id,
+        policy_decision_id=decision.id,
+        strategy_id=score.strategy_id if score else None,
+        job_id=job.id,
+        conversation_id=conversation.id if conversation else None,
         draft_id=draft.id,
         resume_id=resume.id if resume else None,
         action_type=decision.action_type,
         status=ActionStatus.APPROVED.value,
         content=draft.content if decision.action_type != "RESUME" else None,
-        platform=conversation.platform,
+        platform=conversation.platform if conversation else job.source,
         target_company=job.company_name,
         target_job_title=job.title,
-        target_recruiter=conversation.recruiter_name,
-        target_conversation_key=conversation.external_conversation_id,
+        target_recruiter=(
+            conversation.recruiter_name
+            if conversation
+            else str(decision.input_snapshot["recruiter_name"])
+        ),
+        target_conversation_key=(
+            conversation.external_conversation_id if conversation else None
+        ),
         attachment_name=resume.attachment_name if resume else None,
         idempotency_key=idempotency_key,
         send_fingerprint=send_fingerprint,
@@ -264,10 +350,12 @@ def execute_action(
     session.add(attempt)
     session.commit()
     session.refresh(action)
+    job = session.get(db.Job, action.job_id) if action.job_id else None
     command = ApprovedCommand(
         action_type=action.action_type,
         platform=action.platform,
         conversation_key=action.target_conversation_key,
+        external_job_id=job.external_job_id if job else None,
         company=action.target_company,
         job_title=action.target_job_title,
         recruiter=action.target_recruiter,
@@ -319,10 +407,18 @@ def list_tasks(session: Session) -> list[dict[str, object]]:
                 "content": draft.content if draft else None,
                 "confidence": float(draft.confidence) if draft else None,
                 "expires_at": task.expires_at,
-                "platform": conversation.platform if conversation else None,
+                "platform": conversation.platform if conversation else (job.source if job else None),
                 "company": job.company_name if job else None,
                 "job_title": job.title if job else None,
-                "recruiter": conversation.recruiter_name if conversation else None,
+                "recruiter": (
+                    conversation.recruiter_name
+                    if conversation
+                    else (
+                        decision.input_snapshot.get("recruiter_name")
+                        if decision
+                        else None
+                    )
+                ),
             }
         )
     return result
@@ -342,7 +438,12 @@ def _finish(
     attempt.external_reference = result.external_reference
     attempt.evidence_hash = result.evidence_hash
     attempt.finished_at = datetime.now(UTC)
-    if target is ActionStatus.SUCCEEDED and action.action_type == "RESUME" and action.resume_id:
+    if (
+        target is ActionStatus.SUCCEEDED
+        and action.action_type == "RESUME"
+        and action.resume_id
+        and action.conversation_id
+    ):
         session.add(
             db.ResumeSendRecord(
                 conversation_id=action.conversation_id,
@@ -404,6 +505,42 @@ def _require_eligible_score(session: Session, job_id: UUID) -> None:
         raise ValueError("职位不满足简历发送条件")
 
 
+def _require_greeting_score(
+    session: Session,
+    score_id: UUID,
+) -> tuple[db.JobScore, db.Job]:
+    score = session.get(db.JobScore, score_id)
+    if score is None:
+        raise ResourceNotFoundError("评分不存在")
+    job = session.get(db.Job, score.job_id)
+    strategy = session.get(db.JobStrategy, score.strategy_id)
+    profile = session.get(db.CandidateProfile, score.candidate_profile_id)
+    latest_score_id = session.scalar(
+        select(db.JobScore.id)
+        .where(
+            db.JobScore.job_id == score.job_id,
+            db.JobScore.strategy_id == score.strategy_id,
+        )
+        .order_by(db.JobScore.created_at.desc())
+        .limit(1)
+    )
+    if (
+        job is None
+        or strategy is None
+        or profile is None
+        or latest_score_id != score.id
+        or strategy.version != score.strategy_version
+        or profile.version != score.profile_version
+        or score.hard_rejected
+        or score.effective_job_status != "OPEN"
+        or score.total_score < 80
+        or not score.llm_recommends_proactive_contact
+        or not score.automation_eligible
+    ):
+        raise ValueError("职位不满足主动沟通条件或评分已过期")
+    return score, job
+
+
 def _get_action(session: Session, action_id: UUID) -> db.ActionQueue:
     action = session.get(db.ActionQueue, action_id)
     if action is None or action.user_id != DEFAULT_USER_ID:
@@ -417,6 +554,7 @@ def _response(action: db.ActionQueue) -> ActionResponse:
         confirmation_task_id=action.confirmation_task_id,
         action_type=action.action_type,
         status=action.status,
+        job_id=action.job_id,
         conversation_id=action.conversation_id,
         content=action.content,
         attachment_name=action.attachment_name,

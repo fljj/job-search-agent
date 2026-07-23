@@ -12,6 +12,25 @@
       <span data-testid="salary">35K-45K</span>
       <span data-testid="recruiter-name">张招聘</span>
       <section data-testid="job-description">Python、FastAPI、PostgreSQL，5 年后端经验。</section>
+      <button data-testid="start-chat" type="button" onclick="openChat()">立即沟通</button>
     </main>
+    <section data-testid="chat-panel" data-conversation-id="boss-chat-new" hidden>
+      <textarea data-testid="message-composer"></textarea>
+      <button data-testid="send-message" type="button" onclick="sendMessage()">发送</button>
+      <div id="messages"></div>
+    </section>
+    <script>
+      function openChat() {
+        document.querySelector('[data-testid="chat-panel"]').hidden = false;
+      }
+      function sendMessage() {
+        const composer = document.querySelector('[data-testid="message-composer"]');
+        const message = document.createElement('div');
+        message.dataset.testid = 'message-item';
+        message.dataset.direction = 'outbound';
+        message.textContent = composer.value;
+        document.querySelector('#messages').appendChild(message);
+      }
+    </script>
   </body>
 </html>

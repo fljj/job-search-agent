@@ -14,7 +14,8 @@ class ExecutionOutcome(StrEnum):
 class ApprovedCommand(BaseModel):
     action_type: str
     platform: str
-    conversation_key: str
+    conversation_key: str | None = None
+    external_job_id: str | None = None
     company: str
     job_title: str
     recruiter: str

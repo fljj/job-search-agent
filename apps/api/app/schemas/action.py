@@ -4,7 +4,12 @@ from pydantic import BaseModel, Field
 
 
 class ApproveRequest(BaseModel):
-    conversation_id: UUID
+    conversation_id: UUID | None = None
+
+
+class GreetingConfirmationRequest(BaseModel):
+    draft_id: UUID
+    recruiter_name: str = Field(min_length=1, max_length=100)
 
 
 class ModifyRequest(BaseModel):
@@ -25,7 +30,8 @@ class ActionResponse(BaseModel):
     confirmation_task_id: UUID | None
     action_type: str
     status: str
-    conversation_id: UUID
+    job_id: UUID | None
+    conversation_id: UUID | None
     content: str | None
     attachment_name: str | None
     failure_code: str | None

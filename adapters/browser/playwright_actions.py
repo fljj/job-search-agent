@@ -45,30 +45,75 @@ class PlaywrightActionExecutor:
                 platform,
                 selectors,
                 self.config.version,
+                expected_company=command.company,
+                expected_job_title=command.job_title,
                 expected_recruiter=command.recruiter,
             )
-            if check.status is not SessionStatus.SESSION_READY or not check.conversation:
+            if check.status is not SessionStatus.SESSION_READY:
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_FINAL,
                     error_code=check.reason_codes[0] if check.reason_codes else "PREFLIGHT_FAILED",
                 )
-            if check.conversation.external_conversation_id != command.conversation_key:
+            if command.action_type == "GREETING":
+                if not check.job:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="JOB_PAGE_REQUIRED",
+                    )
+                if (
+                    command.external_job_id
+                    and check.job.external_job_id != command.external_job_id
+                ):
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="JOB_TARGET_MISMATCH",
+                    )
+                if (
+                    not check.job.recruiter_name
+                    or command.recruiter not in check.job.recruiter_name
+                    or check.job.source_status != "OPEN"
+                ):
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="RECRUITER_OR_JOB_STATUS_MISMATCH",
+                    )
+                if not command.content:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="EMPTY_CONTENT",
+                    )
+                page.locator(selectors.job_open_marker).first.click()
+                performed = True
+                page.locator(selectors.message_composer).wait_for(
+                    state="visible", timeout=3000
+                )
+                page.locator(selectors.message_composer).fill(command.content)
+                page.locator(selectors.message_send_button).click()
+                page.wait_for_timeout(50)
+                matched = page.locator(selectors.sent_message_items).filter(
+                    has_text=command.content
+                )
+            elif not check.conversation:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_FINAL,
+                    error_code="CONVERSATION_PAGE_REQUIRED",
+                )
+            elif check.conversation.external_conversation_id != command.conversation_key:
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_FINAL,
                     error_code="CONVERSATION_TARGET_MISMATCH",
                 )
-            company = reader.text(selectors.company)
-            title = reader.text(selectors.job_title)
-            if (
-                not company
-                or command.company not in company
-                or not title
-                or command.job_title not in title
+            elif (
+                not check.conversation.company_name
+                or command.company not in check.conversation.company_name
+                or not check.conversation.job_title
+                or command.job_title not in check.conversation.job_title
             ):
                 return ExecutionResult(
-                    outcome=ExecutionOutcome.FAILED_FINAL, error_code="JOB_TARGET_MISMATCH"
+                    outcome=ExecutionOutcome.FAILED_FINAL,
+                    error_code="JOB_TARGET_MISMATCH",
                 )
-            if command.action_type in {"GREETING", "REPLY"}:
+            elif command.action_type == "REPLY":
                 if not command.content:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.FAILED_FINAL, error_code="EMPTY_CONTENT"

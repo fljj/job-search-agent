@@ -44,8 +44,8 @@ def read_fixture(page: Page) -> ReadResult:
     )
 
 
-def approved_command(action_type: str, **changes: str) -> ApprovedCommand:
-    values = {
+def approved_command(action_type: str, **changes: str | None) -> ApprovedCommand:
+    values: dict[str, str | None] = {
         "action_type": action_type,
         "platform": "BOSS",
         "conversation_key": "boss-chat-1",
@@ -96,6 +96,37 @@ def test_sends_text_and_reads_back_result_on_fixture_page() -> None:
         assert page.locator("[data-direction='outbound']").filter(
             has_text="您好，可以发送。"
         ).count() == 1
+
+
+def test_starts_job_conversation_and_sends_greeting_once() -> None:
+    with fixture_page("job-detail.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            approved_command(
+                "GREETING",
+                conversation_key=None,
+                external_job_id="boss-job-1",
+                content="您好，我有多年 Python 后端经验，希望进一步沟通。",
+            ),
+        )
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert page.locator("[data-direction='outbound']").count() == 1
+
+
+def test_greeting_target_mismatch_stops_before_click() -> None:
+    with fixture_page("job-detail.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            approved_command(
+                "GREETING",
+                conversation_key=None,
+                external_job_id="another-job",
+                content="不应发送",
+            ),
+        )
+        assert result.outcome is ExecutionOutcome.FAILED_FINAL
+        assert result.error_code == "JOB_TARGET_MISMATCH"
+        assert page.locator("[data-testid='chat-panel']").is_hidden()
 
 
 def test_selects_unique_existing_resume_and_reads_back_result() -> None:

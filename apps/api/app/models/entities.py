@@ -487,7 +487,12 @@ class ActionQueue(TimestampMixin, Base):
         ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
     )
     authorization_source: Mapped[str] = mapped_column(String(20), default="MANUAL")
-    conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id"))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id"), nullable=True
+    )
     draft_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generated_drafts.id"), nullable=True)
     resume_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("resumes.id"), nullable=True)
     action_type: Mapped[str] = mapped_column(String(30))
@@ -497,7 +502,7 @@ class ActionQueue(TimestampMixin, Base):
     target_company: Mapped[str] = mapped_column(String(200))
     target_job_title: Mapped[str] = mapped_column(String(200))
     target_recruiter: Mapped[str] = mapped_column(String(100))
-    target_conversation_key: Mapped[str] = mapped_column(String(200))
+    target_conversation_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     attachment_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(255))
     send_fingerprint: Mapped[str] = mapped_column(String(64))

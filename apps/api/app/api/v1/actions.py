@@ -8,12 +8,14 @@ from apps.api.app.core.database import get_session
 from apps.api.app.schemas.action import (
     ApproveRequest,
     ExecuteRequest,
+    GreetingConfirmationRequest,
     ModifyRequest,
     ResumeConfirmationRequest,
 )
 from apps.api.app.services.action_service import (
     approve_retry,
     approve_task,
+    create_greeting_confirmation,
     create_resume_confirmation,
     execute_action,
     list_tasks,
@@ -35,6 +37,22 @@ def resume_task(
 ) -> dict[str, object]:
     return response(
         {"id": create_resume_confirmation(session, payload.conversation_id, payload.resume_id)}
+    )
+
+
+@router.post("/confirmation-tasks/greeting")
+def greeting_task(
+    payload: GreetingConfirmationRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(
+        {
+            "id": create_greeting_confirmation(
+                session,
+                payload.draft_id,
+                payload.recruiter_name,
+            )
+        }
     )
 
 

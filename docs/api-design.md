@@ -273,13 +273,16 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 ## 12. 时间确认与执行 API
 
 - `GET /api/v1/confirmation-tasks`：返回草稿、动作类型、状态、原因码、置信度和过期时间。
+- `POST /api/v1/confirmation-tasks/greeting`：将已通过 80 分、开放状态、模型建议和事实校验的招呼语转为首次真实联调待确认任务；请求包含草稿 ID 和页面核验到的招聘人。
 - `POST /api/v1/confirmation-tasks/{id}/approve`：必须携带 `Idempotency-Key`，仅生成 `APPROVED` 动作，不立即发送。
 - `POST /api/v1/confirmation-tasks/{id}/modify`：敏感检查后废弃旧任务，创建新的 `PENDING_APPROVAL` 任务。
 - `POST /api/v1/confirmation-tasks/{id}/reject`：将未批准任务终止为 `CANCELLED`。
 - `POST /api/v1/actions/{id}/execute`：原子占用已批准动作，执行前重新复核页面目标并发送。
 - `POST /api/v1/actions/{id}/retry`：仅允许用户将 `FAILED_RETRYABLE` 重新批准；`OUTCOME_UNKNOWN` 不可重试。
 
-确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。普通回复、低分婉拒和简历发送不使用本组确认 API。
+确认任务有效期由 `conversation-policy.json` 的 `confirmation_ttl_hours` 配置。首次真实
+招呼联调按 `development-plan.md` 要求人工确认；稳定后的普通自动招呼不重复要求确认。
+普通回复、低分婉拒和按策略允许的简历发送不使用本组确认 API。
 
 ## 13. 第五阶段安全自动化 API
 
