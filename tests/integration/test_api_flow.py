@@ -84,6 +84,7 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "max_posted_days": 30, "core_required_skills": ["Java"], "version": 1,
     })
     assert strategy_response.status_code == 200
+    assert strategy_response.json()["data"]["priority"] == 100
     strategy_id = strategy_response.json()["data"]["id"]
 
     profile_data = profile_response.json()["data"]
@@ -133,6 +134,8 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     assert first_score.status_code == 200
     assert first_score.json()["data"]["grade"] == "A"
     assert first_score.json()["data"]["eligibility"] == "ELIGIBLE"
+    assert first_score.json()["data"]["scoring_version"].startswith("legacy:")
+    assert first_score.json()["data"]["automation_eligible"] is False
     assert duplicate_score.json()["data"]["id"] == first_score.json()["data"]["id"]
     score_history = client.get(f"/api/v1/jobs/{job_id}/scores?strategy_id={strategy_id}")
     assert score_history.json()["data"]["total"] == 1
@@ -183,9 +186,9 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
 
     automation_setting = {
         "scope_type": "GLOBAL", "scope_key": "GLOBAL", "enabled": False,
-        "paused": False, "auto_greet_enabled": True, "auto_greet_min_score": 70,
+        "paused": False, "auto_greet_enabled": True, "auto_greet_min_score": 80,
         "auto_reply_enabled": True, "auto_reply_min_confidence": 0.9,
-        "auto_resume_enabled": True, "auto_resume_min_score": 70,
+        "auto_resume_enabled": True, "auto_resume_min_score": 60,
         "hourly_limit": 10, "daily_limit": 50,
     }
     saved_setting = client.put("/api/v1/automation/settings", json=automation_setting)
@@ -216,8 +219,8 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "action_type": "REPLY", "conversation_id": auto_conversation["id"],
         "draft_id": auto_draft["id"], "cdp_url": "http://127.0.0.1:9222",
     })
-    assert auto_sent.json()["data"]["decision"] == "ALLOW_AUTO"
-    assert auto_sent.json()["data"]["action_status"] == "SUCCEEDED"
+    assert auto_sent.json()["data"]["decision"] == "DENY"
+    assert auto_sent.json()["data"]["reason_codes"] == ["JOB_NOT_ELIGIBLE_OR_OPEN"]
 
     time_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
         "external_message_id": "message-2", "content": "周二几点可以电话面试？",

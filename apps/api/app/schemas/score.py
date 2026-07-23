@@ -26,3 +26,8 @@ class ScoreResponse(ScoreResult):
     strategy_version: int
     profile_version: int
     input_fingerprint: str
+    prompt_version: str | None = None
+    llm_invocation_id: UUID | None = None
+    llm_recommends_proactive_contact: bool = False
+    llm_contact_reason: str | None = None
+    automation_eligible: bool = False

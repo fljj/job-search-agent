@@ -10,7 +10,7 @@ from packages.policy_engine.automation import (
 
 def context(**changes: object) -> AutomationContext:
     values: dict[str, object] = {
-        "action_type": "GREETING", "score": 70, "grade": "A",
+        "action_type": "GREETING", "score": 80, "grade": "A",
         "eligible": True, "job_open": True,
     }
     values.update(changes)
@@ -34,11 +34,13 @@ def test_ineligible_closed_and_c_grade_never_auto(changes: dict[str, object]) ->
     assert decision is not AutomationDecision.ALLOW_AUTO
 
 
-def test_a_grade_greeting_is_auto_and_b_requires_explicit_60_threshold() -> None:
+def test_greeting_requires_fixed_80_threshold() -> None:
     assert evaluate_automation(context(), rules())[0] is AutomationDecision.ALLOW_AUTO
-    b_grade = context(score=60, grade="B")
-    assert evaluate_automation(b_grade, rules())[0] is AutomationDecision.REQUIRE_CONFIRMATION
-    assert evaluate_automation(b_grade, rules(auto_greet_min_score=60))[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(
+        context(score=79), rules()
+    )[0] is AutomationDecision.REQUIRE_CONFIRMATION
+    with pytest.raises(ValueError):
+        rules(auto_greet_min_score=79)
 
 
 @pytest.mark.parametrize("intent", [
@@ -57,7 +59,10 @@ def test_reply_requires_verified_facts_confidence_and_original_allow() -> None:
 
 
 def test_resume_requires_explicit_request_available_attachment_and_a_grade() -> None:
-    resume = context(action_type="RESUME", explicit_resume_request=True, resume_available=True)
+    resume = context(
+        action_type="RESUME", score=60, grade="B",
+        explicit_resume_request=True, resume_available=True,
+    )
     assert evaluate_automation(resume, rules())[0] is AutomationDecision.ALLOW_AUTO
     assert evaluate_automation(resume.model_copy(update={"explicit_resume_request": False}), rules())[0] is AutomationDecision.REQUIRE_CONFIRMATION
     assert evaluate_automation(resume.model_copy(update={"resume_already_sent": True}), rules())[0] is AutomationDecision.DENY

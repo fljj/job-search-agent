@@ -121,6 +121,7 @@ class IndustryRule(BaseModel):
 class Strategy(BaseModel):
     name: str
     enabled: bool = True
+    priority: int = Field(default=100, ge=1)
     title_rules: list[TitleRule]
     accepted_seniority_levels: list[SeniorityLevel] = Field(default_factory=list)
     work_mode_rules: list[WorkModeRule]

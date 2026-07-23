@@ -13,13 +13,31 @@ branch_labels = None
 depends_on = None
 
 
+def _column_names(table_name: str) -> set[str]:
+    return {column["name"] for column in sa.inspect(op.get_bind()).get_columns(table_name)}
+
+
+def _foreign_key_columns(table_name: str) -> set[tuple[str, ...]]:
+    return {
+        tuple(foreign_key["constrained_columns"])
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys(table_name)
+    }
+
+
 def upgrade() -> None:
     op.alter_column("action_queue", "confirmation_task_id", existing_type=postgresql.UUID(), nullable=True)
-    op.add_column("action_queue", sa.Column("policy_decision_id", postgresql.UUID(), nullable=True))
-    op.add_column("action_queue", sa.Column("strategy_id", postgresql.UUID(), nullable=True))
-    op.add_column("action_queue", sa.Column("authorization_source", sa.String(20), nullable=False, server_default="MANUAL"))
-    op.create_foreign_key("fk_action_policy_decision", "action_queue", "policy_decisions", ["policy_decision_id"], ["id"])
-    op.create_foreign_key("fk_action_strategy", "action_queue", "job_strategies", ["strategy_id"], ["id"])
+    columns = _column_names("action_queue")
+    if "policy_decision_id" not in columns:
+        op.add_column("action_queue", sa.Column("policy_decision_id", postgresql.UUID(), nullable=True))
+    if "strategy_id" not in columns:
+        op.add_column("action_queue", sa.Column("strategy_id", postgresql.UUID(), nullable=True))
+    if "authorization_source" not in columns:
+        op.add_column("action_queue", sa.Column("authorization_source", sa.String(20), nullable=False, server_default="MANUAL"))
+    foreign_keys = _foreign_key_columns("action_queue")
+    if ("policy_decision_id",) not in foreign_keys:
+        op.create_foreign_key("fk_action_policy_decision", "action_queue", "policy_decisions", ["policy_decision_id"], ["id"])
+    if ("strategy_id",) not in foreign_keys:
+        op.create_foreign_key("fk_action_strategy", "action_queue", "job_strategies", ["strategy_id"], ["id"])
     op.create_table(
         "automation_settings",
         sa.Column("id", postgresql.UUID(), primary_key=True),

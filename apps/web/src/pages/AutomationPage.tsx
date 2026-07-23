@@ -20,8 +20,8 @@ export function AutomationPage() {
       description="全局、平台和策略配置只会逐层收紧权限。敏感问题、具体时间、硬性排除职位和页面身份异常不能通过配置绕过。" />
     <Card title="自动化范围配置"><Form form={form} layout="vertical" onFinish={(value) => void save(value)}
       initialValues={{ scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
-        auto_greet_enabled: false, auto_greet_min_score: 70, auto_reply_enabled: false,
-        auto_reply_min_confidence: .9, auto_resume_enabled: false, auto_resume_min_score: 70,
+        auto_greet_enabled: false, auto_greet_min_score: 80, auto_reply_enabled: false,
+        auto_reply_min_confidence: .9, auto_resume_enabled: false, auto_resume_min_score: 60,
         hourly_limit: 10, daily_limit: 50 }}>
       <Form.Item name="scope_type" label="范围"><Select options={[
         { value: 'GLOBAL', label: '全局' }, { value: 'PLATFORM', label: '平台' },
@@ -36,7 +36,7 @@ export function AutomationPage() {
         <Form.Item name="auto_resume_enabled" label="自动简历" valuePropName="checked"><Switch /></Form.Item>
       </Space>
       <Space wrap>
-        <Form.Item name="auto_greet_min_score" label="招呼最低分"><InputNumber min={60} max={100} /></Form.Item>
+        <Form.Item name="auto_greet_min_score" label="招呼最低分"><InputNumber min={80} max={100} /></Form.Item>
         <Form.Item name="auto_reply_min_confidence" label="回复最低置信度"><InputNumber min={.75} max={1} step={.01} /></Form.Item>
         <Form.Item name="auto_resume_min_score" label="简历最低分"><InputNumber min={60} max={100} /></Form.Item>
         <Form.Item name="hourly_limit" label="每小时上限"><InputNumber min={1} max={100} /></Form.Item>

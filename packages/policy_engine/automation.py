@@ -13,11 +13,11 @@ class AutomationRules(BaseModel):
     enabled: bool = False
     paused: bool = False
     auto_greet_enabled: bool = False
-    auto_greet_min_score: int = Field(default=70, ge=60, le=100)
+    auto_greet_min_score: int = Field(default=80, ge=80, le=100)
     auto_reply_enabled: bool = False
     auto_reply_min_confidence: float = Field(default=0.90, ge=0.75, le=1)
     auto_resume_enabled: bool = False
-    auto_resume_min_score: int = Field(default=70, ge=60, le=100)
+    auto_resume_min_score: int = Field(default=60, ge=60, le=100)
     hourly_limit: int = Field(default=10, ge=1, le=100)
     daily_limit: int = Field(default=50, ge=1, le=1000)
 

@@ -19,7 +19,7 @@ from packages.scoring.models import (
 )
 from packages.scoring.reasons import build_match_reasons, build_risk_notes
 
-SCORING_VERSION = "1.0.0"
+SCORING_VERSION = "legacy:1.0.0"
 
 
 def score_job(context: ScoringContext, *, now: datetime | None = None) -> ScoreResult:

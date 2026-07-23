@@ -67,11 +67,11 @@ users
 
 ### 3.5 `job_strategies`
 
-字段：`id`、`user_id`、`candidate_profile_id`、`name`、`enabled`、`accepted_seniority_levels JSONB`、`max_posted_days`、`accept_outsourcing`、`accept_headhunter`、`version`、`created_at`、`updated_at`。
+字段：`id`、`user_id`、`candidate_profile_id`、`name`、`enabled`、`priority`、`accepted_seniority_levels JSONB`、`max_posted_days`、`accept_outsourcing`、`accept_headhunter`、`version`、`created_at`、`updated_at`。
 
 唯一约束：`(user_id, name)`。
 
-第一阶段不保存自动招呼、自动回复和自动简历配置；这些字段在对应功能进入开发阶段后增加。
+`priority` 为正整数，数值越小优先级越高，用于未绑定策略的入站对话在同分时选择策略。自动化开关保存在 `automation_settings`，不复制到策略聚合中。
 
 ### 3.6 `job_title_rules`
 
@@ -134,21 +134,27 @@ users
 
 ### 3.15 `job_scores`
 
-字段：`id`、`job_id`、`strategy_id`、`candidate_profile_id`、`parsed_job_detail_id`、`strategy_version`、`profile_version`、`scoring_version`、`input_fingerprint`、`effective_job_status`、`action_blockers JSONB`、七个维度分、`total_score`、`grade`、`eligibility`、`hard_rejected`、`match_reasons JSONB`、`risk_notes JSONB`、`input_snapshot JSONB`、`created_at`。
+字段：`id`、`job_id`、`strategy_id`、`candidate_profile_id`、`parsed_job_detail_id`、`strategy_version`、`profile_version`、`scoring_version`、`prompt_version`、`llm_invocation_id`、`input_fingerprint`、`effective_job_status`、`action_blockers JSONB`、七个维度分、`total_score`、`grade`、`eligibility`、`hard_rejected`、`llm_recommends_proactive_contact`、`llm_contact_reason`、`automation_eligible`、`match_reasons JSONB`、`risk_notes JSONB`、`input_snapshot JSONB`、`created_at`。
 
 校验：七个维度不超过各自上限；总分为 0–100；等级与总分一致；`hard_rejected = true` 时 `eligibility = FILTERED_OUT`。
 
-唯一约束：`input_fingerprint`。该指纹由职位、策略版本、候选人资料版本、解析记录和评分规则版本的稳定标识生成。
+唯一约束：`input_fingerprint`。该指纹由职位、策略版本、候选人资料版本、解析记录、评分规则版本、提示词版本、供应商、模型名称和影响输出的模型参数生成。`job_scores` 只保存校验成功的评分，失败调用不能被当作有效评分复用。
 
 ### 3.16 `job_score_details`
 
-字段：`id`、`job_score_id`、`dimension`、`rule_code`、`score_awarded`、`max_score`、`matched_facts JSONB`、`explanation`、`sort_order`。
+字段：`id`、`job_score_id`、`dimension`、`rule_code`、`score_awarded`、`max_score`、`evidence_refs JSONB`、`matched_facts JSONB`、`explanation`、`sort_order`。
 
 ### 3.17 `job_rejections`
 
 字段：`id`、`job_score_id`、`rule_code`、`message`、`evidence JSONB`、`sort_order`、`created_at`。
 
 唯一约束：`(job_score_id, rule_code)`。
+
+### 3.18 `llm_invocations`
+
+字段：`id`、`user_id`、`purpose`、`provider`、`model`、`prompt_version`、`input_hash`、`status`、`provider_response_id`、`latency_ms`、`input_tokens`、`output_tokens`、`failure_code`、`attempt_number`、`created_at`。
+
+只保存受控输入哈希、调用元数据和错误码；默认不保存完整提示词、完整模型响应或 API Key。相同业务评分的每次供应商调用均追加记录，便于审计限流、超时和非法输出。
 
 ## 4. 第一阶段枚举
 
@@ -159,7 +165,10 @@ users
 - `Eligibility`：`ELIGIBLE/FILTERED_OUT`
 - `TitleRuleType`：`INCLUDE/EXCLUDE`
 - `IndustryRuleType`：`PREFERRED/ACCEPTABLE/EXCLUDED`
-- `ParserType`：`RULE/FAKE_LLM/HYBRID_TEST`
+- `ParserType`：`RULE/FAKE_LLM/QWEN`
+- `ScoreStatus`：`PENDING/SUCCEEDED/FAILED`
+- `LlmProvider`：`FAKE/QWEN/ZHIPU`
+- `LlmInvocationPurpose`：`JOB_PARSE/JOB_SCORE/INTENT_CLASSIFY/GREETING/REPLY/CONVERSATION_EVALUATE`
 - `InterpolationType`：`STEP/LINEAR`
 
 数据库建议使用字符串列和检查约束，避免 PostgreSQL 原生枚举升级复杂度。
@@ -168,11 +177,11 @@ users
 
 - `knowledge_items`：候选人事实、来源、敏感度、自动引用权限、验证和有效时间；`(user_id, category, normalized_key)` 唯一。
 - `resumes`：平台内附件名、适用方向和可用状态；`(user_id, platform, attachment_name)` 唯一。
-- `conversations`：模拟平台对话与职位归属；`(user_id, platform, external_conversation_id)` 唯一。
+- `conversations`：平台对话、职位归属、`strategy_id`、`latest_job_score_id` 和状态；`(user_id, platform, external_conversation_id)` 唯一。策略绑定变化必须记录审计。
 - `messages`：原始消息、方向、多意图和状态；`(conversation_id, external_message_id)` 唯一。
 - `generated_drafts`：招呼或回复草稿、事实引用、置信度、风险和生成器版本；`input_fingerprint` 唯一。
 - `policy_decisions`：动作类型、权限结果、原因码、策略版本和输入快照。
-- `confirmation_tasks`：第二阶段只保存 `PENDING_APPROVAL` 确认数据，不提供执行转移；`decision_id` 唯一。
+- `confirmation_tasks`：只保存电话、面试具体时间和日历写操作的 `PENDING_APPROVAL` 数据；`decision_id` 唯一。
 
 第二阶段幂等：模拟消息使用外部消息 ID，草稿使用消息/评分、知识版本和生成器版本生成指纹。
 
@@ -197,7 +206,7 @@ users
 
 - `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及小时/每日限额；`(user_id, scope_type, scope_key)` 唯一。
 - `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
-- `action_queue.policy_decision_id`：自动动作直接关联确定性策略决策。
+- `action_queue.policy_decision_id`：自动动作关联“模型建议 + 确定性约束”的最终策略决策。
 - `action_queue.strategy_id`：保存自动动作采用的策略范围。
 - 自动动作不创建人工批准，因此 `confirmation_task_id` 可空；人工动作仍必须关联确认任务。
 
@@ -241,7 +250,7 @@ SESSION_PAUSED
 
 对话状态：`NEW/ACTIVE/WAITING_RECRUITER/WAITING_USER/SCHEDULING/SCHEDULE_CONFIRMED/ENDED`。
 
-消息状态：`RECEIVED/DRAFT/PENDING_APPROVAL/APPROVED/SENDING/SENT/FAILED/OUTCOME_UNKNOWN`。
+消息状态：`RECEIVED/ANALYZING/DRAFT/PENDING_APPROVAL/APPROVED/SENDING/SENT/DECLINED/FAILED/OUTCOME_UNKNOWN`。
 
 对话状态不能替代单条消息或动作状态。
 
@@ -252,7 +261,7 @@ SESSION_PAUSED
 - JD 导入使用来源 ID 或内容哈希唯一约束；
 - API 重复导入返回既有资源和 `DUPLICATE`，不创建硬性排除；
 - 策略更新使用 `version` 乐观锁；
-- 同一评分请求可以通过 `(job_id, strategy_version, profile_version, parsed_job_detail_id, scoring_version)` 生成请求指纹，允许返回已有结果或明确创建新版本。
+- 同一评分请求通过职位、策略/资料/解析版本、评分/提示词版本、供应商、模型和模型参数生成请求指纹；只允许复用 `SUCCEEDED` 结果。
 
 ### 6.2 后续写操作
 

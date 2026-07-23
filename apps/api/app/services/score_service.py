@@ -138,5 +138,9 @@ def _response(score: db.JobScore) -> ScoreResponse:
         effective_job_status=score.effective_job_status, action_blockers=score.action_blockers,
         dimension_scores=dimensions, details=details, rejection_reasons=rejections,
         match_reasons=score.match_reasons, risk_notes=score.risk_notes,
-        scoring_version=score.scoring_version,
+        scoring_version=score.scoring_version, prompt_version=score.prompt_version,
+        llm_invocation_id=score.llm_invocation_id,
+        llm_recommends_proactive_contact=score.llm_recommends_proactive_contact,
+        llm_contact_reason=score.llm_contact_reason,
+        automation_eligible=score.automation_eligible,
     )

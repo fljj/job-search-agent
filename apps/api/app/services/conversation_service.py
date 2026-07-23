@@ -191,6 +191,8 @@ def _get_conversation(session: Session, conversation_id: object) -> db.Conversat
 
 def _conversation_response(conversation: db.Conversation) -> dict[str, object]:
     return {"id": conversation.id, "job_id": conversation.job_id,
+            "strategy_id": conversation.strategy_id,
+            "latest_job_score_id": conversation.latest_job_score_id,
             "platform": conversation.platform,
             "external_conversation_id": conversation.external_conversation_id,
             "recruiter_name": conversation.recruiter_name, "state": conversation.state}

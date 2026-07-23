@@ -5,7 +5,7 @@ import { api } from '../api/client'
 interface Strategy { id: string; name: string; version: number; [key: string]: unknown }
 
 const template = JSON.stringify({
-  candidate_profile_id: '请填写候选人资料 ID', name: 'Java 后端岗位', enabled: true,
+  candidate_profile_id: '请填写候选人资料 ID', name: 'Java 后端岗位', enabled: true, priority: 100,
   title_rules: [{ rule_type: 'INCLUDE', pattern: 'Java后端', score: 15 }],
   accepted_seniority_levels: ['SENIOR', 'LEAD', 'ARCHITECT'],
   work_mode_rules: [

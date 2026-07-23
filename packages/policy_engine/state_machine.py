@@ -1,6 +1,14 @@
 from enum import StrEnum
 
 
+class ActionType(StrEnum):
+    GREETING = "GREETING"
+    REPLY = "REPLY"
+    RESUME = "RESUME"
+    LOW_SCORE_DECLINE = "LOW_SCORE_DECLINE"
+    SCHEDULE_REPLY = "SCHEDULE_REPLY"
+
+
 class ActionStatus(StrEnum):
     PENDING_APPROVAL = "PENDING_APPROVAL"
     APPROVED = "APPROVED"

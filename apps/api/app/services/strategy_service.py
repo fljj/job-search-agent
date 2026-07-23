@@ -82,6 +82,7 @@ def to_domain(strategy: db.JobStrategy) -> Strategy:
 def _apply(strategy: db.JobStrategy, payload: StrategyPayload) -> None:
     strategy.name = payload.name
     strategy.enabled = payload.enabled
+    strategy.priority = payload.priority
     strategy.candidate_profile_id = payload.candidate_profile_id
     strategy.accepted_seniority_levels = [item.value for item in payload.accepted_seniority_levels]
     strategy.max_posted_days = payload.max_posted_days
@@ -121,7 +122,7 @@ def _apply(strategy: db.JobStrategy, payload: StrategyPayload) -> None:
 def _response(strategy: db.JobStrategy) -> StrategyResponse:
     return StrategyResponse(
         id=strategy.id, candidate_profile_id=strategy.candidate_profile_id, name=strategy.name,
-        enabled=strategy.enabled, version=strategy.version,
+        enabled=strategy.enabled, priority=strategy.priority, version=strategy.version,
         accepted_seniority_levels=strategy.accepted_seniority_levels,
         max_posted_days=strategy.max_posted_days,
         accept_outsourcing=strategy.accept_outsourcing,
