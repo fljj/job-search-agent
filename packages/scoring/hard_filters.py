@@ -72,6 +72,18 @@ def evaluate_hard_filters(context: ScoringContext) -> list[RejectionReason]:
         reasons.append(_reason("HEADHUNTER_NOT_ACCEPTED", "策略不接受猎头职位"))
     if parsed.internship_detected or parsed.seniority_level == SeniorityLevel.INTERN:
         reasons.append(_reason("INTERNSHIP_POSITION", "实习岗位不符合策略"))
+    if (
+        parsed.full_time_bachelor_required
+        and strategy.reject_full_time_bachelor_required
+        and context.candidate.bachelor_full_time is False
+    ):
+        reasons.append(
+            _reason(
+                "FULL_TIME_BACHELOR_REQUIRED",
+                "职位明确要求全日制本科，候选人学历形式不符合",
+                {"requirement": "全日制本科"},
+            )
+        )
     if (parsed.seniority_level == SeniorityLevel.JUNIOR
             and SeniorityLevel.JUNIOR not in strategy.accepted_seniority_levels):
         reasons.append(_reason("JUNIOR_POSITION", "策略不接受初级岗位"))

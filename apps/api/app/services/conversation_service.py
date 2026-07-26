@@ -201,6 +201,30 @@ def create_reply_draft(
     if message.status == "SUPERSEDED":
         raise ValueError("消息已被同一会话中的后续消息聚合")
     conversation = _get_conversation(session, message.conversation_id)
+    education_reply = _full_time_education_reply(session, message)
+    if education_reply is not None:
+        fingerprint = _fingerprint(
+            "REPLY",
+            message.id,
+            "FULL_TIME_EDUCATION_DISCLOSURE",
+            _knowledge_versions(session),
+        )
+        existing = session.scalar(
+            select(db.GeneratedDraft).where(
+                db.GeneratedDraft.input_fingerprint == fingerprint
+            )
+        )
+        if existing:
+            return _draft_response(session, existing)
+        return _persist_draft(
+            session,
+            education_reply,
+            fingerprint,
+            "REPLY",
+            conversation.id,
+            message.id,
+            None,
+        )
     qualification, qualification_evidence = refresh_qualification(
         session, conversation, message=message
     )
@@ -325,7 +349,10 @@ def create_greeting_draft(
         profile,
         parsed.required_skills + parsed.preferred_skills,
     )
-    facts = profile_facts + _knowledge_facts(session)
+    facts = profile_facts + [
+        fact for fact in _knowledge_facts(session)
+        if fact.category.upper() != "EDUCATION"
+    ]
     usable = [
         fact
         for fact in facts
@@ -844,7 +871,10 @@ def _build_scored_reply(
         raise ValueError("回复上下文缺少策略或候选人资料")
     facts = _profile_facts(
         profile, parsed.required_skills + parsed.preferred_skills
-    ) + _knowledge_facts(session)
+    ) + [
+        fact for fact in _knowledge_facts(session)
+        if fact.category.upper() != "EDUCATION"
+    ]
     recent = session.scalars(
         select(db.Message)
         .where(db.Message.conversation_id == conversation.id)
@@ -902,6 +932,40 @@ def _build_scored_reply(
         facts,
         get_conversation_policy(),
         now=datetime.now(UTC),
+    )
+
+
+def _full_time_education_reply(
+    session: Session,
+    message: db.Message,
+) -> DraftResult | None:
+    inquiry_terms = ("全日制", "统招", "学历性质")
+    if not any(term in message.content for term in inquiry_terms):
+        return None
+    profile = session.scalar(
+        select(db.CandidateProfile).where(
+            db.CandidateProfile.user_id == DEFAULT_USER_ID
+        )
+    )
+    if profile is None or profile.bachelor_full_time is not False:
+        return None
+    fact = session.scalar(
+        select(db.KnowledgeItem).where(
+            db.KnowledgeItem.user_id == DEFAULT_USER_ID,
+            db.KnowledgeItem.category == "EDUCATION",
+            db.KnowledgeItem.normalized_key == "本科学习形式",
+            db.KnowledgeItem.allowed_for_auto_reply.is_(True),
+            db.KnowledgeItem.sensitivity == "NORMAL",
+        )
+    )
+    return DraftResult(
+        content="我的本科不是全日制，供您确认是否符合岗位要求。",
+        intents=[Intent.EDUCATION],
+        fact_ids=[fact.id] if fact else [],
+        confidence=1,
+        risk_codes=[],
+        decision=Decision.ALLOW_AUTO,
+        reason_codes=["FULL_TIME_EDUCATION_QUESTION_ANSWERED"],
     )
 
 

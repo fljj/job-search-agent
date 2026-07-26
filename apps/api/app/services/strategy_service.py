@@ -90,6 +90,9 @@ def _apply(strategy: db.JobStrategy, payload: StrategyPayload) -> None:
     strategy.accept_headhunter = payload.accept_headhunter
     strategy.headhunter_score_cap = payload.headhunter_score_cap
     strategy.core_required_skills = payload.core_required_skills
+    strategy.reject_full_time_bachelor_required = (
+        payload.reject_full_time_bachelor_required
+    )
     strategy.title_rules = [db.JobTitleRule(rule_type=item.rule_type.value, pattern=item.pattern,
                                             normalized_pattern=normalize_text(item.pattern), score=item.score,
                                             is_hard_requirement=item.is_hard_requirement)
@@ -130,6 +133,9 @@ def _response(strategy: db.JobStrategy) -> StrategyResponse:
         accept_headhunter=strategy.accept_headhunter,
         headhunter_score_cap=strategy.headhunter_score_cap,
         core_required_skills=strategy.core_required_skills,
+        reject_full_time_bachelor_required=(
+            strategy.reject_full_time_bachelor_required
+        ),
         title_rules=[TitleRule(rule_type=item.rule_type, pattern=item.pattern, score=item.score,
                                is_hard_requirement=item.is_hard_requirement) for item in strategy.title_rules],
         work_mode_rules=[WorkModeRule(work_mode=item.work_mode, enabled=item.enabled,

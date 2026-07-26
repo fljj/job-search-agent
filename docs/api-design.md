@@ -59,6 +59,9 @@
 
 `headhunter_score_cap` 可为空；配置时范围为 0–79。它只在可靠识别为猎头岗位时限制最终分数，不等同于 `accept_headhunter=false` 的硬性排除。
 
+候选人资料的 `bachelor_full_time` 为可空布尔值；`null` 表示未知。策略字段
+`reject_full_time_bachelor_required` 控制是否把明确的全日制/统招本科要求作为硬性排除。
+
 `priority` 为正整数，数值越小优先级越高，用于未绑定策略的入站对话在同分时选择策略。
 
 ### `GET /api/v1/strategies`

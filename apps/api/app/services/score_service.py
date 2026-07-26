@@ -91,6 +91,7 @@ def create_score(
         management_years=profile.management_years,
         has_architecture_experience=profile.has_architecture_experience,
         has_core_system_experience=profile.has_core_system_experience,
+        bachelor_full_time=profile.bachelor_full_time,
         skills=[CandidateSkill(name=item.name, years=item.years, source=item.source,
                                is_core=item.is_core) for item in profile.skills],
         industry_experiences=[item.industry_code for item in profile.industries],

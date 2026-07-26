@@ -8,6 +8,7 @@ def parser() -> RuleJobParser:
             outsourcing_keywords=["人力外包", "驻场外包", "外包项目"],
             headhunter_keywords=["猎头", "代招"],
             internship_keywords=["实习"],
+            full_time_bachelor_keywords=["全日制本科", "统招本科"],
         )
     )
 
@@ -45,3 +46,17 @@ def test_hard_filter_keyword_detection_is_configurable() -> None:
     assert RuleJobParser(
         RuleParserConfig(headhunter_keywords=["第三方寻访"])
     ).parse(job).headhunter_detected is True
+
+
+def test_only_explicit_full_time_bachelor_requirement_is_detected() -> None:
+    explicit = JobInput(
+        title="Java开发工程师",
+        company_name="示例公司",
+        description="要求全日制本科及以上学历。",
+    )
+    ordinary = explicit.model_copy(
+        update={"description": "要求本科及以上学历。"}
+    )
+
+    assert parser().parse(explicit).full_time_bachelor_required is True
+    assert parser().parse(ordinary).full_time_bachelor_required is False

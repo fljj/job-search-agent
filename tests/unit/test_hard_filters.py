@@ -65,3 +65,63 @@ def test_parsed_rejections(context: ScoringContext, changes: dict[str, object], 
 def test_unknown_salary_does_not_hard_reject(context: ScoringContext) -> None:
     parsed = context.parsed_job.model_copy(update={"salary": None})
     assert "SALARY_BELOW_MINIMUM" not in codes(context.model_copy(update={"parsed_job": parsed}))
+
+
+def test_explicit_full_time_bachelor_requirement_rejects_non_full_time_candidate(
+    context: ScoringContext,
+) -> None:
+    candidate = context.candidate.model_copy(
+        update={"bachelor_full_time": False}
+    )
+    strategy = context.strategy.model_copy(
+        update={"reject_full_time_bachelor_required": True}
+    )
+    parsed = context.parsed_job.model_copy(
+        update={"full_time_bachelor_required": True}
+    )
+
+    assert "FULL_TIME_BACHELOR_REQUIRED" in codes(
+        context.model_copy(
+            update={
+                "candidate": candidate,
+                "strategy": strategy,
+                "parsed_job": parsed,
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("candidate_value", "strategy_enabled", "explicit_requirement"),
+    [
+        (False, True, False),
+        (False, False, True),
+        (None, True, True),
+        (True, True, True),
+    ],
+)
+def test_full_time_bachelor_rule_does_not_guess_or_override_strategy(
+    context: ScoringContext,
+    candidate_value: bool | None,
+    strategy_enabled: bool,
+    explicit_requirement: bool,
+) -> None:
+    changed = context.model_copy(
+        update={
+            "candidate": context.candidate.model_copy(
+                update={"bachelor_full_time": candidate_value}
+            ),
+            "strategy": context.strategy.model_copy(
+                update={
+                    "reject_full_time_bachelor_required": strategy_enabled
+                }
+            ),
+            "parsed_job": context.parsed_job.model_copy(
+                update={
+                    "full_time_bachelor_required": explicit_requirement
+                }
+            ),
+        }
+    )
+
+    assert "FULL_TIME_BACHELOR_REQUIRED" not in codes(changed)

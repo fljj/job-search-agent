@@ -53,6 +53,7 @@ class CandidateProfile(BaseModel):
     management_years: Decimal = Field(default=Decimal(0), ge=0)
     has_architecture_experience: bool = False
     has_core_system_experience: bool = False
+    bachelor_full_time: bool | None = None
     skills: list[CandidateSkill] = Field(default_factory=list)
     industry_experiences: list[str] = Field(default_factory=list)
     version: int = Field(default=1, ge=1)
@@ -133,6 +134,7 @@ class Strategy(BaseModel):
     headhunter_score_cap: int | None = Field(default=None, ge=0, le=79)
     max_posted_days: int = Field(default=30, ge=1)
     core_required_skills: list[str] = Field(default_factory=list)
+    reject_full_time_bachelor_required: bool = False
     version: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")

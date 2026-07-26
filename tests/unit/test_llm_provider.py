@@ -194,7 +194,7 @@ def test_fake_reply_uses_strategy_context_without_treating_it_as_candidate_fact(
 
 def test_reply_prompt_separates_strategy_and_candidate_facts() -> None:
     version, prompt = PROMPTS["generate_reply"]
-    assert version == "reply-v2"
+    assert version == "reply-v3"
     assert "策略上下文" in prompt
     assert "不能当作候选人经历" in prompt
     assert "不得承诺电话或面试具体时间" in prompt

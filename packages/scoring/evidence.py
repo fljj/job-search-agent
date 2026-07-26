@@ -65,6 +65,16 @@ def with_evidence_catalog(context: ScoringContext) -> ScoringContext:
     add("parsed_job.years_required", context.parsed_job.years_required, ["experience"])
     add("candidate.total_years", context.candidate.total_years, ["experience"])
     add(
+        "candidate.bachelor_full_time",
+        context.candidate.bachelor_full_time,
+        ["experience"],
+    )
+    add(
+        "parsed_job.full_time_bachelor_required",
+        context.parsed_job.full_time_bachelor_required,
+        ["experience"],
+    )
+    add(
         "candidate.has_core_system_experience",
         context.candidate.has_core_system_experience,
         ["experience"],

@@ -67,6 +67,7 @@ class RuleParserConfig(BaseModel):
     outsourcing_keywords: list[str] = Field(default_factory=list)
     headhunter_keywords: list[str] = Field(default_factory=list)
     internship_keywords: list[str] = Field(default_factory=list)
+    full_time_bachelor_keywords: list[str] = Field(default_factory=list)
 
 
 class ParsedJob(BaseModel):
@@ -81,6 +82,7 @@ class ParsedJob(BaseModel):
     outsourcing_detected: bool = False
     headhunter_detected: bool = False
     internship_detected: bool = False
+    full_time_bachelor_required: bool = False
     confidence: Decimal = Field(default=Decimal("1"), ge=0, le=1)
     warnings: list[str] = Field(default_factory=list)
     parser_type: str = "RULE"

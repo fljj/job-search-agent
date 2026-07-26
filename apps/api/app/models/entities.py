@@ -44,6 +44,7 @@ class CandidateProfile(TimestampMixin, Base):
     management_years: Mapped[Decimal] = mapped_column(Numeric(4, 1), default=0)
     has_architecture_experience: Mapped[bool] = mapped_column(Boolean, default=False)
     has_core_system_experience: Mapped[bool] = mapped_column(Boolean, default=False)
+    bachelor_full_time: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     skills: Mapped[list["CandidateSkill"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
     industries: Mapped[list["CandidateIndustryExperience"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
@@ -91,6 +92,9 @@ class JobStrategy(TimestampMixin, Base):
     accept_headhunter: Mapped[bool] = mapped_column(Boolean, default=True)
     headhunter_score_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     core_required_skills: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    reject_full_time_bachelor_required: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     version: Mapped[int] = mapped_column(Integer, default=1)
     title_rules: Mapped[list["JobTitleRule"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
     work_mode_rules: Mapped[list["WorkModeRule"]] = relationship(cascade="all, delete-orphan", lazy="selectin")

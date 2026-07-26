@@ -7,6 +7,7 @@ import { api } from '../api/client'
 interface Profile {
   version: number; name: string; total_years: number; management_years: number
   has_architecture_experience: boolean; has_core_system_experience: boolean
+  bachelor_full_time?: boolean
   skills: unknown[]; industry_experiences: unknown[]
 }
 interface KnowledgeItem {
@@ -90,6 +91,7 @@ export function ProfilePage() {
         <Card><Form form={profileForm} layout="vertical" onFinish={(value) => void saveProfile(value)}
           initialValues={{ total_years: 0, management_years: 0,
             has_architecture_experience: false, has_core_system_experience: false,
+            bachelor_full_time: undefined,
             skills_json: '[]', industries_json: '[]' }}>
           <Form.Item name="name" label="姓名" rules={[{ required: true }]}><Input /></Form.Item>
           <Space wrap>
@@ -99,6 +101,12 @@ export function ProfilePage() {
               valuePropName="checked"><Switch /></Form.Item>
             <Form.Item name="has_core_system_experience" label="核心系统经验"
               valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name="bachelor_full_time" label="本科是否全日制">
+              <Select allowClear placeholder="请选择" style={{ width: 150 }} options={[
+                { value: true, label: '是' },
+                { value: false, label: '否' },
+              ]} />
+            </Form.Item>
           </Space>
           <Form.Item name="skills_json" label="技能及证据（结构化数据）"
             rules={[{ required: true }]}><Input.TextArea rows={8} /></Form.Item>

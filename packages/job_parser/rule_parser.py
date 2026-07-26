@@ -43,6 +43,9 @@ class RuleJobParser:
             internship_detected=any(
                 word in text for word in self.config.internship_keywords
             ),
+            full_time_bachelor_required=any(
+                word in text for word in self.config.full_time_bachelor_keywords
+            ),
             confidence=Decimal("0.85"),
             warnings=warnings,
             parser_type="RULE",

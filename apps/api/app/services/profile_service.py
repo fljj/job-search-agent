@@ -37,6 +37,7 @@ def save_profile(session: Session, payload: ProfilePayload) -> ProfileResponse:
     profile.management_years = payload.management_years
     profile.has_architecture_experience = payload.has_architecture_experience
     profile.has_core_system_experience = payload.has_core_system_experience
+    profile.bachelor_full_time = payload.bachelor_full_time
     profile.skills = [CandidateSkill(name=item.name, normalized_name=normalize_skill(item.name).lower(),
                                      years=item.years, proficiency=item.proficiency,
                                      source=item.source, is_core=item.is_core) for item in payload.skills]
@@ -53,7 +54,8 @@ def _response(profile: CandidateProfile) -> ProfileResponse:
         id=profile.id, name=profile.name, total_years=profile.total_years,
         management_years=profile.management_years,
         has_architecture_experience=profile.has_architecture_experience,
-        has_core_system_experience=profile.has_core_system_experience, version=profile.version,
+        has_core_system_experience=profile.has_core_system_experience,
+        bachelor_full_time=profile.bachelor_full_time, version=profile.version,
         skills=[{"name": item.name, "years": item.years, "proficiency": item.proficiency,
                  "source": item.source, "is_core": item.is_core} for item in profile.skills],
         industry_experiences=[{"industry_code": item.industry_code, "years": item.years,

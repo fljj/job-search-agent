@@ -14,6 +14,7 @@ const template = JSON.stringify({
   ],
   salary_rules: [], industry_rules: [], company_blacklist: [], accept_outsourcing: false,
   accept_headhunter: true, headhunter_score_cap: null, max_posted_days: 30,
+  reject_full_time_bachelor_required: false,
   core_required_skills: ['Java'], version: 1,
 }, null, 2)
 

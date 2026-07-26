@@ -24,6 +24,7 @@ class ProfilePayload(BaseModel):
     management_years: Decimal = Field(default=Decimal(0), ge=0)
     has_architecture_experience: bool = False
     has_core_system_experience: bool = False
+    bachelor_full_time: bool | None = None
     version: int | None = Field(default=None, ge=1)
     skills: list[SkillPayload] = Field(default_factory=list)
     industry_experiences: list[IndustryExperiencePayload] = Field(default_factory=list)

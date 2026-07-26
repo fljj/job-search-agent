@@ -136,7 +136,7 @@ users
 
 ### 3.15 `job_scores`
 
-字段：`id`、`job_id`、`strategy_id`、`candidate_profile_id`、`parsed_job_detail_id`、`strategy_version`、`profile_version`、`scoring_version`、`prompt_version`、`llm_invocation_id`、`input_fingerprint`、`effective_job_status`、`action_blockers JSONB`、七个维度分、`total_score`、`grade`、`eligibility`、`hard_rejected`、`llm_recommends_proactive_contact`、`llm_contact_reason`、`automation_eligible`、`match_reasons JSONB`、`risk_notes JSONB`、`input_snapshot JSONB`、`created_at`。
+字段：`id`、`job_id`、`strategy_id`、`candidate_profile_id`、`parsed_job_detail_id`、`strategy_version`、`profile_version`、`scoring_version`、`prompt_version`、`llm_invocation_id`、`input_fingerprint`、`effective_job_status`、`action_blockers JSONB`、七个维度分、`total_score`、`grade`、`eligibility`、`hard_rejected`、`llm_recommends_proactive_contact`、`llm_contact_reason`、`automation_eligible`、`match_reasons JSONB`、`risk_notes JSONB`、`input_snapshot JSONB`、`created_at`。候选人资料增加可空的 `bachelor_full_time`，策略增加 `reject_full_time_bachelor_required`；解析记录在 `flags` 中保存 `full_time_bachelor_required`。
 
 校验：七个维度不超过各自上限；总分为 0–100；等级与总分一致；`hard_rejected = true` 时 `eligibility = FILTERED_OUT`。
 

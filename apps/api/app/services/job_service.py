@@ -147,6 +147,9 @@ def parse_job(
                 "outsourcing_detected": deterministic_flags.outsourcing_detected,
                 "headhunter_detected": deterministic_flags.headhunter_detected,
                 "internship_detected": deterministic_flags.internship_detected,
+                "full_time_bachelor_required": (
+                    deterministic_flags.full_time_bachelor_required
+                ),
             }
         )
         record_llm_invocation(
@@ -168,7 +171,8 @@ def parse_job(
         salary_normalized=parsed.salary.model_dump(mode="json") if parsed.salary else None,
         flags={"outsourcing_detected": parsed.outsourcing_detected,
                "headhunter_detected": parsed.headhunter_detected,
-               "internship_detected": parsed.internship_detected},
+               "internship_detected": parsed.internship_detected,
+               "full_time_bachelor_required": parsed.full_time_bachelor_required},
         confidence=parsed.confidence, warnings=parsed.warnings,
     )
     session.add(record)
@@ -218,7 +222,11 @@ def to_parsed_domain(record: db.ParsedJobDetail) -> ParsedJob:
         responsibilities=record.responsibilities, salary=record.salary_normalized,
         outsourcing_detected=flags.get("outsourcing_detected", False),
         headhunter_detected=flags.get("headhunter_detected", False),
-        internship_detected=flags.get("internship_detected", False), confidence=record.confidence,
+        internship_detected=flags.get("internship_detected", False),
+        full_time_bachelor_required=flags.get(
+            "full_time_bachelor_required", False
+        ),
+        confidence=record.confidence,
         warnings=record.warnings, parser_type=record.parser_type, parser_version=record.parser_version,
     )
 
