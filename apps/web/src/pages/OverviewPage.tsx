@@ -2,6 +2,7 @@ import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag } fr
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
+import { activeRuns, agentStatusText } from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
 
 interface Run {
@@ -49,7 +50,8 @@ export function OverviewPage() {
       setOperations(operationData); setRollout(rolloutData.items[0])
     })
   }, [])
-  const activeRun = runs.find((item) => ['RUNNING', 'PAUSED'].includes(item.status))
+  const currentRuns = activeRuns(runs)
+  const processedCount = currentRuns.reduce((sum, item) => sum + item.processed_count, 0)
   const currentWorkers = activeWorkers(operations?.workers)
   const safetyErrors = Object.values(rollout?.safety_metrics ?? {}).reduce((sum, value) => sum + value, 0)
   return <Space direction="vertical" size="large" style={{ width: '100%' }}>
@@ -58,9 +60,9 @@ export function OverviewPage() {
         description="请在系统设置中检查数据库、LLM、灰度安全指标和平台会话。" />}
     <Row gutter={[16, 16]}>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="Agent 状态"
-        value={activeRun?.status ?? '未启动'} /></Card></Col>
+        value={agentStatusText(runs)} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="已处理职位/消息"
-        value={activeRun?.processed_count ?? 0} /></Card></Col>
+        value={processedCount} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="自动动作"
         value={actions.filter((item) => item.status === 'SUCCEEDED').length} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="待确认面试"
@@ -68,9 +70,16 @@ export function OverviewPage() {
     </Row>
     <Card title="运行状态" extra={<Button onClick={() => void load()}>刷新</Button>}>
       <Descriptions column={{ xs: 1, md: 2 }} items={[
-        { key: 'run', label: '运行', children: <Tag color={statusColor(activeRun?.status ?? '')}>
-          {activeRun?.status ?? 'STOPPED'}</Tag> },
-        { key: 'platform', label: '平台', children: activeRun?.platform ?? '-' },
+        { key: 'run', label: '运行', children: currentRuns.length > 0
+          ? <Space size={[4, 4]} wrap>{currentRuns.map((run) =>
+            <Tag key={run.id} color={statusColor(run.status)}>
+              {run.platform}:{run.status}
+              {run.status === 'PAUSED' && run.pause_reason_codes.length > 0
+                ? `（${run.pause_reason_codes.join('、')}）` : ''}
+            </Tag>)}</Space>
+          : <Tag>STOPPED</Tag> },
+        { key: 'platform', label: '平台', children:
+          currentRuns.map((item) => item.platform).join('、') || '-' },
         { key: 'worker', label: 'Worker', children: <Tag color={
           currentWorkers.length > 1 ? 'red'
             : currentWorkers[0]?.status === 'STALE' ? 'orange'

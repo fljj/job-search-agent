@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { statusColor } from './pages/automation-status'
+import { activeRuns, agentStatusText, type RunSummaryItem } from './pages/run-summary'
 import { activeWorkers, workerStatusText } from './pages/worker-status'
 
 describe('Agent 控制台状态展示', () => {
@@ -32,5 +33,42 @@ describe('Worker 状态展示', () => {
       ...workers,
       { worker_id: 'worker-stale', status: 'STALE' },
     ])).toContain('异常：存在 2 个活动 Worker')
+  })
+})
+
+describe('总览平台运行聚合', () => {
+  const run = (
+    platform: string,
+    status: string,
+    processedCount: number,
+  ): RunSummaryItem => ({
+    id: platform,
+    platform,
+    status,
+    processed_count: processedCount,
+    pause_reason_codes: [],
+  })
+
+  it('同时展示并汇总所有活动平台', () => {
+    const runs = [
+      run('MAIMAI', 'RUNNING', 3),
+      run('BOSS', 'RUNNING', 5),
+      run('MOCK', 'STOPPED', 100),
+    ]
+
+    expect(activeRuns(runs).map((item) => item.platform)).toEqual(['BOSS', 'MAIMAI'])
+    expect(activeRuns(runs).reduce((sum, item) => sum + item.processed_count, 0)).toBe(8)
+    expect(agentStatusText(runs)).toBe('2 个平台运行中')
+  })
+
+  it('部分平台暂停时显示部分运行', () => {
+    expect(agentStatusText([
+      run('BOSS', 'RUNNING', 0),
+      run('MAIMAI', 'PAUSED', 0),
+    ])).toBe('部分运行')
+  })
+
+  it('没有活动平台时显示未启动', () => {
+    expect(agentStatusText([run('BOSS', 'STOPPED', 0)])).toBe('未启动')
   })
 })
