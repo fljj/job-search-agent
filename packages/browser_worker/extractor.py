@@ -72,7 +72,11 @@ def _extract_job_list(
 ) -> ReadResult:
     jobs: list[BrowserJobSummary] = []
     for element in page.elements(selectors.job_list_items):
-        external_id = element.attribute("", selectors.job_list_item_id_attribute)
+        detail_url = element.attribute(selectors.job_list_item_link, "href")
+        external_id = (
+            element.attribute("", selectors.job_list_item_id_attribute)
+            or _job_id_from_url(detail_url or "")
+        )
         title = element.text(selectors.job_list_item_title)
         company = _normalize_company_name(element.text(selectors.job_list_item_company))
         if not external_id:
@@ -89,7 +93,7 @@ def _extract_job_list(
             external_job_id=external_id,
             title=title,
             company_name=company,
-            detail_url=element.attribute(selectors.job_list_item_link, "href"),
+            detail_url=detail_url,
         ))
     if not jobs:
         return _failure(page, platform, version, SessionStatus.SESSION_PAGE_CHANGED,

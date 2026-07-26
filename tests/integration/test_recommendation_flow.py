@@ -10,10 +10,12 @@ from sqlalchemy.orm import Session
 from adapters.browser.maimai_recommendations import MaimaiRecommendationCard
 from apps.api.app.core.database import Base
 from apps.api.app.models import entities as db
+from apps.api.app.services.operations_service import audit_discrepancies
 from apps.api.app.services.recommendation_service import (
     dispatch_recommendation,
     scan_recommendations,
 )
+from apps.api.app.services.rollout_service import calculate_safety_metrics
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
 from packages.policy_engine.recommendation import RecommendationRules
@@ -44,6 +46,16 @@ class FakeRecommendationAdapter:
         limit: int = 20,
     ) -> list[MaimaiRecommendationCard]:
         return [self.card]
+
+
+class EmptyRecommendationAdapter:
+    def scan(
+        self,
+        _cdp_url: str,
+        _rules: RecommendationRules,
+        limit: int = 20,
+    ) -> list[MaimaiRecommendationCard]:
+        return []
 
 
 class SuccessfulExecutor:
@@ -149,3 +161,93 @@ def test_recommendation_scan_is_idempotent_and_dispatches_once(
     assert repeated_completion["status"] == "ACCEPTED"
     attempts = session.scalars(select(db.ActionAttempt)).all()
     assert len(attempts) == 1
+    rollout = session.scalar(
+        select(db.RolloutControl).where(db.RolloutControl.platform == "MAIMAI")
+    )
+    assert rollout is not None
+    assert calculate_safety_metrics(session, rollout)["UNSCORED_WRITE"] == 0
+    assert audit_discrepancies(session) == []
+
+
+def test_recommendation_is_authorized_after_rollout_is_configured(
+    session: Session,
+) -> None:
+    session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    session.flush()
+    profile = db.CandidateProfile(
+        user_id=DEFAULT_USER_ID,
+        name="测试候选人",
+        total_years=10,
+        management_years=0,
+        has_architecture_experience=True,
+        has_core_system_experience=True,
+    )
+    session.add(profile)
+    session.flush()
+    strategy = db.JobStrategy(
+        user_id=DEFAULT_USER_ID,
+        candidate_profile_id=profile.id,
+        name="测试策略",
+        enabled=True,
+        priority=1,
+    )
+    session.add(strategy)
+    session.flush()
+    session.add(
+        db.AutomationSetting(
+            user_id=DEFAULT_USER_ID,
+            scope_type="GLOBAL",
+            scope_key="GLOBAL",
+            enabled=True,
+            auto_resume_enabled=True,
+            maimai_recommendation_enabled=True,
+            maimai_recommendation_resume_enabled=True,
+        )
+    )
+    run = db.AgentRun(
+        user_id=DEFAULT_USER_ID,
+        platform="MAIMAI",
+        strategy_id=strategy.id,
+        executor_type="REAL_CDP",
+        status="RUNNING",
+        cursor={},
+    )
+    session.add(run)
+    session.commit()
+    adapter = FakeRecommendationAdapter(
+        MaimaiRecommendationCard(
+            external_recommendation_id="recommendation-delayed-rollout",
+            recruiter_name="招聘顾问",
+            recruiter_title="示例公司·招聘",
+            company_name="示例公司",
+            job_title="Java 后端开发",
+            card_text="系统推荐 Java 后端开发，可以要一份你的简历吗",
+        )
+    )
+
+    first = scan_recommendations(
+        session, run, "http://127.0.0.1:9222", adapter=adapter
+    )[0]
+    assert first["action_id"] is None
+    assert "ROLLOUT_NOT_CONFIGURED" in first["reason_codes"]
+
+    session.add(
+        db.RolloutControl(
+            user_id=DEFAULT_USER_ID,
+            platform="MAIMAI",
+            status="ACTIVE",
+            current_level=6,
+            previous_level=1,
+            stage_started_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    authorized = scan_recommendations(
+        session,
+        run,
+        "http://127.0.0.1:9222",
+        adapter=EmptyRecommendationAdapter(),
+    )[0]
+
+    assert authorized["action_status"] == "APPROVED"
+    assert "ROLLOUT_NOT_CONFIGURED" not in authorized["reason_codes"]

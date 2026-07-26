@@ -339,7 +339,8 @@ SESSION_PAUSED
 - `stage_started_at` 和 `minimum_stage_hours` 决定最早升级时间，最短不得低于 24 小时。
 - `reply_daily_limit` 最大为 5，`greeting_daily_limit` 最大为 3；第六级改用正式自动化
   配置的每日上限。
-- `version` 用于升级、暂停和回退的乐观并发控制。升级必须严格加一，不能跳级。
+- `version` 用于升级、正式接管、暂停和回退的乐观并发控制。常规升级必须严格加一；
+  用户明确授权且安全指标全为零时，正式接管可以审计事件形式直接进入第六级。
 - 灰度转换和自动回退追加写入 `audit_events`，保存前后级别及触发指标；不覆盖历史。
 - 安全指标从 `action_queue`、`action_attempts`、`reconciliation_tasks`、草稿和评分记录
   计算，不由浏览器或前端自行上报成功。

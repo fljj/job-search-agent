@@ -143,6 +143,36 @@ def test_rollout_requires_ordered_daily_manual_transitions(
     assert paused.json()["data"]["status"] == "PAUSED"
 
 
+def test_maimai_rollout_can_enter_audited_formal_takeover(
+    client: TestClient,
+) -> None:
+    created = client.put(
+        "/api/v1/automation/rollouts",
+        json={
+            "platform": "MAIMAI",
+            "minimum_stage_hours": 24,
+            "reply_daily_limit": 5,
+            "greeting_daily_limit": 3,
+        },
+    )
+    assert created.status_code == 200
+    rollout = created.json()["data"]
+    assert rollout["platform"] == "MAIMAI"
+    assert rollout["current_level"] == 1
+
+    activated = client.post(
+        "/api/v1/automation/rollouts/MAIMAI/transition",
+        json={
+            "action": "ACTIVATE_FORMAL",
+            "expected_version": rollout["version"],
+        },
+    )
+    assert activated.status_code == 200
+    formal = activated.json()["data"]
+    assert formal["status"] == "ACTIVE"
+    assert formal["current_level"] == 6
+
+
 def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     mock_settings = Settings(_env_file=None, calendar_provider="MOCK")
     monkeypatch.setattr(

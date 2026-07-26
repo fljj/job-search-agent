@@ -70,6 +70,16 @@ def transition_rollout(
     if payload.action == "ACTIVATE":
         row.status = "ACTIVE"
         row.stage_started_at = now
+    elif payload.action == "ACTIVATE_FORMAL":
+        metrics = calculate_safety_metrics(session, row)
+        reasons = [code for code, count in metrics.items() if count > 0]
+        if reasons:
+            raise ValueError(f"安全指标未通过：{','.join(reasons)}")
+        row.previous_level = row.current_level
+        row.current_level = RolloutLevel.FORMAL_LIMITS
+        row.status = "ACTIVE"
+        row.stage_started_at = now
+        reasons = ["USER_CONFIRMED_FORMAL_TAKEOVER"]
     elif payload.action == "PAUSE":
         row.status = "PAUSED"
     elif payload.action == "ROLLBACK":
@@ -217,7 +227,13 @@ def calculate_safety_metrics(
                 duplicate_send += 1
             successful_fingerprints.add(fingerprint)
         draft = session.get(db.GeneratedDraft, action.draft_id) if action.draft_id else None
-        if draft is None or draft.job_score_id is None:
+        is_platform_recommendation = action.action_type in {
+            "PLATFORM_RECOMMENDATION_ACCEPT",
+            "PLATFORM_RECOMMENDATION_REJECT",
+        }
+        if not is_platform_recommendation and (
+            draft is None or draft.job_score_id is None
+        ):
             unscored_write += 1
         if draft and any(
             intent in draft.intents

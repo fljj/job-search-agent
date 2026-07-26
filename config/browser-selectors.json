@@ -1,16 +1,16 @@
 {
-  "version": "2026-07-24-v9",
+  "version": "2026-07-26-v10",
   "platforms": {
     "BOSS": {
       "allowed_hosts": ["www.zhipin.com", "m.zhipin.com"],
       "login_marker": "[data-testid='user-avatar'], .nav-figure",
       "verification_marker": ".geetest_panel, .verify-box, [class*='captcha']",
-      "job_list_root": "[data-testid='job-list']",
-      "job_list_items": "[data-testid='job-list-item']",
+      "job_list_root": "[data-testid='job-list'], .job-list-container",
+      "job_list_items": "[data-testid='job-list-item'], .job-card-box",
       "job_list_item_id_attribute": "data-job-id",
-      "job_list_item_title": "[data-testid='job-title']",
-      "job_list_item_company": "[data-testid='company-name']",
-      "job_list_item_link": "[data-testid='job-link']",
+      "job_list_item_title": "[data-testid='job-title'], .job-name",
+      "job_list_item_company": "[data-testid='company-name'], .boss-name",
+      "job_list_item_link": "[data-testid='job-link'], .job-name",
       "next_cursor_attribute": "data-next-cursor",
       "job_root": "[data-testid='job-detail'], .job-detail",
       "job_id": "[data-job-id]",

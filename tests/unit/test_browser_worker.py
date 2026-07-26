@@ -209,6 +209,34 @@ def test_job_list_missing_required_field_stops_discovery() -> None:
     assert result.reason_codes == ["REQUIRED_JOB_LIST_FIELD_MISSING"]
 
 
+def test_job_list_uses_detail_url_when_real_card_has_no_job_id_attribute() -> None:
+    config = get_browser_selectors()
+    selectors = config.platforms["BOSS"]
+    page = FakePage(url="https://www.zhipin.com/web/geek/jobs")
+    page.visible = {selectors.login_marker, selectors.job_list_root}
+    page.element_lists = {
+        selectors.job_list_items: [
+            FakeElement(
+                texts={
+                    selectors.job_list_item_title: "Java 后端开发",
+                    selectors.job_list_item_company: "示例科技",
+                },
+                attributes={
+                    (
+                        selectors.job_list_item_link,
+                        "href",
+                    ): "/job_detail/e29439525cc4e0810nd92d64FlBS.html",
+                },
+            )
+        ]
+    }
+
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+
+    assert result.status is SessionStatus.SESSION_READY
+    assert result.jobs[0].external_job_id == "e29439525cc4e0810nd92d64FlBS"
+
+
 def test_invalid_message_time_stops_conversation_read() -> None:
     config = get_browser_selectors()
     selectors = config.platforms["BOSS"]

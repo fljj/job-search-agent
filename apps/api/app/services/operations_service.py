@@ -203,7 +203,14 @@ def audit_discrepancies(session: Session) -> list[dict[str, object]]:
                 db.ActionAttempt.status == "SUCCEEDED",
             )
         )
-        if not successful_attempt or not action.policy_decision_id:
+        recommendation_source = session.scalar(
+            select(db.PlatformRecommendation.id).where(
+                db.PlatformRecommendation.action_id == action.id
+            )
+        )
+        if not successful_attempt or (
+            not action.policy_decision_id and not recommendation_source
+        ):
             discrepancies.append(
                 {
                     "code": "SUCCESS_WITHOUT_PROVENANCE",

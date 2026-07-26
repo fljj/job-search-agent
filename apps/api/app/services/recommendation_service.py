@@ -60,15 +60,31 @@ def scan_recommendations(
     strategy = session.get(db.JobStrategy, run.strategy_id)
     if strategy is None or not strategy.enabled:
         raise ValueError("求职策略不存在或未启用")
+    rows = session.scalars(
+        select(db.PlatformRecommendation).where(
+            db.PlatformRecommendation.user_id == DEFAULT_USER_ID,
+            db.PlatformRecommendation.agent_run_id == run.id,
+            db.PlatformRecommendation.platform == "MAIMAI",
+            db.PlatformRecommendation.status == "DECIDED",
+            db.PlatformRecommendation.action_id.is_(None),
+        )
+    ).all()
+    for row in rows:
+        _authorize_existing_recommendation(
+            session, row, run, strategy, automation
+        )
     cards = (adapter or MaimaiRecommendationAdapter()).scan(
         cdp_url, get_recommendation_rules(), limit
     )
-    rows = [
-        _persist_card(session, run, strategy, automation, card)
-        for card in cards
+    observed_rows = [
+        _persist_card(session, run, strategy, automation, card) for card in cards
     ]
+    rows_by_id = {row.id: row for row in [*rows, *observed_rows]}
     session.commit()
-    return [_response(row, session.get(db.ActionQueue, row.action_id)) for row in rows]
+    return [
+        _response(row, _action_or_none(session, row.action_id))
+        for row in rows_by_id.values()
+    ]
 
 
 def list_recommendations(
@@ -91,14 +107,20 @@ def list_recommendations(
         query.order_by(db.PlatformRecommendation.last_observed_at.desc())
     ).all()
     return [
-        _response(row, session.get(db.ActionQueue, row.action_id))
+        _response(row, _action_or_none(session, row.action_id))
         for row in rows
     ]
 
 
 def get_recommendation(session: Session, recommendation_id: UUID) -> dict[str, object]:
     row = _required(session, recommendation_id)
-    return _response(row, session.get(db.ActionQueue, row.action_id))
+    return _response(row, _action_or_none(session, row.action_id))
+
+
+def _action_or_none(
+    session: Session, action_id: UUID | None
+) -> db.ActionQueue | None:
+    return session.get(db.ActionQueue, action_id) if action_id is not None else None
 
 
 def dispatch_recommendation(
@@ -158,6 +180,9 @@ def _persist_card(
     )
     if existing:
         existing.last_observed_at = datetime.now(UTC)
+        _authorize_existing_recommendation(
+            session, existing, run, strategy, automation
+        )
         return existing
     decision, reasons = decide_recommendation(
         recruiter=card.recruiter_name,
@@ -205,6 +230,53 @@ def _persist_card(
         row.reason_codes = [*row.reason_codes, *rollout_reasons]
     _audit(session, row)
     return row
+
+
+def _authorize_existing_recommendation(
+    session: Session,
+    row: db.PlatformRecommendation,
+    run: db.AgentRun,
+    strategy: db.JobStrategy,
+    automation: AutomationRules,
+) -> None:
+    if row.action_id is not None or row.status != "DECIDED":
+        return
+    try:
+        decision = RecommendationDecision(row.decision)
+    except ValueError:
+        return
+    if decision is RecommendationDecision.DENY:
+        return
+    action_type = (
+        "PLATFORM_RECOMMENDATION_ACCEPT"
+        if decision is RecommendationDecision.ACCEPT_AND_SEND_PROFILE
+        else "PLATFORM_RECOMMENDATION_REJECT"
+    )
+    if (
+        decision is RecommendationDecision.ACCEPT_AND_SEND_PROFILE
+        and not automation.maimai_recommendation_resume_enabled
+    ):
+        return
+    rollout_allowed, rollout_reasons = evaluate_rollout_action(
+        session, "MAIMAI", action_type, automation.daily_limit
+    )
+    if not rollout_allowed:
+        row.reason_codes = list(dict.fromkeys([*row.reason_codes, *rollout_reasons]))
+        return
+    row.reason_codes = [
+        code
+        for code in row.reason_codes
+        if code
+        not in {
+            "ROLLOUT_NOT_CONFIGURED",
+            "ROLLOUT_PAUSED",
+            "ROLLOUT_ACTION_NOT_ENABLED",
+            "ROLLOUT_DAILY_LIMIT_REACHED",
+        }
+    ]
+    action = _create_action(session, row, run, strategy, action_type)
+    row.action_id = action.id
+    _audit(session, row)
 
 
 def _create_action(
