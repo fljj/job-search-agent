@@ -133,6 +133,16 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
             .order_by(db.GeneratedDraft.created_at.desc())
             .limit(1)
         )
+        draft_decision = (
+            session.scalar(
+                select(db.PolicyDecision)
+                .where(db.PolicyDecision.draft_id == draft.id)
+                .order_by(db.PolicyDecision.created_at.desc())
+                .limit(1)
+            )
+            if draft
+            else None
+        )
         resume_action = session.scalar(
             select(db.ActionQueue)
             .where(
@@ -165,6 +175,12 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
                 "latest_grade": score.grade if score else None,
                 "latest_draft_type": draft.draft_type if draft else None,
                 "latest_draft_content": draft.content if draft else None,
+                "latest_draft_decision": (
+                    draft_decision.decision if draft_decision else None
+                ),
+                "latest_draft_reason_codes": (
+                    draft_decision.reason_codes if draft_decision else []
+                ),
                 "resume_action_status": resume_action.status if resume_action else None,
                 "resume_attachment_name": (
                     resume_action.attachment_name if resume_action else None
