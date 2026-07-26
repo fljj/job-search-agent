@@ -19,10 +19,12 @@ export function SchedulingPage() {
   const [createEvents, setCreateEvents] = useState<Record<string, boolean>>({})
   const [selectedSlots, setSelectedSlots] = useState<Record<string, number>>({})
   const [calendar, setCalendar] = useState<CalendarStatus>()
+  const showRequestError = (error: unknown) =>
+    message.error(error instanceof Error ? error.message : '操作失败，请稍后重试')
   const load = () => api<{ items: ScheduleRequest[] }>('/scheduling/requests').then((data) => setItems(data.items))
   useEffect(() => {
-    void load()
-    void api<CalendarStatus>('/system/calendar-status').then(setCalendar)
+    void load().catch(showRequestError)
+    void api<CalendarStatus>('/system/calendar-status').then(setCalendar).catch(showRequestError)
   }, [])
   const approve = async (item: ScheduleRequest) => {
     const selectedIndex = selectedSlots[item.id]
@@ -56,7 +58,8 @@ export function SchedulingPage() {
       description={calendar?.real_provider
         ? `真实日历 ${calendar.calendar_id}；读取忙闲与创建事件仍是独立操作。`
         : '当前使用本地模拟日历，不代表真实日历空闲。'} />
-    <Card title="时间确认任务" extra={<Button onClick={() => void load()}>刷新</Button>}>
+    <Card title="时间确认任务"
+      extra={<Button onClick={() => void load().catch(showRequestError)}>刷新</Button>}>
       <Table rowKey="id" dataSource={items} columns={[
       { title: '目标', render: (_: unknown, item: ScheduleRequest) =>
         `${item.platform ?? '-'} / ${item.company_name ?? '-'} / ${item.job_title ?? '-'} / ${item.recruiter_name ?? '-'}` },
@@ -91,10 +94,12 @@ export function SchedulingPage() {
           </Checkbox>
         </Space> },
       { title: '操作', render: (_: unknown, item: ScheduleRequest) => <Space>
-        <Button disabled={item.status !== 'PENDING_APPROVAL'} onClick={() => void approve(item)}>确认时间回复</Button>
+        <Button disabled={item.status !== 'PENDING_APPROVAL'}
+          onClick={() => void approve(item).catch(showRequestError)}>确认时间回复</Button>
         <Button disabled={!['PENDING_APPROVAL', 'APPROVED'].includes(item.status)}
-          onClick={() => void reject(item)}>拒绝</Button>
-        <Button danger disabled={item.status !== 'APPROVED'} onClick={() => void execute(item)}>复核并发送</Button>
+          onClick={() => void reject(item).catch(showRequestError)}>拒绝</Button>
+        <Button danger disabled={item.status !== 'APPROVED'}
+          onClick={() => void execute(item).catch(showRequestError)}>复核并发送</Button>
       </Space> },
     ]} /></Card>
   </Space>

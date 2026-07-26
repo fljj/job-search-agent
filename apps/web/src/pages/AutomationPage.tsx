@@ -56,6 +56,8 @@ export function AutomationPage() {
   const [rollout, setRollout] = useState<RolloutStatus>()
   const [strategies, setStrategies] = useState<StrategyOption[]>([])
   const currentWorkers = activeWorkers(operations?.workers)
+  const showRequestError = (error: unknown) =>
+    message.error(error instanceof Error ? error.message : '操作失败，请稍后重试')
 
   const load = async () => {
     const [llmStatus, runList, actionList, operationStatus, rolloutList, strategyList] = await Promise.all([
@@ -155,13 +157,15 @@ export function AutomationPage() {
         }>{workerStatusText(operations?.workers)}</Tag> },
         { key: 'discrepancies', label: '审计差异', children: operations?.discrepancies.length ?? 0 },
       ]} />
-      <Button disabled={!operations?.unknown_action_count} onClick={() => void reconcile()}>
+      <Button disabled={!operations?.unknown_action_count}
+        onClick={() => void reconcile().catch(showRequestError)}>
         执行对账
       </Button>
     </Card>
 
     <Card title="BOSS 无人值守灰度">
-      {!rollout ? <Button type="primary" onClick={() => void initializeRollout()}>
+      {!rollout ? <Button type="primary"
+        onClick={() => void initializeRollout().catch(showRequestError)}>
         初始化一级只读灰度
       </Button> : <>
         <Descriptions items={[
@@ -176,13 +180,13 @@ export function AutomationPage() {
         ]} />
         <Space wrap>
           <Button type="primary" disabled={rollout.status === 'ACTIVE'}
-            onClick={() => void transitionRollout('ACTIVATE')}>启用当前级别</Button>
+            onClick={() => void transitionRollout('ACTIVATE').catch(showRequestError)}>启用当前级别</Button>
           <Button danger disabled={rollout.status !== 'ACTIVE'}
-            onClick={() => void transitionRollout('PAUSE')}>暂停灰度</Button>
+            onClick={() => void transitionRollout('PAUSE').catch(showRequestError)}>暂停灰度</Button>
           <Button disabled={rollout.status !== 'ACTIVE' || rollout.remaining_hours > 0 || rollout.current_level >= 6}
-            onClick={() => void transitionRollout('ADVANCE')}>升级一级</Button>
+            onClick={() => void transitionRollout('ADVANCE').catch(showRequestError)}>升级一级</Button>
           <Button disabled={rollout.current_level <= 1 && rollout.status === 'PAUSED'}
-            onClick={() => void transitionRollout('ROLLBACK')}>回退一级</Button>
+            onClick={() => void transitionRollout('ROLLBACK').catch(showRequestError)}>回退一级</Button>
         </Space>
       </>}
     </Card>
@@ -197,8 +201,8 @@ export function AutomationPage() {
           placeholder="选择已启用策略" options={strategies.map((item) => ({
             value: item.id, label: item.name,
           }))} />
-        <Button type="primary" onClick={() => void start()}>启动</Button>
-        <Button onClick={() => void load()}>刷新</Button>
+        <Button type="primary" onClick={() => void start().catch(showRequestError)}>启动</Button>
+        <Button onClick={() => void load().catch(showRequestError)}>刷新</Button>
       </Space>
       <Table rowKey="id" dataSource={runs} columns={[
         { title: '平台', dataIndex: 'platform' },
@@ -210,8 +214,10 @@ export function AutomationPage() {
         { title: '游标', dataIndex: 'cursor', render: (value: Record<string, unknown>) =>
           <code>{JSON.stringify(value)}</code> },
         { title: '操作', render: (_: unknown, run: AgentRun) => <Space>
-          <Button danger disabled={run.status !== 'RUNNING'} onClick={() => void changeRun(run, 'pause')}>暂停</Button>
-          <Button disabled={run.status !== 'PAUSED'} onClick={() => void changeRun(run, 'resume')}>恢复</Button>
+          <Button danger disabled={run.status !== 'RUNNING'}
+            onClick={() => void changeRun(run, 'pause').catch(showRequestError)}>暂停</Button>
+          <Button disabled={run.status !== 'PAUSED'}
+            onClick={() => void changeRun(run, 'resume').catch(showRequestError)}>恢复</Button>
         </Space> },
       ]} />
     </Card>
@@ -227,7 +233,8 @@ export function AutomationPage() {
       ]} />
     </Card>
 
-    <Card title="自动化范围配置"><Form form={form} layout="vertical" onFinish={(value) => void save(value)}
+    <Card title="自动化范围配置"><Form form={form} layout="vertical"
+      onFinish={(value) => void save(value).catch(showRequestError)}
       initialValues={{ scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
         auto_greet_enabled: false, auto_greet_min_score: 80, auto_reply_enabled: false,
         auto_reply_min_confidence: .9, auto_resume_enabled: false, auto_resume_min_score: 60,
@@ -246,7 +253,9 @@ export function AutomationPage() {
         <Form.Item name="auto_reply_enabled" label="自动回复" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="auto_resume_enabled" label="自动简历" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="job_scan_enabled" label="主动扫描职位" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="emergency_stop" label="紧急停止" valuePropName="checked"><Switch /></Form.Item>
+        <Form.Item name="emergency_stop" label="紧急停止" valuePropName="checked">
+          <Switch aria-label="紧急停止" />
+        </Form.Item>
       </Space>
       <Space wrap>
         <Form.Item name="auto_greet_min_score" label="招呼最低分"><InputNumber min={80} max={100} /></Form.Item>
