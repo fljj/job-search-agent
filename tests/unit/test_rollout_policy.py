@@ -1,5 +1,6 @@
 import pytest
 
+from apps.api.app.services.rollout_service import requires_job_score
 from packages.policy_engine.rollout import RolloutLevel, action_limit, allows_job_scan
 
 
@@ -57,3 +58,19 @@ def test_unknown_action_is_always_denied() -> None:
         )
         == 0
     )
+
+
+@pytest.mark.parametrize(
+    ("action_type", "expected"),
+    [
+        ("GREETING", True),
+        ("REPLY", False),
+        ("RESUME", False),
+        ("MISMATCH_DECLINE", False),
+        ("PLATFORM_RECOMMENDATION_ACCEPT", False),
+    ],
+)
+def test_only_proactive_greeting_requires_formal_job_score(
+    action_type: str, expected: bool
+) -> None:
+    assert requires_job_score(action_type) is expected

@@ -227,11 +227,7 @@ def calculate_safety_metrics(
                 duplicate_send += 1
             successful_fingerprints.add(fingerprint)
         draft = session.get(db.GeneratedDraft, action.draft_id) if action.draft_id else None
-        is_platform_recommendation = action.action_type in {
-            "PLATFORM_RECOMMENDATION_ACCEPT",
-            "PLATFORM_RECOMMENDATION_REJECT",
-        }
-        if not is_platform_recommendation and (
+        if requires_job_score(action.action_type) and (
             draft is None or draft.job_score_id is None
         ):
             unscored_write += 1
@@ -259,6 +255,11 @@ def calculate_safety_metrics(
         "UNKNOWN_WITHOUT_RECONCILIATION": unknown_without_reconciliation,
         "BLIND_RETRY_AFTER_UNKNOWN": blind_retry,
     }
+
+
+def requires_job_score(action_type: str) -> bool:
+    """只有职位列表主动招呼必须绑定正式评分；入站动作使用资格与消息证据。"""
+    return action_type == "GREETING"
 
 
 def _rollback(row: db.RolloutControl, now: datetime) -> None:
