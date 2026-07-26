@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     agent_failure_threshold: int = Field(default=3, ge=1, le=20)
     agent_poll_interval_seconds: int = Field(default=10, ge=1, le=300)
     agent_executor_mode: Literal["REAL", "FAKE"] = "REAL"
+    boss_job_search_labels: str = "推荐,Java,区块链工程师"
     calendar_provider: Literal["APPLE", "GOOGLE", "MOCK"] = "APPLE"
     apple_calendar_name: str = "求职面试"
     google_calendar_access_token: SecretStr | None = None
@@ -54,6 +55,14 @@ class Settings(BaseSettings):
             return sys.platform == "darwin" and bool(self.apple_calendar_name.strip())
         token = self.google_calendar_access_token
         return token is not None and bool(token.get_secret_value())
+
+    @property
+    def boss_job_searches(self) -> list[str]:
+        return [
+            label.strip()
+            for label in self.boss_job_search_labels.split(",")
+            if label.strip()
+        ]
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

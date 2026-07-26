@@ -31,13 +31,19 @@ export function JobPage() {
     return api<{ items: Job[] }>(`/jobs?${query}`).then((data) => setJobs(data.items))
   }
   useEffect(() => {
-    void Promise.all([
-      api<{ items: Job[] }>('/jobs'),
-      api<{ items: Strategy[] }>('/strategies'),
-    ]).then(([jobData, strategyData]) => {
-      setJobs(jobData.items); setStrategies(strategyData.items)
+    void api<{ items: Strategy[] }>('/strategies').then(async (strategyData) => {
+      setStrategies(strategyData.items)
       const enabled = strategyData.items.find((item) => item.enabled)
-      if (enabled) setStrategyId(enabled.id)
+      if (enabled) {
+        setStrategyId(enabled.id)
+        const jobData = await api<{ items: Job[] }>(
+          `/jobs?strategy_id=${encodeURIComponent(enabled.id)}`,
+        )
+        setJobs(jobData.items)
+      } else {
+        const jobData = await api<{ items: Job[] }>('/jobs')
+        setJobs(jobData.items)
+      }
     })
   }, [])
   const openScore = async (scoreId: string) => setScore(await api<ScoreResult>(`/scores/${scoreId}`))

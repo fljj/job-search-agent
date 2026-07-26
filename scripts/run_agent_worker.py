@@ -8,6 +8,7 @@ import socket
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -29,7 +30,10 @@ from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
 from apps.api.app.services.agent_service import pause_run, tick_run
 from apps.api.app.services.automation_service import _effective_rules
-from apps.api.app.services.job_discovery_service import process_job_discovery_batch
+from apps.api.app.services.job_discovery_service import (
+    job_scan_block_reasons,
+    process_job_discovery_batch,
+)
 from apps.api.app.services.message_discovery_service import (
     persist_discovery_batch,
     record_ready_platform_session,
@@ -190,6 +194,84 @@ def _single_worker_lock() -> Iterator[None]:
         yield
 
 
+def _run_boss_job_discovery(
+    session: Session,
+    run: db.AgentRun,
+    worker_id: str,
+    cdp_url: str,
+    executor: ActionExecutor,
+    rules: object,
+) -> None:
+    from packages.policy_engine.automation import AutomationRules
+
+    assert isinstance(rules, AutomationRules)
+    raw_job_cursor = (run.cursor or {}).get("job_discovery")
+    job_cursor = (
+        raw_job_cursor if isinstance(raw_job_cursor, dict) else {}
+    )
+    raw_job_position = job_cursor.get("scroll_position")
+    raw_seen_jobs = job_cursor.get("seen_job_ids")
+    search_keys = get_settings().boss_job_searches
+    try:
+        job_batch = BossJobDiscoveryAdapter(get_browser_selectors()).scan(
+            cdp_url,
+            search_key=str(
+                job_cursor.get("search_key")
+                or (search_keys[0] if search_keys else "CURRENT_SEARCH")
+            ),
+            search_keys=search_keys,
+            refresh_before_scan=bool(
+                job_cursor.get("refresh_before_scan", False)
+            ),
+            switch_search_before_scan=bool(
+                job_cursor.get(
+                    "switch_search_before_scan",
+                    not bool(raw_job_cursor),
+                )
+            ),
+            scroll_position=(
+                raw_job_position if isinstance(raw_job_position, int) else 0
+            ),
+            previous_cursor=(
+                str(job_cursor["next_cursor"])
+                if job_cursor.get("next_cursor")
+                else None
+            ),
+            seen_job_ids=[
+                str(item)
+                for item in (
+                    raw_seen_jobs if isinstance(raw_seen_jobs, list) else []
+                )
+            ],
+            limit=min(
+                get_settings().agent_tick_batch_size,
+                rules.hourly_scan_limit,
+            ),
+        )
+    except (OSError, TimeoutError, ValueError):
+        pause_run(session, run.id, ["JOB_DISCOVERY_UNAVAILABLE"])
+        return
+    process_job_discovery_batch(
+        session,
+        run,
+        job_batch,
+        provider=build_llm_provider(get_settings()),
+        executor=executor,
+        cdp_url=cdp_url,
+    )
+    gray_event(
+        logger,
+        "JOB_SCAN_COMPLETED",
+        worker_id=worker_id,
+        run_id=run.id,
+        scanned_count=len(job_batch.items),
+        exhausted=job_batch.exhausted,
+        cursor=job_batch.scroll_position,
+        search_key=job_batch.search_key,
+        next_search_key=job_batch.next_search_key,
+    )
+
+
 def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
     with SessionLocal() as session:
         run_ids = session.scalars(
@@ -222,62 +304,26 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                         and not rules.emergency_stop
                         and allows_rollout_job_scan(session, run.platform)
                     ):
-                        raw_job_cursor = (run.cursor or {}).get("job_discovery")
-                        job_cursor = (
-                            raw_job_cursor
-                            if isinstance(raw_job_cursor, dict)
-                            else {}
+                        scan_blockers = job_scan_block_reasons(
+                            session, run, rules, datetime.now(UTC)
                         )
-                        raw_job_position = job_cursor.get("scroll_position")
-                        raw_seen_jobs = job_cursor.get("seen_job_ids")
-                        try:
-                            job_batch = BossJobDiscoveryAdapter(
-                                get_browser_selectors()
-                            ).scan(
+                        if scan_blockers:
+                            gray_event(
+                                logger,
+                                "JOB_SCAN_SKIPPED",
+                                worker_id=worker_id,
+                                run_id=run_id,
+                                reason_codes=scan_blockers,
+                            )
+                        else:
+                            _run_boss_job_discovery(
+                                session,
+                                run,
+                                worker_id,
                                 cdp_url,
-                                search_key=str(
-                                    job_cursor.get("search_key") or "CURRENT_SEARCH"
-                                ),
-                                scroll_position=(
-                                    raw_job_position
-                                    if isinstance(raw_job_position, int)
-                                    else 0
-                                ),
-                                seen_job_ids=[
-                                    str(item)
-                                    for item in (
-                                        raw_seen_jobs
-                                        if isinstance(raw_seen_jobs, list)
-                                        else []
-                                    )
-                                ],
-                                limit=min(
-                                    get_settings().agent_tick_batch_size,
-                                    rules.hourly_scan_limit,
-                                ),
+                                executor,
+                                rules,
                             )
-                        except (OSError, TimeoutError, ValueError):
-                            pause_run(
-                                session, run_id, ["JOB_DISCOVERY_UNAVAILABLE"]
-                            )
-                            continue
-                        process_job_discovery_batch(
-                            session,
-                            run,
-                            job_batch,
-                            provider=build_llm_provider(get_settings()),
-                            executor=executor,
-                            cdp_url=cdp_url,
-                        )
-                        gray_event(
-                            logger,
-                            "JOB_SCAN_COMPLETED",
-                            worker_id=worker_id,
-                            run_id=run_id,
-                            scanned_count=len(job_batch.items),
-                            exhausted=job_batch.exhausted,
-                            cursor=job_batch.scroll_position,
-                        )
                 elif run.platform == Platform.MAIMAI.value:
                     if not _discover_messages(
                         session,

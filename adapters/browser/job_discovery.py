@@ -34,6 +34,8 @@ class JobDiscoveryBatch(BaseModel):
     items: list[DiscoveredJob] = Field(default_factory=list)
     seen_job_ids: list[str] = Field(default_factory=list, max_length=2000)
     exhausted: bool = False
+    next_search_key: str | None = None
+    refresh_before_next_scan: bool = False
 
 
 class BossJobDiscoveryAdapter:
@@ -48,7 +50,11 @@ class BossJobDiscoveryAdapter:
         cdp_url: str,
         *,
         search_key: str = "CURRENT_SEARCH",
+        search_keys: list[str] | None = None,
+        refresh_before_scan: bool = False,
+        switch_search_before_scan: bool = False,
         scroll_position: int = 0,
+        previous_cursor: str | None = None,
         seen_job_ids: list[str] | None = None,
         limit: int = 20,
         interval_seconds: int = 30,
@@ -56,6 +62,15 @@ class BossJobDiscoveryAdapter:
         validate_local_cdp_url(cdp_url)
         target = self._find_list_target(cdp_url)
         with RawCdpPageReader(target) as page:
+            if refresh_before_scan:
+                page._evaluate("location.reload()")
+                time.sleep(2)
+            if (
+                switch_search_before_scan
+                and search_keys
+                and search_key in search_keys
+            ):
+                self._activate_search(page, search_key)
             listing = extract_current_page(
                 page, Platform.BOSS, self.selectors, self.config.version
             )
@@ -67,7 +82,7 @@ class BossJobDiscoveryAdapter:
             candidates = select_job_candidates(
                 listing.jobs,
                 seen_job_ids or [],
-                scroll_position=scroll_position,
+                scroll_position=0,
                 limit=limit,
             )
             items = [
@@ -80,15 +95,18 @@ class BossJobDiscoveryAdapter:
                 "if (!element) return false; element.scrollTop = element.scrollHeight; "
                 "element.dispatchEvent(new Event('scroll', {bubbles: true})); return true; })()"
             )
-            next_position = min(
-                len(listing.jobs), scroll_position + limit
+            next_position = scroll_position + len(candidates)
+            exhausted = is_job_list_exhausted(
+                len(candidates), listing.cursor, previous_cursor
             )
-            exhausted = next_position >= len(listing.jobs) and not listing.cursor
             seen = list(dict.fromkeys([
                 *(seen_job_ids or []),
                 *(item.external_job_id for item in candidates),
             ]))[-2000:]
             current = datetime.now(UTC)
+            next_search, wrapped = next_job_search(
+                search_key, search_keys or [], exhausted=exhausted
+            )
             return JobDiscoveryBatch(
                 platform=Platform.BOSS,
                 search_key=search_key,
@@ -101,7 +119,32 @@ class BossJobDiscoveryAdapter:
                 items=items,
                 seen_job_ids=seen,
                 exhausted=exhausted,
+                next_search_key=next_search,
+                refresh_before_next_scan=wrapped,
             )
+
+    def _activate_search(
+        self, page: RawCdpPageReader, search_key: str
+    ) -> None:
+        activated = page._evaluate(
+            "(() => {"
+            f"const expected = {json.dumps(search_key)}.trim().toLocaleLowerCase();"
+            "const visible = element => element.getClientRects().length > 0 "
+            "&& getComputedStyle(element).visibility !== 'hidden';"
+            "const candidates = Array.from(document.querySelectorAll("
+            "'.c-expect-select a'));"
+            "const target = candidates.find(element => visible(element) "
+            "&& (() => {"
+            "const actual = (element.textContent || '').trim().toLocaleLowerCase();"
+            "return actual === expected || actual.startsWith(`${expected}(`);"
+            "})());"
+            "if (!target) return false;"
+            "target.click(); return true;"
+            "})()"
+        )
+        if not activated:
+            raise ValueError(f"BOSS 职位搜索入口不可用: {search_key}")
+        time.sleep(1)
 
     def _find_list_target(self, cdp_url: str) -> str:
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
@@ -221,6 +264,30 @@ def select_job_candidates(
         for item in items[scroll_position : scroll_position + limit]
         if item.external_job_id not in seen
     ]
+
+
+def next_job_search(
+    current: str, search_keys: list[str], *, exhausted: bool
+) -> tuple[str, bool]:
+    """返回下一次扫描入口，以及是否需要在下一次扫描前刷新页面。"""
+    if not exhausted or not search_keys:
+        return current, False
+    try:
+        current_index = search_keys.index(current)
+    except ValueError:
+        return search_keys[0], False
+    next_index = (current_index + 1) % len(search_keys)
+    return search_keys[next_index], next_index == 0
+
+
+def is_job_list_exhausted(
+    candidate_count: int,
+    current_cursor: str | None,
+    previous_cursor: str | None,
+) -> bool:
+    return candidate_count == 0 and (
+        not current_cursor or current_cursor == previous_cursor
+    )
 
 
 def verify_job_target(

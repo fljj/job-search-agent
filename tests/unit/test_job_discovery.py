@@ -1,6 +1,11 @@
 import pytest
 
-from adapters.browser.job_discovery import select_job_candidates, verify_job_target
+from adapters.browser.job_discovery import (
+    is_job_list_exhausted,
+    next_job_search,
+    select_job_candidates,
+    verify_job_target,
+)
 from apps.api.app.services.job_discovery_service import _job_safety_reasons
 from packages.browser_worker.models import (
     BrowserJob,
@@ -62,6 +67,55 @@ def test_scans_500_jobs_idempotently_after_list_reorder() -> None:
         )
         == []
     )
+
+
+def test_virtual_list_selects_unseen_items_without_reusing_cumulative_offset() -> None:
+    first_view = [summary(index) for index in range(10)]
+    second_view = [summary(index) for index in range(10, 20)]
+    seen = [item.external_job_id for item in first_view]
+
+    selected = select_job_candidates(
+        second_view,
+        seen,
+        scroll_position=0,
+        limit=10,
+    )
+
+    assert [item.external_job_id for item in selected] == [
+        f"job-{index}" for index in range(10, 20)
+    ]
+
+
+def test_virtual_list_exhausts_when_cursor_stops_and_no_new_job_is_visible() -> None:
+    assert is_job_list_exhausted(0, "cursor-1", "cursor-1") is True
+    assert is_job_list_exhausted(0, "cursor-2", "cursor-1") is False
+    assert is_job_list_exhausted(1, "cursor-1", "cursor-1") is False
+
+
+def test_job_search_rotation_keeps_current_search_until_exhausted() -> None:
+    searches = ["推荐", "Java", "区块链工程师"]
+
+    assert next_job_search("Java", searches, exhausted=False) == ("Java", False)
+
+
+def test_job_search_rotation_switches_tabs_and_refreshes_after_full_cycle() -> None:
+    searches = ["推荐", "Java", "区块链工程师"]
+
+    assert next_job_search("推荐", searches, exhausted=True) == ("Java", False)
+    assert next_job_search("Java", searches, exhausted=True) == (
+        "区块链工程师",
+        False,
+    )
+    assert next_job_search("区块链工程师", searches, exhausted=True) == (
+        "推荐",
+        True,
+    )
+
+
+def test_unknown_job_search_recovers_to_first_configured_search() -> None:
+    assert next_job_search(
+        "已删除的入口", ["推荐", "Java"], exhausted=True
+    ) == ("推荐", False)
 
 
 def test_job_detail_verification_rejects_switched_job() -> None:

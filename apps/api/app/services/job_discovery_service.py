@@ -36,7 +36,7 @@ def process_job_discovery_batch(
         raise ValueError("职位发现批次平台与 Agent 运行不匹配")
     current = now or datetime.now(UTC)
     rules = _effective_rules(session, run.platform, run.strategy_id)
-    blocked = _scan_blocker(session, run, rules, current)
+    blocked = job_scan_block_reasons(session, run, rules, current)
     if blocked:
         _event(session, run, "JOB_SCAN_BLOCKED", blocked)
         session.commit()
@@ -147,13 +147,15 @@ def process_job_discovery_batch(
         _state_event(session, run, item, "RETURNING")
     root_cursor = dict(run.cursor or {})
     root_cursor["job_discovery"] = {
-        "search_key": batch.search_key,
+        "search_key": batch.next_search_key or batch.search_key,
         "scroll_position": 0 if batch.exhausted else batch.scroll_position,
         "next_cursor": batch.next_cursor,
         "seen_job_ids": batch.seen_job_ids,
         "last_scan_at": batch.scanned_at.isoformat(),
         "next_scan_at": batch.next_scan_at.isoformat(),
         "exhausted": batch.exhausted,
+        "refresh_before_scan": batch.refresh_before_next_scan,
+        "switch_search_before_scan": batch.exhausted,
     }
     run.cursor = root_cursor
     _event(session, run, "JOB_SCAN_COMPLETED", [f"{key.upper()}_{value}" for key, value in counts.items()])
@@ -161,7 +163,7 @@ def process_job_discovery_batch(
     return counts
 
 
-def _scan_blocker(
+def job_scan_block_reasons(
     session: Session, run: db.AgentRun, rules: object, now: datetime
 ) -> list[str]:
     from packages.policy_engine.automation import AutomationRules

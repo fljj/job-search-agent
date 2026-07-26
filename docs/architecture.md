@@ -145,7 +145,8 @@ job-search-agent/
 
 ### 3.8 第十阶段职位发现模块
 
-- `adapters/browser/job_discovery.py`：只负责读取当前唯一 BOSS 职位列表、驱动虚拟滚动、
+- `adapters/browser/job_discovery.py`：只负责读取当前唯一 BOSS 职位列表、按配置切换
+  搜索入口、完整轮询后刷新页面、驱动虚拟滚动、
   在新标签打开详情并复核外部职位 ID、公司和标题；不评分、不授权发送。
 - `job_discovery_service`：持久化发现记录，编排导入、解析、评分、去重、冷却和主动招呼
   授权，并推进职位发现游标。

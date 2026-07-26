@@ -15,6 +15,7 @@ from adapters.browser.message_discovery import (
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
+from apps.api.app.core.config import Settings
 from apps.api.app.models import entities as db
 from packages.browser_worker.actions import (
     ApprovedCommand,
@@ -42,6 +43,15 @@ def command() -> ApprovedCommand:
         recruiter="招聘人",
         content="您好",
     )
+
+
+def test_boss_job_search_labels_are_configurable() -> None:
+    settings = Settings(
+        _env_file=None,
+        boss_job_search_labels="推荐, Java ,区块链工程师,,",
+    )
+
+    assert settings.boss_job_searches == ["推荐", "Java", "区块链工程师"]
 
 
 def test_fake_executor_is_offline_and_records_commands() -> None:

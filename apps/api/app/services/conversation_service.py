@@ -117,7 +117,11 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
     ).all()
     items: list[dict[str, object]] = []
     for conversation in conversations:
-        job = session.get(db.Job, conversation.job_id)
+        job = (
+            session.get(db.Job, conversation.job_id)
+            if conversation.job_id
+            else None
+        )
         score = (
             session.get(db.JobScore, conversation.latest_job_score_id)
             if conversation.latest_job_score_id
@@ -152,6 +156,7 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
                     if job
                     else conversation.observed_company_name
                 ),
+                "job_id": conversation.job_id,
                 "job_title": (
                     job.title if job else conversation.observed_job_title
                 ),
