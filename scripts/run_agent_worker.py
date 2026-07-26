@@ -60,6 +60,23 @@ LOCK_PATH = "/tmp/job-search-agent-worker.lock"
 STOP_EVENT = threading.Event()
 
 
+def _send_worker_heartbeat(worker_id: str) -> None:
+    with SessionLocal() as session:
+        heartbeat_worker(session, worker_id)
+
+
+def _heartbeat_loop(
+    worker_id: str,
+    interval_seconds: int,
+    stop_event: threading.Event,
+) -> None:
+    while not stop_event.wait(interval_seconds):
+        try:
+            _send_worker_heartbeat(worker_id)
+        except Exception:
+            logger.exception("Worker heartbeat failed; will retry safely")
+
+
 def _build_executor(platform: str, mode: str) -> tuple[ActionExecutor, str]:
     if platform in {Platform.BOSS.value, Platform.MAIMAI.value}:
         if mode != "REAL":
@@ -360,17 +377,26 @@ def main() -> None:
                     "selector_version": get_browser_selectors().version,
                 },
             )
+        heartbeat_stop_event = threading.Event()
+        heartbeat_interval = max(5, min(settings.worker_stale_seconds // 3, 30))
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            args=(worker_id, heartbeat_interval, heartbeat_stop_event),
+            name="agent-worker-heartbeat",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
             while not STOP_EVENT.is_set():
                 try:
                     run_once(worker_id, cdp_url)
                     maintenance_once(cdp_url)
-                    with SessionLocal() as session:
-                        heartbeat_worker(session, worker_id)
                 except Exception:
                     logger.exception("Worker loop failed; will retry safely")
                 STOP_EVENT.wait(settings.agent_poll_interval_seconds)
         finally:
+            heartbeat_stop_event.set()
+            heartbeat_thread.join(timeout=heartbeat_interval + 1)
             with SessionLocal() as session:
                 stop_worker(session, worker_id)
 

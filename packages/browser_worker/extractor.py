@@ -120,13 +120,21 @@ def _extract_job(
     source_status = "CLOSED" if page.exists(selectors.job_closed_marker) else (
         "OPEN" if page.exists(selectors.job_open_marker) else "UNKNOWN"
     )
+    location = page.text(selectors.location)
+    work_mode = _normalize_work_mode(page.text(selectors.work_mode))
+    if (
+        platform is Platform.BOSS
+        and work_mode == "UNKNOWN"
+        and location
+    ):
+        work_mode = "ONSITE"
     job = BrowserJob(external_job_id=(
                          page.attribute(selectors.job_id, "data-job-id")
                          or _job_id_from_url(page.url)
                      ),
                      title=title, company_name=company, industry=page.text(selectors.industry),
-                     location=page.text(selectors.location),
-                     work_mode=_normalize_work_mode(page.text(selectors.work_mode)),
+                     location=location,
+                     work_mode=work_mode,
                      salary_text=page.text(selectors.salary),
                      recruiter_name=page.text(selectors.recruiter_on_job),
                      description=description, source_status=source_status)

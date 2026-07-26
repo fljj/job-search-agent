@@ -73,6 +73,18 @@ def test_job_detail_verification_rejects_switched_job() -> None:
     assert verify_job_target(selected, switched) == ["JOB_ID_MISMATCH"]
 
 
+def test_job_detail_accepts_full_company_name_for_truncated_list_name() -> None:
+    selected = summary(1)
+    result = detail(selected)
+    assert result.job is not None
+    result.job.company_name = f"{selected.company_name}有限责任公司"
+
+    assert verify_job_target(selected, result) == []
+
+    result.job.company_name = "完全不同的公司"
+    assert verify_job_target(selected, result) == ["JOB_COMPANY_MISMATCH"]
+
+
 @pytest.mark.parametrize(
     ("changes", "reason"),
     [

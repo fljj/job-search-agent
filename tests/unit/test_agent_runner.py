@@ -1,5 +1,7 @@
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -24,6 +26,7 @@ from packages.policy_engine.automation import AutomationRules
 from scripts.run_agent_worker import (
     _build_executor,
     _discover_messages,
+    _heartbeat_loop,
     _process_maimai_recommendations,
     _single_worker_lock,
 )
@@ -86,6 +89,32 @@ def test_only_one_worker_can_hold_process_lock(
     with _single_worker_lock(), pytest.raises(RuntimeError, match="已有 Agent Worker"):
         with _single_worker_lock():
             pytest.fail("第二个 Worker 不应取得进程锁")
+
+
+def test_worker_heartbeat_continues_independently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    intervals: list[int] = []
+    heartbeats: list[str] = []
+
+    class StopAfterOneHeartbeat:
+        def wait(self, interval: int) -> bool:
+            intervals.append(interval)
+            return len(intervals) > 1
+
+    monkeypatch.setattr(
+        "scripts.run_agent_worker._send_worker_heartbeat",
+        heartbeats.append,
+    )
+
+    _heartbeat_loop(
+        "worker-1",
+        20,
+        cast(threading.Event, StopAfterOneHeartbeat()),
+    )
+
+    assert intervals == [20, 20]
+    assert heartbeats == ["worker-1"]
 
 
 def test_message_discovery_reuses_platform_cursor(

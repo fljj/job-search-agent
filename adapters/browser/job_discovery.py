@@ -1,7 +1,8 @@
 import json
 import time
 from datetime import UTC, datetime
-from urllib.request import urlopen
+from urllib.parse import quote, urljoin, urlparse
+from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, Field
 
@@ -135,31 +136,52 @@ class BossJobDiscoveryAdapter:
             return DiscoveredJob(
                 summary=summary, reason_codes=["JOB_DETAIL_LINK_MISSING"]
             )
+        href = urljoin(page.url, href)
+        if urlparse(href).hostname not in self.selectors.allowed_hosts:
+            return DiscoveredJob(
+                summary=summary, reason_codes=["JOB_DETAIL_LINK_INVALID"]
+            )
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
             before = {str(item.get("id")) for item in json.loads(response.read())}
-        if not page._evaluate(f"Boolean(window.open({json.dumps(href)}, '_blank'))"):
+        request = Request(
+            f"{cdp_url.rstrip('/')}/json/new?{quote(href, safe=':/?=&%')}",
+            method="PUT",
+        )
+        try:
+            with urlopen(request, timeout=3) as response:
+                created_target = json.loads(response.read())
+        except (OSError, TimeoutError, ValueError):
             return DiscoveredJob(
                 summary=summary, reason_codes=["JOB_DETAIL_OPEN_FAILED"]
             )
+        created_target_id = str(created_target.get("id") or "")
         for _ in range(30):
             with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
                 targets = json.loads(response.read())
             for target in targets:
-                if str(target.get("id")) in before or not target.get("webSocketDebuggerUrl"):
+                target_id = str(target.get("id"))
+                if (
+                    target_id in before
+                    or (created_target_id and target_id != created_target_id)
+                    or not target.get("webSocketDebuggerUrl")
+                ):
                     continue
                 try:
                     with RawCdpPageReader(str(target["webSocketDebuggerUrl"])) as detail_page:
-                        try:
-                            result = extract_current_page(
-                                detail_page,
-                                Platform.BOSS,
-                                self.selectors,
-                                self.config.version,
-                                expected_company=summary.company_name,
-                                expected_job_title=summary.title,
-                            )
-                        finally:
-                            detail_page._evaluate("window.close()")
+                        result = extract_current_page(
+                            detail_page,
+                            Platform.BOSS,
+                            self.selectors,
+                            self.config.version,
+                            expected_company=summary.company_name,
+                            expected_job_title=summary.title,
+                        )
+                    if (
+                        result.status is not SessionStatus.SESSION_READY
+                        or result.page_type is not PageType.JOB
+                    ):
+                        continue
+                    self._close_target(cdp_url, target_id)
                     reasons = verify_job_target(summary, result)
                     return DiscoveredJob(
                         summary=summary,
@@ -169,9 +191,21 @@ class BossJobDiscoveryAdapter:
                 except (OSError, TimeoutError, ValueError):
                     continue
             time.sleep(0.1)
+        if created_target_id:
+            self._close_target(cdp_url, created_target_id)
         return DiscoveredJob(
             summary=summary, reason_codes=["JOB_DETAIL_NOT_READY"]
         )
+
+    @staticmethod
+    def _close_target(cdp_url: str, target_id: str) -> None:
+        try:
+            with urlopen(
+                f"{cdp_url.rstrip('/')}/json/close/{target_id}", timeout=3
+            ):
+                pass
+        except (OSError, TimeoutError, ValueError):
+            pass
 
 
 def select_job_candidates(
@@ -197,7 +231,10 @@ def verify_job_target(
         return ["JOB_DETAIL_MISSING"]
     if job.external_job_id and job.external_job_id != summary.external_job_id:
         return ["JOB_ID_MISMATCH"]
-    if job.company_name != summary.company_name:
+    if not (
+        summary.company_name in job.company_name
+        or job.company_name in summary.company_name
+    ):
         return ["JOB_COMPANY_MISMATCH"]
     if job.title != summary.title:
         return ["JOB_TITLE_MISMATCH"]

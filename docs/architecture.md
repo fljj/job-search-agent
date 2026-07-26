@@ -171,6 +171,8 @@ job-search-agent/
   审计差异检查。
 - `worker_instances` 与本机 `flock` 共同限制单实例；`agent_runs` 短租约限制具体运行
   的并发处理。
+- Worker 使用独立线程和独立数据库会话定时更新实例心跳，LLM 调用或单轮任务较慢时
+  不依赖主循环结束才续报状态；退出时先停止心跳线程再登记停止状态。
 - `reconciliation_tasks` 只调用浏览器只读观察能力，不能授权或重发动作；超时转人工。
 - `packages/audit/redaction.py`：日志输出前移除 Bearer Token、API Key 和数据库密码。
 - `packages/audit/gray_logging.py`：将结构化灰度事件轮转写入配置目录，并复用脱敏过滤器。

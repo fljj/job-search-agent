@@ -81,6 +81,15 @@ def test_normalizes_boss_company_accessibility_prefix() -> None:
     assert result.job and result.job.company_name == "示例科技"
 
 
+def test_boss_job_with_location_defaults_to_onsite_when_mode_is_absent() -> None:
+    page, selectors = job_page(Platform.BOSS)
+    page.texts.pop(selectors.work_mode)
+
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+
+    assert result.job and result.job.work_mode == "ONSITE"
+
+
 def test_preserves_boss_recruiting_agency_company_prefix_as_scoring_evidence() -> None:
     page, selectors = job_page(Platform.BOSS)
     page.texts[selectors.company] = "代招公司：上海某大型证券公司"
