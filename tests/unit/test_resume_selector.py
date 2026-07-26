@@ -1,21 +1,21 @@
 from uuid import uuid4
 
-from packages.resume_selector.selector import ResumeCandidate, select_resume
+from packages.resume_selector.selector import ResumeCandidate, select_default_resume
 
 
-def test_selects_available_matching_resume() -> None:
+def test_selects_first_available_resume_without_job_matching() -> None:
     resume = ResumeCandidate(uuid4(), "Java后端.pdf", ["Java后端"], True)
-    assert select_resume([resume], "高级Java后端工程师") == resume
+    assert select_default_resume([resume]) == resume
 
 
-def test_does_not_select_unavailable_or_unmatched_resume() -> None:
+def test_does_not_select_unavailable_resume() -> None:
     resume = ResumeCandidate(uuid4(), "Java后端.pdf", ["Java后端"], False)
-    assert select_resume([resume], "Java后端") is None
+    assert select_default_resume([resume]) is None
 
 
-def test_multiple_matching_resumes_require_unambiguous_selection() -> None:
+def test_multiple_available_resumes_select_first_as_platform_default() -> None:
     resumes = [
         ResumeCandidate(uuid4(), "Java后端-A.pdf", ["Java后端"], True),
-        ResumeCandidate(uuid4(), "Java后端-B.pdf", ["Java后端"], True),
+        ResumeCandidate(uuid4(), "产品.pdf", ["产品"], True),
     ]
-    assert select_resume(resumes, "高级Java后端工程师") is None
+    assert select_default_resume(resumes) == resumes[0]

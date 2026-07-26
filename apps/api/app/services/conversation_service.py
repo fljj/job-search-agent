@@ -54,7 +54,7 @@ from packages.llm.models import (
 )
 from packages.llm.ports import LlmProvider
 from packages.policy_engine.content_check import validate_edited_content
-from packages.resume_selector.selector import ResumeCandidate, select_resume
+from packages.resume_selector.selector import ResumeCandidate, select_default_resume
 
 POLICY_VERSION = "conversation-policy-v1"
 GENERATOR_VERSION = "conversation-llm-v4"
@@ -424,14 +424,9 @@ def create_resume_draft(
             db.Resume.user_id == DEFAULT_USER_ID,
             db.Resume.platform == conversation.platform,
             db.Resume.is_available.is_(True),
-        )
+        ).order_by(db.Resume.created_at.asc(), db.Resume.id.asc())
     ).all()
-    job = (
-        get_job_entity(session, conversation.job_id)
-        if conversation.job_id
-        else None
-    )
-    selected = select_resume(
+    selected = select_default_resume(
         [
             ResumeCandidate(
                 id=item.id,
@@ -440,8 +435,7 @@ def create_resume_draft(
                 is_available=item.is_available,
             )
             for item in resumes
-        ],
-        job.title if job else message.content,
+        ]
     )
     duplicate = bool(
         selected
@@ -461,6 +455,7 @@ def create_resume_draft(
     )
     fingerprint = _fingerprint(
         "RESUME",
+        "DEFAULT_PLATFORM_RESUME_V1",
         conversation.id,
         selected.id if selected else None,
         evaluation.evidence_message_ids,
@@ -474,7 +469,7 @@ def create_resume_draft(
     if existing:
         return _draft_response(session, existing)
     result = DraftResult(
-        content=selected.attachment_name if selected else "无可用的匹配简历附件",
+        content=selected.attachment_name if selected else "无可用的默认简历附件",
         intents=[Intent.RESUME_REQUEST],
         confidence=float(evaluation.confidence),
         risk_codes=[] if allowed else ["RESUME_SEND_CONDITIONS_NOT_MET"],

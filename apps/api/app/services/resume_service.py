@@ -6,7 +6,7 @@ from apps.api.app.schemas.conversation import ResumePayload, ResumeResponse
 from apps.api.app.services.errors import ResourceNotFoundError, VersionConflictError
 from apps.api.app.services.job_service import get_job_entity
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
-from packages.resume_selector.selector import ResumeCandidate, select_resume
+from packages.resume_selector.selector import ResumeCandidate, select_default_resume
 
 
 def save_resume(session: Session, payload: ResumePayload, resume_id: object | None = None) -> ResumeResponse:
@@ -40,12 +40,16 @@ def list_resumes(session: Session, page: int, page_size: int) -> tuple[list[Resu
 
 
 def select_resume_for_job(session: Session, job_id: object) -> ResumeResponse | None:
-    job = get_job_entity(session, job_id)
-    rows = session.scalars(select(db.Resume).where(db.Resume.user_id == DEFAULT_USER_ID)).all()
-    selected = select_resume([
+    get_job_entity(session, job_id)
+    rows = session.scalars(
+        select(db.Resume)
+        .where(db.Resume.user_id == DEFAULT_USER_ID)
+        .order_by(db.Resume.created_at.asc(), db.Resume.id.asc())
+    ).all()
+    selected = select_default_resume([
         ResumeCandidate(item.id, item.attachment_name, item.target_directions, item.is_available)
         for item in rows
-    ], job.title)
+    ])
     if selected is None:
         return None
     entity = next(item for item in rows if item.id == selected.id)

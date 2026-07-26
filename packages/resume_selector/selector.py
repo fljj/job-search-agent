@@ -10,12 +10,8 @@ class ResumeCandidate:
     is_available: bool
 
 
-def select_resume(resumes: list[ResumeCandidate], job_title: str) -> ResumeCandidate | None:
-    lowered = job_title.lower()
-    matches = [
-        resume
-        for resume in resumes
-        if resume.is_available
-        and any(direction.lower() in lowered for direction in resume.target_directions)
-    ]
-    return matches[0] if len(matches) == 1 else None
+def select_default_resume(
+    resumes: list[ResumeCandidate],
+) -> ResumeCandidate | None:
+    """选择平台已登记的第一份可用简历，不按职位标题二次匹配。"""
+    return next((resume for resume in resumes if resume.is_available), None)
