@@ -66,9 +66,9 @@ export function JobPage() {
       { title: '评分', render: (_: unknown, job: Job) => job.latest_score
         ? <Tag color={job.latest_score.total_score >= 80 ? 'green' : 'blue'}>
           {job.latest_score.total_score} / {job.latest_score.grade}</Tag> : <Tag>待评分</Tag> },
-      { title: '资格', render: (_: unknown, job: Job) => job.latest_score
+      { title: '硬性规则', render: (_: unknown, job: Job) => job.latest_score
         ? <Tag color={job.latest_score.hard_rejected ? 'red' : 'green'}>
-          {job.latest_score.hard_rejected ? '硬性排除' : job.latest_score.eligibility}</Tag> : '-' },
+          {job.latest_score.hard_rejected ? '已排除' : '通过'}</Tag> : <Tag>待评分</Tag> },
       { title: '操作', render: (_: unknown, job: Job) => <Button
         disabled={!job.latest_score} onClick={() => job.latest_score && void openScore(job.latest_score.id)}>
         查看评分证据</Button> },
