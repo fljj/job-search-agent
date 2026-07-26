@@ -1,205 +1,378 @@
 # job-search-agent
 
-无人值守求职 Agent。系统自动发现和评分职位、主动沟通、处理普通招聘消息，并根据
-对话证据发送网站附件简历；电话与面试具体时间、安全异常和平台验证仍由用户处理。
+面向 BOSS 直聘和脉脉的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
+消息，并按规则发送网站内已有简历；电话和面试的具体时间、登录验证、验证码及安全异常
+仍由用户处理。
 
-## 技术栈
+## 1. 系统组成
 
-- Python 3.13、FastAPI、Pydantic v2、SQLAlchemy 2、Alembic、PostgreSQL
-- React、TypeScript、Ant Design、Vite
-- Playwright（连接用户手动登录的本机 Chromium CDP 会话）
-- pytest、Ruff、mypy、Vitest
+- API：FastAPI、SQLAlchemy、Alembic、PostgreSQL
+- Web：React、TypeScript、Ant Design、Vite
+- Worker：通过 Playwright 连接本机已登录的 Chrome CDP 会话
+- LLM：默认使用智谱 `glm-5.2`
+- 日历：macOS 默认使用 Apple Calendar
 
-## 本地启动
+API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
+状态的平台任务，不需要为 BOSS 和脉脉分别启动 Worker。
 
-### 1. 准备环境
+## 2. 环境要求
+
+- macOS（Apple Calendar 和下面的 Chrome 启动命令针对 macOS）
+- Python `3.13`
+- Node.js `20.19+`、`22.12+` 或 `24+`
+- npm
+- Docker Desktop
+- Google Chrome
+
+确认版本：
+
+```bash
+python3.13 --version
+node --version
+npm --version
+docker --version
+```
+
+所有后端命令都应在项目根目录执行，因为程序会从根目录读取 `.env` 和 `config/`。
+
+## 3. 首次安装
+
+### 3.1 创建环境变量文件
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres
+```
+
+打开 `.env`，至少配置智谱密钥：
+
+```dotenv
+LLM_PROVIDER=ZHIPU
+ZHIPU_API_KEY=你的智谱API密钥
+LLM_MODEL=glm-5.2
+AGENT_EXECUTOR_MODE=REAL
+CALENDAR_PROVIDER=APPLE
+APPLE_CALENDAR_NAME=求职面试
+```
+
+不要提交 `.env`。系统不会在接口或日志中返回 API Key。
+
+常用 Worker 配置：
+
+| 配置 | 默认值 | 说明 |
+|---|---|---|
+| `AGENT_EXECUTOR_MODE` | `REAL` | BOSS/脉脉必须使用 `REAL`；离线 MOCK 使用 `FAKE` |
+| `AGENT_CDP_URL` | `http://127.0.0.1:9222` | 专用 Chrome 的调试地址 |
+| `AGENT_POLL_INTERVAL_SECONDS` | `10` | Worker 轮询间隔 |
+| `AGENT_TICK_BATCH_SIZE` | `10` | 每轮最多处理数量 |
+| `BOSS_JOB_SEARCH_LABELS` | `推荐,Java,区块链工程师` | BOSS 职位入口名称，必须与页面文字一致 |
+| `AGENT_LOG_DIR` | `~/Desktop/job-search-agent-gray/logs` | Worker 日志目录 |
+| `WORKER_STALE_SECONDS` | `60` | 超过该时间没有心跳则标记 Worker 异常 |
+
+完整配置及默认值见 [.env.example](.env.example)。
+
+### 3.2 安装后端
+
+```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -e '.[dev]'
 ```
 
-项目 PostgreSQL 映射到本机 `55432` 端口，避免与已有本地 PostgreSQL 冲突。
-
-`.env.example` 默认配置智谱 `glm-5.2`。`LLM_PROVIDER=FAKE` 可完全离线运行；使用
-智谱时只将 `ZHIPU_API_KEY` 写入本机 `.env`，不得提交。智谱模式不会读取或发送既有
-千问 `LLM_API_KEY`。
-
-硬过滤识别词、自动沟通、平台推荐和排期规则分别集中在
-`config/job-parser.json`、`config/conversation-policy.json`、
-`config/recommendation-policy.json` 和 `config/scheduling-policy.json`。
-
-Mac 默认使用 `CALENDAR_PROVIDER=APPLE`，通过系统 Calendar 读取所有日历的忙碌时间，
-并把用户明确授权的面试事件写入 `APPLE_CALENDAR_NAME` 指定的日历。首次访问时 macOS
-会请求“自动化/日历”权限；拒绝权限、目标日历不存在或 Calendar 不可用时，系统统一
-返回日历不可用。也可以改为 `MOCK` 做本地测试，或配置 `GOOGLE` 供应商。
-
-统一 LLM 适配器的默认测试不会访问网络。配置密钥后可显式执行一次模型消息分类冒烟，
-或执行一次不访问数据库和招聘网站的职位解析及条目级证据评分冒烟：
+以后重新打开终端，只需在项目根目录执行：
 
 ```bash
-python scripts/smoke_llm.py
-python scripts/smoke_llm_score.py
+source .venv/bin/activate
 ```
 
-### 2. 初始化数据库
+### 3.3 启动 PostgreSQL
+
+先启动 Docker Desktop，再执行：
+
+```bash
+docker compose up -d postgres
+docker compose ps
+```
+
+PostgreSQL 使用本机端口 `55432`，数据保存在 Docker volume `postgres_data` 中。
+
+### 3.4 执行数据库迁移
 
 ```bash
 alembic upgrade head
 ```
 
-### 3. 启动 API
+每次拉取包含数据库变更的新代码后，都应再次运行该命令。
 
-```bash
-uvicorn apps.api.app.main:app --reload
-```
-
-API 文档：`http://localhost:8000/docs`。
-
-### 4. 启动前端
+### 3.5 安装前端
 
 ```bash
 cd apps/web
 npm install
+cd ../..
+```
+
+## 4. 启动 API 和前端
+
+开发环境建议分别打开两个终端。
+
+终端一，在项目根目录启动 API：
+
+```bash
+source .venv/bin/activate
+uvicorn apps.api.app.main:app --reload
+```
+
+- API：<http://localhost:8000>
+- API 文档：<http://localhost:8000/docs>
+
+终端二启动前端：
+
+```bash
+cd apps/web
 npm run dev
 ```
 
-前端地址：`http://localhost:5173`。
+- 前端：<http://localhost:5173>
 
-## 核心流程
+首次使用时在前端完成：
 
-1. `PUT /api/v1/profile` 保存候选人评分资料。
-2. `POST /api/v1/strategies` 创建完整求职策略。
-3. `POST /api/v1/jobs/import` 或 `/import/batch` 导入模拟 JD。
-4. `POST /api/v1/jobs/{job_id}/parse` 使用 `LLM` 模式生成模型结构化解析记录；`RULE` 仅保留为离线兼容模式。
-5. `POST /api/v1/jobs/{job_id}/scores` 执行“确定性硬排除 + LLM 七维评分 + 程序校验”并保存结果；`/scores/re-evaluate` 配合 `Idempotency-Key` 显式重新评估。
-6. `GET /api/v1/scores/{score_id}` 查看维度明细、排除原因和风险。
-7. `POST /api/v1/knowledge-items` 录入有来源、敏感度和自动引用权限的事实。
-8. `POST /api/v1/resumes` 登记网站内附件简历元数据。
-9. `POST /api/v1/conversations` 和消息接口创建模拟对话。
-10. `POST /api/v1/drafts/reply`、`/drafts/greeting` 或 `/drafts/resume` 生成 LLM 事实受限草稿及权限决策；只有具体时间创建确认任务。
-11. `POST /api/v1/browser/read-current` 只读解析当前 BOSS/脉脉页面并幂等导入。
-12. 只有电话和面试具体时间进入“面试确认”页；普通招呼、回复、婉拒和按请求发送
-    简历不创建人工确认任务。
-13. 在“安全自动化”页按全局、平台或策略配置开关与阈值，通过 `/api/v1/automation/dispatch` 执行服务端授权。
-14. Agent 自动识别电话和面试邀请；在“电话与面试安排”页检查日历、确认或拒绝具体
-    回复，并独立授权创建日历事件。新的改期任务会替代尚未完成的旧任务。
-15. 通过 `/api/v1/automation/runs` 启动 Agent，并由 `/runs/{id}/tick` 执行受数据库短租约保护的离线轮询；可暂停、恢复和查看心跳、计数及熔断原因。
-16. 真实 BOSS 和脉脉无人值守必须先初始化平台自动化控制。默认从一级只读消息开始，
-    每级至少运行 24 小时且全部安全指标为零后，才可人工升级一级；用户明确授权正式
-    接管时可执行 `ACTIVATE_FORMAL` 直接进入第六级，但安全指标非零时仍拒绝。
+1. 在“候选人中心”维护候选人资料、可信事实和网站内简历名称。
+2. 在“求职策略”创建并启用策略。
+3. 在“系统设置”确认数据库、LLM 和日历状态正常。
 
-本地短轮询 Worker 可独立启动。执行器必须通过 `AGENT_EXECUTOR_MODE` 显式隔离：
-真实 BOSS 使用 `REAL`，离线 `MOCK` 测试使用 `FAKE`，配置交叉时 Worker 拒绝执行。
-BOSS 平台会通过本机 CDP 自动扫描唯一的消息列表页，按未读会话切换并复核会话 ID、
-招聘人、公司和职位。入站消息即使尚未唯一绑定职位或正式评分也会幂等导入；此时只
-允许安全澄清、按明确请求发送简历等入站动作，主动招呼仍必须使用有效评分。
-列表游标、最后消息标识及最多 500 个去重键保存在 Agent 运行记录中；虚拟滚动会在
-后续轮询继续加载。启用“主动扫描职位”后，Worker 还会读取唯一的 BOSS 职位搜索列表，
-逐个新标签核验详情，并执行导入、GLM 评分、程序授权、去重/冷却和主动招呼。职位扫描
-仅在配置的工作时段和限额内运行，紧急停止优先阻断所有自动动作。Worker 使用本机进程
-锁避免重复启动，并记录执行器类型。专用浏览器需同时保留一个消息列表页和一个职位
-搜索列表页：
+LLM 配置显示“未配置”时，确认 `ZHIPU_API_KEY` 写在项目根目录 `.env`，然后重启 API
+和 Worker。修改 `.env` 不会自动刷新已经运行的进程。
+
+可在不访问招聘网站的情况下检查智谱连接：
 
 ```bash
+source .venv/bin/activate
+python scripts/smoke_llm.py
+python scripts/smoke_llm_score.py
+```
+
+这两个命令会真实调用模型并消耗少量 Token。
+
+## 5. 准备招聘平台专用 Chrome
+
+Worker 不启动浏览器，也不保存账号密码、Cookie 或验证码。必须由用户手动打开专用
+Chrome 并登录。
+
+如果已经有使用端口 `9222` 的专用 Chrome，不要重复启动。首次启动：
+
+```bash
+open -na "Google Chrome" --args \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/job-agent-browser-profile
+```
+
+在这个 Chrome 中手动登录并保留以下唯一标签页：
+
+### BOSS
+
+- 一个消息列表页：`https://www.zhipin.com/web/geek/chat`
+- 一个职位列表页：`https://www.zhipin.com/web/geek/jobs`
+
+### 脉脉
+
+- 一个消息页：`https://maimai.cn/chat`
+
+同一平台不要打开多个消息列表或职位列表，否则 Worker 无法唯一确认操作目标并会暂停。
+遇到登录验证、验证码或页面结构无法确认时，Worker 会停止该平台写操作。
+
+可检查 CDP 是否可用：
+
+```bash
+curl http://127.0.0.1:9222/json/version
+```
+
+## 6. 配置并启动 Agent Run
+
+Worker 进程和平台 Run 是两回事：
+
+- Run：保存在数据库中，表示 BOSS 或脉脉是否应该运行。
+- Worker：本机唯一执行进程，轮询并处理所有 `RUNNING` Run。
+
+### 6.1 配置自动化
+
+打开前端“系统设置”：
+
+1. 创建或保存全局自动化配置，设置“启用”为开。
+2. 按需要开启自动回复、按请求发送简历和主动扫描职位。
+3. 主动招呼最低分不得低于 80。
+4. 设置工作时间、小时/每日限额以及公司和招聘人冷却时间。
+5. 保持“紧急停止”为关闭。
+
+建议先使用较低限额观察日志，再逐步增加。电话和面试的具体时间无论日历是否空闲，都
+不会由 Worker 自动确认。
+
+新环境也可以通过 API 一次创建全局配置。下面的示例开启职位扫描、普通回复、主动招呼、
+按明确请求发送简历和脉脉推荐；正式写操作仍需通过平台控制、安全检查和限额：
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/v1/automation/settings \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "scope_type": "GLOBAL",
+    "scope_key": "GLOBAL",
+    "enabled": true,
+    "paused": false,
+    "auto_greet_enabled": true,
+    "auto_greet_min_score": 80,
+    "auto_reply_enabled": true,
+    "low_score_decline_enabled": true,
+    "auto_reply_min_confidence": 0.9,
+    "auto_resume_enabled": true,
+    "auto_resume_min_score": 60,
+    "maimai_recommendation_enabled": true,
+    "maimai_recommendation_resume_enabled": true,
+    "hourly_limit": 10,
+    "daily_limit": 50,
+    "emergency_stop": false,
+    "job_scan_enabled": true,
+    "hourly_scan_limit": 100,
+    "daily_scan_limit": 500,
+    "company_cooldown_hours": 24,
+    "recruiter_cooldown_hours": 24,
+    "work_start_hour": 8,
+    "work_end_hour": 22
+  }'
+```
+
+已有配置优先在前端修改。调用 `PUT` 会按提交内容更新对应范围，不要在不了解当前限额
+时直接覆盖生产配置。
+
+### 6.2 初始化平台控制
+
+BOSS 首次运行时，在“系统设置”的“BOSS 无人值守灰度”中点击“初始化”，然后启用
+当前级别。系统支持逐级验证；正式接管仍受安全指标和服务端门禁限制。
+
+脉脉的普通消息与系统推荐使用同一个 MAIMAI Run。系统推荐是否启用、是否允许同意后
+发送平台资料，分别由：
+
+- `maimai_recommendation_enabled`
+- `maimai_recommendation_resume_enabled`
+
+控制。推荐卡片使用确定性规则判断，不调用 LLM；推荐后的真人对话才可能调用 LLM。
+具体推荐规则见
+[config/recommendation-policy.json](config/recommendation-policy.json)。
+
+### 6.3 创建 BOSS 和脉脉 Run
+
+在“系统设置”底部的“Agent 运行”区域：
+
+1. 选择平台 `BOSS`。
+2. 选择已经启用的求职策略。
+3. 点击“启动”。
+4. 再选择平台 `MAIMAI`，使用同一策略点击“启动”。
+
+平台显示 `RUNNING` 只表示数据库任务已经启动；必须继续启动 Worker 才会实际扫描页面。
+
+## 7. 启动 Worker
+
+打开第三个终端，在项目根目录执行：
+
+```bash
+source .venv/bin/activate
 python scripts/run_agent_worker.py
 ```
 
-Worker 启动时检查数据库迁移、LLM、选择器、执行器，以及真实运行需要的 CDP 和登录
-会话；同时登记 PID、停止状态，并由独立定时任务持续更新心跳，长时间评分不会被误报为
-失联。结果未知动作自动进入只读对账队列，持续未知超过
-配置时限后升级人工处理。Agent 控制台展示自检、Worker、游标、未知动作和审计差异。
-灰度日志默认轮转写入 `~/Desktop/job-search-agent-gray/logs/agent-gray.log`，记录
-Worker 周期、消息/职位扫描数量、动作计数、暂停原因及灰度状态，不记录消息正文、
-Cookie 或密钥。
+Worker 启动前会检查：
 
-CDP 地址默认是 `http://127.0.0.1:9222`，需要调整时设置
-`AGENT_CDP_URL`。Worker 不保存浏览器 Cookie 或招聘平台密码。电话和面试具体时间
-仍只生成确认任务，不会自动发送。
+- 数据库是否可连接且迁移到最新版本；
+- LLM 是否配置；
+- `AGENT_EXECUTOR_MODE` 是否与真实平台匹配；
+- CDP 是否可连接；
+- 是否已经存在另一个 Worker。
 
-对 `OUTCOME_UNKNOWN` 动作使用 `POST /api/v1/actions/{id}/reconcile` 回读平台。
-只有平台明确确认未发送后，动作才转为可重新批准状态；仍无法判断时保持阻断。
+Worker 启动后的首轮扫描会继续检查平台登录状态和页面是否可识别；检查失败时只暂停对应
+平台 Run。
 
-### 本机浏览器只读接入
-
-由用户使用独立 Chromium/Chrome 配置目录手动启动调试端口并登录招聘平台，例如：
+macOS 长时间运行时，可以让该进程阻止电脑自动睡眠：
 
 ```bash
-open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=/tmp/job-agent-browser-profile
+source .venv/bin/activate
+caffeinate -dims python scripts/run_agent_worker.py
 ```
 
-正式运行由 Worker 自动读取职位与消息列表。底层只读 API 仍用于测试和诊断，但不再
-作为正式前端页面；只允许 `localhost/127.0.0.1/::1` CDP 端点，不保存账号、密码或 Cookie。
+不要同时运行两份 Worker。进程锁会拒绝第二个实例，但重复的进程管理仍会造成状态混乱。
 
-BOSS 职位发现默认按 `推荐 → Java → 区块链工程师` 轮询。每个入口会先按列表游标
-分批滚动，耗尽后切换到下一个入口；完整一轮后刷新职位页并重新开始，同时使用已发现
-职位 ID 去重。可通过 `BOSS_JOB_SEARCH_LABELS` 使用英文逗号配置入口显示名称，名称
-必须与 BOSS 页面上的搜索入口文字一致。
+停止 Worker：在 Worker 终端按 `Ctrl+C`。程序会记录停止状态；数据库中的平台 Run
+不会因此被删除。
 
-前端采用“总览、职位中心、消息中心、面试确认、求职策略、候选人中心、系统设置”
-导航。总览展示 Agent、Worker、灰度和安全指标；职位与消息中心用于观察自动化结果；
-候选人中心统一维护资料、可信知识和网站附件简历；只有电话与面试具体时间进入确认页。
-系统设置只显示 LLM 配置状态，不返回密钥。
-控制台同时展示 BOSS 六级灰度、升级剩余时间和安全指标。未初始化或已暂停灰度时，
-服务端拒绝真实平台写操作；前端开关不能绕过该门禁。灰度一至六依次开放消息只读、
-职位只读评分、每日最多 5 个普通回复、每日最多 3 个主动招呼、明确索要后的简历发送
-和正式配置限额。
+## 8. 日常启动顺序
 
-脉脉系统推荐由独立流程处理：只扫描带未读标记的系统推荐卡片，跳过官方通知；程序
-按 `config/recommendation-policy.json` 的受控词表判断同意或拒绝。执行前会重新核对
-招聘人、岗位和唯一按钮，执行后必须回读平台成功证据。启用前需要在全局自动化配置
-中同时设置 `maimai_recommendation_enabled=true`；同意并发送平台资料还需设置
-`maimai_recommendation_resume_enabled=true`，并将 MAIMAI 灰度推进到第五级。
+电脑重启后按以下顺序恢复：
 
-脉脉普通未读私信由 Worker 自动遍历，复用 BOSS 相同的消息游标、会话短租约、幂等
-导入、资格成熟度和动作链。官方账号及系统推荐卡片会在普通消息入口被排除，继续由
-上述独立推荐流程处理；关闭系统推荐开关不会阻止普通私信扫描。脉脉页面结构或会话
-身份不一致时只暂停当前脉脉运行，不影响 BOSS。
+1. 启动 Docker Desktop。
+2. `docker compose up -d postgres`
+3. 启动 API。
+4. 启动前端。
+5. 启动端口 `9222` 的专用 Chrome，并确认 BOSS/脉脉仍已登录。
+6. 打开所需的消息页和 BOSS 职位页。
+7. 在总览确认平台 Run；暂停的平台可在页面恢复后点击“重新连接”。
+8. 启动唯一 Worker。
 
-推荐记录可通过以下接口查询和受控操作：
+API 和前端用于控制及观察；Worker 才负责持续读取招聘平台和执行自动动作。
 
-- `GET /api/v1/platform-recommendations`
-- `POST /api/v1/platform-recommendations/scan`
-- `POST /api/v1/platform-recommendations/{id}/dispatch`
-- `POST /api/v1/platform-recommendations/{id}/reconcile`
+## 9. 状态与日志
 
-招聘方入站消息不再以 60 分作为回复或首次明确索要简历的门槛。对话维护
-`UNKNOWN/ROUGH_MATCH/FULL_MATCH/MISMATCH` 资格成熟度：未知岗位先自动澄清，大致
-匹配可推进电话沟通，完整匹配才可推进面试，明确冲突只发送一次礼貌婉拒。电话和面试
-的具体时间仍必须由用户确认。资格状态可通过
-`GET /api/v1/conversations/{id}/qualification` 查询，并可通过服务端受控的
-`POST /api/v1/conversations/{id}/qualification/evaluate` 重新评估。
+前端“总览”应同时显示：
 
-BOSS 职位详情只有在页面存在可见且可用的沟通入口时才记录为 `OPEN`；无法确认
-开放状态时保持 `UNKNOWN` 并禁止自动沟通。招呼语可以引用候选人资料中已确认的
-工作年限、管理经历和技能事实。
+- BOSS 和脉脉平台状态；
+- 唯一 Worker 及其心跳状态；
+- LLM、数据库和安全指标；
+- 自动动作、未知结果和待确认事项。
 
-BOSS 首次点击“立即沟通”会直接发送平台默认招呼。系统使用 `PLATFORM_DEFAULT`
-模式并回读实际发送文本；默认接受任意非空平台文案并记录审计，如配置固定预期文案
-则必须逐字一致。系统不会追加第二条消息。
+常见状态：
 
-示例候选人和职位数据位于 `config/sample-data/`。
+| 状态 | 含义 | 处理 |
+|---|---|---|
+| `RUNNING` | 平台 Run 正常轮询 | 无需处理 |
+| `PAUSED (MESSAGE_DISCOVERY_UNAVAILABLE)` | 消息页关闭或暂时无法识别 | 重新打开唯一消息页，点击“重新连接” |
+| `PAUSED (JOB_DISCOVERY_UNAVAILABLE)` | BOSS 职位页关闭或无法识别 | 重新打开唯一职位页，点击“重新连接” |
+| `STALE` | Worker 心跳超时 | 检查 Worker 终端，确认旧进程停止后重新启动 |
+| `OUTCOME_UNKNOWN` | 无法确认一次写操作是否成功 | 不要直接重试，先在系统设置执行对账 |
 
-## 验证
+Worker 日志默认写入：
+
+```text
+~/Desktop/job-search-agent-gray/logs/agent-gray.log
+```
+
+查看最新日志：
 
 ```bash
-playwright install chromium
+tail -f ~/Desktop/job-search-agent-gray/logs/agent-gray.log
+```
+
+日志包含扫描、动作、暂停和对账事件，不应包含 API Key、Cookie 或完整消息正文。
+
+## 10. 开发验证
+
+后端：
+
+```bash
+source .venv/bin/activate
 pytest
 ruff check .
 mypy .
-alembic upgrade head
-alembic downgrade base
-alembic upgrade head
 ```
 
-默认的 `pytest` 在未配置测试数据库时会跳过 PostgreSQL 集成测试。如需运行完整 API 流程，先创建独立测试库，再执行：
+PostgreSQL 集成测试使用独立测试库：
 
 ```bash
 TEST_DATABASE_URL=postgresql+psycopg://job_agent:job_agent@localhost:55432/job_agent_test pytest
 ```
+
+浏览器夹具测试首次需要：
+
+```bash
+playwright install chromium
+```
+
+前端：
 
 ```bash
 cd apps/web
@@ -208,55 +381,47 @@ npm run test
 npm run build
 ```
 
-PostgreSQL 集成测试和迁移验证需要本地 Docker 或可用的 PostgreSQL 16 实例。
+## 11. 数据备份与测试数据重置
 
-### 备份与恢复演练
-
-备份文件可能包含个人信息，默认目录已被 Git 忽略，文件权限设为仅当前用户：
+备份：
 
 ```bash
 DATABASE_URL='postgresql+psycopg://...' scripts/backup_database.sh
 ```
 
-恢复脚本只允许目标数据库名称包含 `_restore_test`：
+恢复演练只允许数据库名称包含 `_restore_test`：
 
 ```bash
 RESTORE_DATABASE_URL='postgresql+psycopg://.../job_agent_restore_test' \
   scripts/restore_rehearsal.sh backups/job-search-agent-YYYYMMDD-HHMMSS.dump
 ```
 
-灰度前清理运行历史但保留候选人、策略、知识库、附件简历和自动化配置：
+清理灰度历史会删除职位、评分、会话、动作、审计和排期数据。先预览，确认目标后才执行：
 
 ```bash
 python scripts/reset_gray_data.py --confirm-database job_agent
 python scripts/reset_gray_data.py --confirm-database job_agent --execute
 ```
 
-第一条命令只预览。第二条会清除职位、评分、会话、动作、审计、Worker、浏览器证据和
-排期历史，并重建暂停的 BOSS 一级灰度。
+不要在日常启动过程中执行数据重置。
 
-## 当前范围限制
+## 12. 安全边界与当前限制
 
-- BOSS 已覆盖职位列表/详情、对话列表/详情、文本及站内附件简历的本地夹具；脉脉已
-  覆盖普通消息列表/详情和系统推荐卡片识别、同意/拒绝、回读与对账，普通职位列表
-  主动发现仍未实现。
-- 第六阶段默认测试只使用脱敏 HTML 和本地无头 Chromium，不登录或操作真实账号。
-- BOSS 消息和职位发现已接入 Agent 循环；六级灰度控制已实现，但真实无人值守仍须
-  逐级完成完整工作日、100 个真实职位、20 个真实会话以及 8/24 小时耐久验收。
-- 控制台默认联调限速为每小时 1 次、每日 3 次；真实联调必须按 `docs/development-plan.md` 的顺序逐步人工放行。
-- 简历仅能从已登记且平台页面中唯一匹配的附件中选择，不上传本地文件。
-- Mac 默认接入 Apple Calendar；Google Calendar 和本地 `MOCK` 可通过环境变量切换。
-  Apple 目标写入日历不存在或系统权限未授予时安全降级为不可用。
-- 新评分使用 LLM 七维输出；旧 `legacy` 评分只保留历史展示，不能授权新的自动动作。
-- 自动招呼最低分配置不得低于 80。数据库中的主动简历最低分配置保留给尚未实现的
-  非入站发送流程，不限制招聘方明确索要简历。
-- 阶段十四仍需完成至少 20 条真实脉脉推荐的小流量灰度；阶段十六仍需完成至少
-  20 条真实脉脉普通消息灰度，以及 BOSS/脉脉入站耐久验收。
-- 策略可配置最高 79 分的猎头岗位分数封顶，使猎头岗位可接收回复但不主动招呼。
-- 智谱 GLM-5.2 已接入职位解析、评分、招呼、入站回复和简历反馈判断。主动招呼由
-  80 分、职位开放、模型建议、灰度级别和动作开关共同授权，不再创建通用人工确认；
-  执行前仍复核职位、公司、招聘人、开放状态和外部职位 ID，并使用幂等指纹防重复。
-- BOSS 正式运行只允许 `REAL` 执行器，`MOCK` 离线测试只允许 `FAKE`；两者交叉配置时
-  Worker 会拒绝运行。
+- 不破解验证码、不绕过登录验证、不进行反检测或无限批量投递。
+- 简历只从招聘网站中已经存在的附件选择，不自动上传本地文件。
+- 主动招呼必须通过硬性规则、80 分门槛、模型建议、职位开放状态、自动化开关和限额。
+- 招聘方主动索要简历时不受主动职位评分门槛限制，但仍受资格、重复发送和安全规则约束。
+- 电话和面试具体时间必须由用户确认，日历空闲不等于自动接受。
+- BOSS 支持职位发现和消息处理；脉脉支持普通消息及系统推荐，暂不支持脉脉职位列表主动发现。
+- 页面身份不一致、登录失效、选择器变化或结果无法确认时，系统会暂停或进入安全对账。
 
-完整设计见 `docs/`。
+详细设计和业务规则见：
+
+- [产品需求](docs/product-requirements.md)
+- [评分规则](docs/scoring-rules.md)
+- [沟通策略](docs/conversation-policy.md)
+- [排期策略](docs/scheduling-policy.md)
+- [架构设计](docs/architecture.md)
+- [数据模型](docs/data-model.md)
+- [API 设计](docs/api-design.md)
+- [开发计划](docs/development-plan.md)

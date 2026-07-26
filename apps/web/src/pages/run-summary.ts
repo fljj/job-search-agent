@@ -7,6 +7,11 @@ export interface RunSummaryItem {
 }
 
 const platformOrder = ['BOSS', 'MAIMAI']
+const reconnectablePauseReasons = new Set([
+  'MESSAGE_DISCOVERY_UNAVAILABLE',
+  'JOB_DISCOVERY_UNAVAILABLE',
+  'RECOMMENDATION_DISCOVERY_UNAVAILABLE',
+])
 
 export function activeRuns<T extends RunSummaryItem>(runs: T[]) {
   return runs
@@ -26,4 +31,11 @@ export function agentStatusText(runs: RunSummaryItem[]) {
     return currentRuns.length === 1 ? 'RUNNING' : `${currentRuns.length} 个平台运行中`
   }
   return currentRuns.some((item) => item.status === 'RUNNING') ? '部分运行' : '已暂停'
+}
+
+export function canReconnectRun(
+  run: Pick<RunSummaryItem, 'status' | 'pause_reason_codes'>,
+) {
+  return run.status === 'PAUSED'
+    && run.pause_reason_codes.some((reason) => reconnectablePauseReasons.has(reason))
 }

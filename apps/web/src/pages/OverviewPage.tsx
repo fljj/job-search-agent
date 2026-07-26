@@ -1,8 +1,8 @@
-import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag } from 'antd'
+import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
-import { activeRuns, agentStatusText } from './run-summary'
+import { activeRuns, agentStatusText, canReconnectRun } from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
 
 interface Run {
@@ -27,6 +27,7 @@ export function OverviewPage() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [operations, setOperations] = useState<Operations>()
   const [rollout, setRollout] = useState<Rollout>()
+  const [reconnectingRunId, setReconnectingRunId] = useState<string>()
   const load = async () => {
     const [runData, actionData, conversationData, operationData, rolloutData] = await Promise.all([
       api<{ items: Run[] }>('/automation/runs'),
@@ -37,6 +38,18 @@ export function OverviewPage() {
     ])
     setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
     setOperations(operationData); setRollout(rolloutData.items[0])
+  }
+  const reconnect = async (run: Run) => {
+    setReconnectingRunId(run.id)
+    try {
+      await api(`/automation/runs/${run.id}/resume`, { method: 'POST' })
+      message.success(`${run.platform} 已恢复，正在重新检查页面`)
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '重新连接失败，请确认平台页面已经打开')
+    } finally {
+      setReconnectingRunId(undefined)
+    }
   }
   useEffect(() => {
     void Promise.all([
@@ -72,11 +85,15 @@ export function OverviewPage() {
       <Descriptions column={{ xs: 1, md: 2 }} items={[
         { key: 'run', label: '运行', children: currentRuns.length > 0
           ? <Space size={[4, 4]} wrap>{currentRuns.map((run) =>
-            <Tag key={run.id} color={statusColor(run.status)}>
-              {run.platform}:{run.status}
-              {run.status === 'PAUSED' && run.pause_reason_codes.length > 0
-                ? `（${run.pause_reason_codes.join('、')}）` : ''}
-            </Tag>)}</Space>
+            <Space key={run.id} size={4}>
+              <Tag color={statusColor(run.status)}>
+                {run.platform}:{run.status}
+                {run.status === 'PAUSED' && run.pause_reason_codes.length > 0
+                  ? `（${run.pause_reason_codes.join('、')}）` : ''}
+              </Tag>
+              {canReconnectRun(run) && <Button size="small" loading={reconnectingRunId === run.id}
+                onClick={() => void reconnect(run)}>重新连接</Button>}
+            </Space>)}</Space>
           : <Tag>STOPPED</Tag> },
         { key: 'platform', label: '平台', children:
           currentRuns.map((item) => item.platform).join('、') || '-' },
