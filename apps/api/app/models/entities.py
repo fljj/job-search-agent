@@ -235,6 +235,7 @@ class LlmInvocation(Base):
     __tablename__ = "llm_invocations"
     __table_args__ = (
         CheckConstraint("attempt_number >= 1", name="ck_llm_invocations_attempt_number"),
+        Index("ix_llm_invocations_input_hash", "input_hash"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
@@ -266,8 +267,10 @@ class JobScore(Base):
     prompt_version: Mapped[str] = mapped_column(
         String(50), default="legacy-rules-v1", server_default="legacy-rules-v1"
     )
-    # 外键由 0007 迁移创建，避免旧迁移使用当前元数据建表时提前引用尚未创建的表。
-    llm_invocation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    llm_invocation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("llm_invocations.id", ondelete="SET NULL", name="fk_job_scores_llm_invocation"),
+        nullable=True,
+    )
     input_fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
     effective_job_status: Mapped[str] = mapped_column(String(20))
     action_blockers: Mapped[list[str]] = mapped_column(JSONB)

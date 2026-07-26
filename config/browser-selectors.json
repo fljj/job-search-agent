@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-24-v8",
+  "version": "2026-07-24-v9",
   "platforms": {
     "BOSS": {
       "allowed_hosts": ["www.zhipin.com", "m.zhipin.com"],
@@ -65,7 +65,7 @@
     },
     "MAIMAI": {
       "allowed_hosts": ["maimai.cn", "www.maimai.cn"],
-      "login_marker": "[data-testid='user-avatar'], .user-avatar",
+      "login_marker": "[data-testid='user-avatar'], .user-avatar, .maimai-pc-chat-wrap",
       "verification_marker": ".verify-container, [class*='captcha']",
       "job_list_root": "[data-testid='job-list']",
       "job_list_items": "[data-testid='job-list-item']",
@@ -89,7 +89,7 @@
       "platform_greeting_dialog": "[data-testid='greeting-dialog'], .startchat-content",
       "platform_greeting_message": "[data-testid='greeting-message'], .startchat-content .message-list .message-item .text",
       "conversation_list_root": "[data-testid='conversation-list'], .message-list-container, .message-list",
-      "conversation_list_items": "[data-testid='conversation-list-item'], .message-item[data-msg]",
+      "conversation_list_items": "[data-testid='conversation-list-item'], .message-item-normal[data-msg]",
       "conversation_list_item_id_attribute": "data-msg",
       "conversation_list_item_id_json_key": "mid",
       "conversation_list_item_recruiter": "[data-testid='recruiter-name'], .message-user-name",
