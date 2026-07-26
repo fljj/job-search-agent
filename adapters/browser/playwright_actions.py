@@ -28,6 +28,12 @@ from packages.browser_worker.extractor import extract_current_page
 from packages.browser_worker.models import Platform, SessionStatus
 
 
+def _conversation_key_matches(actual: str, expected: str | None) -> bool:
+    if not expected:
+        return False
+    return expected.startswith("derived:") or actual == expected
+
+
 def _recommendation_card(command: ApprovedCommand) -> MaimaiRecommendationCard:
     if not command.conversation_key:
         raise ValueError("推荐动作缺少平台推荐 ID")
@@ -149,8 +155,10 @@ class PlaywrightActionExecutor:
                 if (
                     check.status is SessionStatus.SESSION_READY
                     and check.conversation
-                    and check.conversation.external_conversation_id
-                    == command.conversation_key
+                    and _conversation_key_matches(
+                        check.conversation.external_conversation_id,
+                        command.conversation_key,
+                    )
                     and command.recruiter in check.conversation.recruiter_name
                     and command.job_title in (check.conversation.job_title or "")
                 ):
@@ -304,8 +312,10 @@ class PlaywrightActionExecutor:
                 if (
                     check.status is SessionStatus.SESSION_READY
                     and check.conversation
-                    and check.conversation.external_conversation_id
-                    == command.conversation_key
+                    and _conversation_key_matches(
+                        check.conversation.external_conversation_id,
+                        command.conversation_key,
+                    )
                     and command.recruiter in check.conversation.recruiter_name
                     and command.job_title in (check.conversation.job_title or "")
                 ):
@@ -499,8 +509,10 @@ class PlaywrightActionExecutor:
                     matches.append(page)
             elif check.conversation:
                 if (
-                    check.conversation.external_conversation_id
-                    == command.conversation_key
+                    _conversation_key_matches(
+                        check.conversation.external_conversation_id,
+                        command.conversation_key,
+                    )
                     and command.recruiter in check.conversation.recruiter_name
                     and command.company in (check.conversation.company_name or "")
                     and command.job_title in (check.conversation.job_title or "")
@@ -606,7 +618,10 @@ class PlaywrightActionExecutor:
                     outcome=ExecutionOutcome.FAILED_FINAL,
                     error_code="CONVERSATION_PAGE_REQUIRED",
                 )
-            elif check.conversation.external_conversation_id != command.conversation_key:
+            elif not _conversation_key_matches(
+                check.conversation.external_conversation_id,
+                command.conversation_key,
+            ):
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_FINAL,
                     error_code="CONVERSATION_TARGET_MISMATCH",

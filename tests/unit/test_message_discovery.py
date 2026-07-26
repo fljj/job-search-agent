@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from adapters.browser.message_discovery import (
     _matches_partition,
+    _normalize_duplicate_conversation_ids,
     _verify_target,
     select_discovery_candidates,
 )
@@ -62,6 +63,18 @@ def test_target_verification_checks_stable_identity_not_recruiter_name_only() ->
     assert _verify_target(selected, changed) == ["CONVERSATION_JOB_CHANGED"]
 
 
+def test_derived_boss_identity_uses_recruiter_when_list_role_is_not_job_title() -> None:
+    selected = summary(1)
+    selected.external_conversation_id = "derived:fixture"
+    selected.job_title = "招聘专家"
+    result = detail(selected)
+    assert result.conversation is not None
+    result.conversation.external_conversation_id = "62001"
+    result.conversation.job_title = "Java开发工程师"
+
+    assert _verify_target(selected, result) == []
+
+
 def test_cursor_scans_100_reordered_conversations_without_duplicates() -> None:
     items = [summary(index) for index in range(100)]
     seen: list[str] = []
@@ -102,6 +115,18 @@ def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:
     assert _matches_partition(item, "ALL")
     assert not _matches_partition(item, "UNREAD")
     assert not _matches_partition(item, "NEW_GREETING")
+
+
+def test_duplicate_platform_conversation_ids_get_stable_composite_ids() -> None:
+    first = summary(1)
+    second = summary(2)
+    second.external_conversation_id = first.external_conversation_id
+
+    _normalize_duplicate_conversation_ids([first, second])
+
+    assert first.external_conversation_id.startswith("derived:")
+    assert second.external_conversation_id.startswith("derived:")
+    assert first.external_conversation_id != second.external_conversation_id
 
 
 def test_successful_discovery_records_ready_platform_session() -> None:

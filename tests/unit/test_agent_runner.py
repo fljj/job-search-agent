@@ -134,7 +134,7 @@ def test_message_discovery_reuses_platform_cursor(
     )
     batch = MessageDiscoveryBatch(
         platform=Platform.MAIMAI,
-        partition="UNREAD",
+        partition="ALL",
         scroll_position=30,
         scanned_at=datetime.now(UTC),
     )
@@ -170,7 +170,7 @@ def test_message_discovery_reuses_platform_cursor(
     )
     adapter.scan.assert_called_once_with(
         "http://127.0.0.1:9222",
-        partition="UNREAD",
+        partition="ALL",
         scroll_position=20,
         seen_message_keys=["chat-1:message-1"],
         limit=10,

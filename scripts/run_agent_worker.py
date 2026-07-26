@@ -103,7 +103,7 @@ def _discover_messages(
     try:
         batch = adapter.scan(
             cdp_url,
-            partition=str(cursor.get("partition") or "UNREAD"),
+        partition="ALL",
             scroll_position=raw_position if isinstance(raw_position, int) else 0,
             seen_message_keys=[
                 str(item)

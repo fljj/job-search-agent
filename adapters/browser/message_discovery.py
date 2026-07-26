@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from datetime import UTC, datetime
@@ -67,6 +68,7 @@ class MessageDiscoveryAdapter:
             )
             if listing.status is not SessionStatus.SESSION_READY:
                 raise ValueError(f"{self.platform.value} 对话列表结构不可用")
+            _normalize_duplicate_conversation_ids(listing.conversations)
             eligible = [
                 item
                 for item in listing.conversations
@@ -145,8 +147,16 @@ class MessageDiscoveryAdapter:
             f"const attribute = {json.dumps(self.selectors.conversation_list_item_id_attribute)}; "
             f"const jsonKey = {json.dumps(self.selectors.conversation_list_item_id_json_key)}; "
             f"const expected = {json.dumps(summary.external_conversation_id)}; "
+            f"const recruiterSelector = {json.dumps(self.selectors.conversation_list_item_recruiter)}; "
+            f"const expectedRecruiter = {json.dumps(summary.recruiter_name)}; "
+            f"const jobSelector = {json.dumps(self.selectors.conversation_list_item_job_title)}; "
+            f"const expectedJob = {json.dumps(summary.job_title)}; "
             "const matches = Array.from(document.querySelectorAll(selector)).filter("
             "item => { const raw = item.getAttribute(attribute) || item.getAttribute('d-c'); "
+            "const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim(); "
+            "const job = item.querySelector(jobSelector)?.textContent?.trim(); "
+            "if (expected.startsWith('derived:')) return recruiter === expectedRecruiter "
+            "&& (!expectedJob || job === expectedJob); "
             "if (!raw) return false; if (!jsonKey) return raw === expected; "
             "try { return String(JSON.parse(raw)[jsonKey]) === expected; } "
             "catch { return false; } }); "
@@ -166,8 +176,18 @@ class MessageDiscoveryAdapter:
                 self.config.version,
                 expected_recruiter=summary.recruiter_name,
             )
-            if detail.page_type is PageType.CONVERSATION and detail.conversation:
+            if (
+                detail.page_type is PageType.CONVERSATION
+                and detail.conversation
+                and detail.conversation.messages
+            ):
                 reasons = _verify_target(summary, detail)
+                if not reasons and summary.external_conversation_id.startswith(
+                    "derived:"
+                ):
+                    detail.conversation.external_conversation_id = (
+                        summary.external_conversation_id
+                    )
                 job_detail = (
                     self._read_linked_job(page, cdp_url)
                     if not reasons
@@ -258,11 +278,18 @@ def _verify_target(
     conversation = detail.conversation
     if conversation is None:
         return ["CONVERSATION_DETAIL_MISSING"]
-    if conversation.external_conversation_id != summary.external_conversation_id:
+    if (
+        not summary.external_conversation_id.startswith("derived:")
+        and conversation.external_conversation_id != summary.external_conversation_id
+    ):
         return ["CONVERSATION_ID_MISMATCH"]
     if conversation.recruiter_name != summary.recruiter_name:
         return ["RECRUITER_TARGET_MISMATCH"]
-    if summary.job_title and conversation.job_title != summary.job_title:
+    if (
+        not summary.external_conversation_id.startswith("derived:")
+        and summary.job_title
+        and conversation.job_title != summary.job_title
+    ):
         return ["CONVERSATION_JOB_CHANGED"]
     if summary.company_name and conversation.company_name != summary.company_name:
         return ["CONVERSATION_COMPANY_MISMATCH"]
@@ -273,6 +300,29 @@ def _verify_target(
     ):
         return ["CONVERSATION_JOB_ID_MISMATCH"]
     return []
+
+
+def _normalize_duplicate_conversation_ids(
+    items: list[BrowserConversationSummary],
+) -> None:
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item.external_conversation_id] = (
+            counts.get(item.external_conversation_id, 0) + 1
+        )
+    for item in items:
+        if counts[item.external_conversation_id] <= 1:
+            continue
+        identity = "|".join(
+            [
+                item.recruiter_name,
+                item.job_title or "",
+                item.company_name or "",
+            ]
+        )
+        item.external_conversation_id = (
+            f"derived:{hashlib.sha256(identity.encode()).hexdigest()}"
+        )
 
 
 def select_discovery_candidates(
