@@ -20,6 +20,7 @@ from apps.api.app.services.job_service import import_job
 from apps.api.app.services.score_service import create_score
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
+from packages.scoring.llm_engine import LlmScoreValidationError
 
 
 def process_job_discovery_batch(
@@ -54,7 +55,16 @@ def process_job_discovery_batch(
         _state_event(session, run, item, "OPENING_DETAIL")
         _state_event(session, run, item, "VERIFYING_JOB")
         if item.detail is None or item.detail.job is None or item.reason_codes:
-            _finish(record, "SKIPPED", item.reason_codes or ["JOB_DETAIL_MISSING"])
+            reasons = item.reason_codes or ["JOB_DETAIL_MISSING"]
+            status = (
+                "RETRYABLE"
+                if any(
+                    reason in {"JOB_DETAIL_OPEN_FAILED", "JOB_DETAIL_NOT_READY"}
+                    for reason in reasons
+                )
+                else "SKIPPED"
+            )
+            _finish(record, status, reasons)
             counts["skipped"] += 1
             continue
         source = item.detail.job
@@ -124,6 +134,10 @@ def process_job_discovery_batch(
             )
         except LlmProviderError as exc:
             _finish(record, "RETRYABLE", [exc.code])
+            counts["skipped"] += 1
+            continue
+        except LlmScoreValidationError:
+            _finish(record, "RETRYABLE", ["INVALID_SCORING_OUTPUT"])
             counts["skipped"] += 1
             continue
         record.action_id = (

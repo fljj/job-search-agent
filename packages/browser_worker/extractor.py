@@ -122,6 +122,8 @@ def _extract_job(
     )
     location = page.text(selectors.location)
     work_mode = _normalize_work_mode(page.text(selectors.work_mode))
+    if work_mode == "UNKNOWN":
+        work_mode = _normalize_work_mode(title)
     if (
         platform is Platform.BOSS
         and work_mode == "UNKNOWN"
@@ -324,7 +326,7 @@ def _unread_count(raw_value: str | None) -> int | None:
 
 def _normalize_work_mode(value: str | None) -> str:
     lowered = (value or "").lower()
-    if any(word in lowered for word in ("远程", "remote")):
+    if any(word in lowered for word in ("远程", "居家办公", "remote")):
         return "REMOTE"
     if any(word in lowered for word in ("混合", "hybrid")):
         return "HYBRID"

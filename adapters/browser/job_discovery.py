@@ -71,9 +71,18 @@ class BossJobDiscoveryAdapter:
                 and search_key in search_keys
             ):
                 self._activate_search(page, search_key)
-            listing = extract_current_page(
-                page, Platform.BOSS, self.selectors, self.config.version
-            )
+            listing = None
+            for _ in range(10):
+                listing = extract_current_page(
+                    page, Platform.BOSS, self.selectors, self.config.version
+                )
+                if (
+                    listing.status is SessionStatus.SESSION_READY
+                    and listing.page_type is PageType.JOB_LIST
+                ):
+                    break
+                time.sleep(0.5)
+            assert listing is not None
             if (
                 listing.status is not SessionStatus.SESSION_READY
                 or listing.page_type is not PageType.JOB_LIST
@@ -99,9 +108,21 @@ class BossJobDiscoveryAdapter:
             exhausted = is_job_list_exhausted(
                 len(candidates), listing.cursor, previous_cursor
             )
+            transient_ids = {
+                item.summary.external_job_id
+                for item in items
+                if any(
+                    reason in {"JOB_DETAIL_OPEN_FAILED", "JOB_DETAIL_NOT_READY"}
+                    for reason in item.reason_codes
+                )
+            }
             seen = list(dict.fromkeys([
                 *(seen_job_ids or []),
-                *(item.external_job_id for item in candidates),
+                *(
+                    item.external_job_id
+                    for item in candidates
+                    if item.external_job_id not in transient_ids
+                ),
             ]))[-2000:]
             current = datetime.now(UTC)
             next_search, wrapped = next_job_search(
@@ -144,7 +165,6 @@ class BossJobDiscoveryAdapter:
         )
         if not activated:
             raise ValueError(f"BOSS 职位搜索入口不可用: {search_key}")
-        time.sleep(1)
 
     def _find_list_target(self, cdp_url: str) -> str:
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
@@ -198,7 +218,7 @@ class BossJobDiscoveryAdapter:
                 summary=summary, reason_codes=["JOB_DETAIL_OPEN_FAILED"]
             )
         created_target_id = str(created_target.get("id") or "")
-        for _ in range(30):
+        for _ in range(100):
             with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
                 targets = json.loads(response.read())
             for target in targets:
