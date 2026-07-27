@@ -23,4 +23,10 @@ class ZhipuLlmProvider(QwenLlmProvider):
             max_retries=max_retries,
             provider_name="ZHIPU",
             transport=transport,
+            request_options={
+                "thinking": {"type": "disabled"},
+                "reasoning_effort": "none",
+                "do_sample": False,
+                "max_tokens": 4096,
+            },
         )

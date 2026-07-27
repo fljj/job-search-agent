@@ -140,6 +140,24 @@ def test_factory_builds_zhipu_glm_provider() -> None:
     assert provider.model_name == "glm-5.2"
 
 
+def test_zhipu_disables_deep_thinking_for_structured_tasks() -> None:
+    transport = StubTransport(response('{"intents":["UNCLEAR"],"confidence":1}'))
+    provider = ZhipuLlmProvider(
+        api_key="secret-test-key",
+        base_url="https://example.invalid/v4",
+        model="glm-5.2",
+        transport=transport,
+    )
+
+    provider.classify_message(MessageClassificationRequest(message="你好"))
+
+    payload = cast(dict[str, object], transport.calls[0]["payload"])
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["reasoning_effort"] == "none"
+    assert payload["do_sample"] is False
+    assert payload["max_tokens"] == 4096
+
+
 def test_authorization_key_is_not_in_payload() -> None:
     transport = StubTransport(response('{"intents":["UNCLEAR"],"confidence":1}'))
     qwen(transport).classify_message(MessageClassificationRequest(message="你好"))

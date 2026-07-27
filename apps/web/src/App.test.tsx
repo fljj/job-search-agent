@@ -28,10 +28,17 @@ describe('Worker 状态展示', () => {
     expect(workerStatusText([{ worker_id: 'worker-old', status: 'STOPPED' }])).toBe('未运行')
   })
 
-  it('多个活动 Worker 时显示异常', () => {
+  it('失联 Worker 不计入活动数量', () => {
     expect(workerStatusText([
       ...workers,
       { worker_id: 'worker-stale', status: 'STALE' },
+    ])).toBe('worker-current:RUNNING')
+  })
+
+  it('多个运行中的 Worker 才显示异常', () => {
+    expect(workerStatusText([
+      ...workers,
+      { worker_id: 'worker-another', status: 'RUNNING' },
     ])).toContain('异常：存在 2 个活动 Worker')
   })
 })

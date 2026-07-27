@@ -4,7 +4,7 @@ export interface WorkerStatus {
 }
 
 export function activeWorkers(workers: WorkerStatus[] = []) {
-  return workers.filter((worker) => ['RUNNING', 'STALE'].includes(worker.status))
+  return workers.filter((worker) => worker.status === 'RUNNING')
 }
 
 export function workerStatusText(workers: WorkerStatus[] = []) {

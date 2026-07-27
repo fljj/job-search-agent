@@ -81,6 +81,7 @@ class QwenLlmProvider:
         max_retries: int = 1,
         provider_name: str = "QWEN",
         transport: JsonTransport | None = None,
+        request_options: dict[str, object] | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("LLM API Key 未配置")
@@ -91,6 +92,7 @@ class QwenLlmProvider:
         self._timeout = timeout_seconds
         self._max_retries = max_retries
         self._transport = transport or UrllibJsonTransport()
+        self._request_options = request_options or {}
 
     @property
     def provider_name(self) -> str:
@@ -148,6 +150,7 @@ class QwenLlmProvider:
                 },
             ],
         }
+        payload.update(self._request_options)
         started = monotonic()
         attempt = 1
         while True:
