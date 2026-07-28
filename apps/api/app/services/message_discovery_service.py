@@ -16,6 +16,7 @@ from apps.api.app.services.conversation_service import (
     import_message,
 )
 from apps.api.app.services.job_service import import_job
+from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.models import MessageDirection
 
@@ -118,6 +119,18 @@ def persist_discovery_batch(
             )
             if before is None:
                 counts["imported"] += 1
+        latest_inbound = session.scalar(
+            select(db.Message)
+            .where(
+                db.Message.conversation_id == conversation.id,
+                db.Message.direction == "INBOUND",
+            )
+            .order_by(db.Message.received_at.desc(), db.Message.created_at.desc())
+            .limit(1)
+        )
+        if latest_inbound is not None:
+            # 既有消息可能早于完整 JD 入库；职位重新绑定后必须用新事实刷新资格。
+            refresh_qualification(session, conversation, message=latest_inbound)
         conversation.processing_lease_owner = None
         conversation.processing_lease_expires_at = None
         reasons = ["CONVERSATION_IMPORTED"]

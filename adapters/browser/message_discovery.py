@@ -1,9 +1,10 @@
 import hashlib
 import json
+import re
 import time
 from datetime import UTC, datetime
-from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.parse import quote, urljoin, urlparse
+from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, Field
 
@@ -191,12 +192,16 @@ class MessageDiscoveryAdapter:
                 job_detail = (
                     self._read_linked_job(page, cdp_url)
                     if not reasons
-                    and not (
-                        summary.external_job_id
-                        or detail.conversation.external_job_id
-                    )
                     else None
                 )
+                if (
+                    job_detail
+                    and job_detail.job
+                    and not detail.conversation.external_job_id
+                ):
+                    detail.conversation.external_job_id = (
+                        job_detail.job.external_job_id
+                    )
                 return DiscoveredConversation(
                     summary=summary,
                     detail=detail if not reasons else None,
@@ -212,36 +217,92 @@ class MessageDiscoveryAdapter:
     def _read_linked_job(
         self, page: RawCdpPageReader, cdp_url: str
     ) -> ReadResult | None:
-        href = page.attribute(self.selectors.conversation_job_link, "href")
+        href = self._linked_job_href(page)
         if not href:
+            return None
+        if (urlparse(href).hostname or "").lower() not in self.selectors.allowed_hosts:
             return None
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
             before = {str(item.get("id")) for item in json.loads(response.read())}
-        opened = page._evaluate(f"Boolean(window.open({json.dumps(href)}, '_blank'))")
-        if not opened:
+        request = Request(
+            f"{cdp_url.rstrip('/')}/json/new?{quote(href, safe=':/?=&%')}",
+            method="PUT",
+        )
+        try:
+            with urlopen(request, timeout=3) as response:
+                created_target = json.loads(response.read())
+        except (OSError, TimeoutError, ValueError):
             return None
-        for _ in range(30):
+        created_target_id = str(created_target.get("id") or "")
+        opened_target_ids: set[str] = set()
+        for _ in range(100):
             with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
                 targets = json.loads(response.read())
             for target in targets:
-                if str(target.get("id")) in before or not target.get("webSocketDebuggerUrl"):
+                target_id = str(target.get("id"))
+                if (
+                    target_id in before
+                    or (created_target_id and target_id != created_target_id)
+                    or not target.get("webSocketDebuggerUrl")
+                ):
                     continue
+                opened_target_ids.add(target_id)
                 try:
                     with RawCdpPageReader(str(target["webSocketDebuggerUrl"])) as job_page:
-                        try:
-                            result = extract_current_page(
-                                job_page,
-                                self.platform,
-                                self.selectors,
-                                self.config.version,
-                            )
-                        finally:
+                        if (
+                            urlparse(job_page.url).hostname or ""
+                        ).lower() not in self.selectors.allowed_hosts:
+                            continue
+                        result = extract_current_page(
+                            job_page,
+                            self.platform,
+                            self.selectors,
+                            self.config.version,
+                        )
+                        if (
+                            result.status is SessionStatus.SESSION_READY
+                            and result.page_type is PageType.JOB
+                            and result.job is not None
+                        ):
                             job_page._evaluate("window.close()")
-                    return result if result.page_type is PageType.JOB else None
+                            return result
                 except (OSError, TimeoutError, ValueError):
                     continue
             time.sleep(0.1)
+        for target_id in opened_target_ids or {created_target_id}:
+            if not target_id:
+                continue
+            self._close_target(cdp_url, target_id)
         return None
+
+    def _linked_job_href(self, page: RawCdpPageReader) -> str | None:
+        href = page.attribute(self.selectors.conversation_job_link, "href")
+        if href:
+            return urljoin(page.url, href)
+        if self.platform is not Platform.BOSS:
+            return None
+        encrypted_job_id = page._evaluate(
+            "document.querySelector('.chat-position-content')"
+            "?.__vue__?.['conversation$']?.encryptJobId || null"
+        )
+        if not isinstance(encrypted_job_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_~-]+", encrypted_job_id
+        ):
+            return None
+        return (
+            "https://www.zhipin.com/job_detail/"
+            f"{quote(encrypted_job_id, safe='_~-')}.html"
+        )
+
+    @staticmethod
+    def _close_target(cdp_url: str, target_id: str) -> None:
+        try:
+            with urlopen(
+                f"{cdp_url.rstrip('/')}/json/close/{target_id}", timeout=3
+            ):
+                pass
+        except (OSError, TimeoutError, ValueError):
+            pass
 
 
 class BossMessageDiscoveryAdapter(MessageDiscoveryAdapter):
