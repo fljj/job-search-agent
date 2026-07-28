@@ -21,6 +21,7 @@ from packages.browser_worker.models import (
 class DiscoveredJob(BaseModel):
     summary: BrowserJobSummary
     detail: ReadResult | None = None
+    detail_target_id: str | None = None
     reason_codes: list[str] = Field(default_factory=list)
 
 
@@ -244,11 +245,13 @@ class BossJobDiscoveryAdapter:
                         or result.page_type is not PageType.JOB
                     ):
                         continue
-                    self._close_target(cdp_url, target_id)
                     reasons = verify_job_target(summary, result)
+                    if reasons:
+                        self._close_target(cdp_url, target_id)
                     return DiscoveredJob(
                         summary=summary,
                         detail=result if not reasons else None,
+                        detail_target_id=target_id if not reasons else None,
                         reason_codes=reasons,
                     )
                 except (OSError, TimeoutError, ValueError):
@@ -269,6 +272,12 @@ class BossJobDiscoveryAdapter:
                 pass
         except (OSError, TimeoutError, ValueError):
             pass
+
+    def close_details(self, cdp_url: str, batch: JobDiscoveryBatch) -> None:
+        """批次完成后关闭扫描器创建的详情页，不影响用户原有标签页。"""
+        for item in batch.items:
+            if item.detail_target_id:
+                self._close_target(cdp_url, item.detail_target_id)
 
 
 def select_job_candidates(

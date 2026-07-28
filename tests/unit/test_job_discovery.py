@@ -1,6 +1,11 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from adapters.browser.job_discovery import (
+    BossJobDiscoveryAdapter,
+    DiscoveredJob,
+    JobDiscoveryBatch,
     is_job_list_exhausted,
     next_job_search,
     select_job_candidates,
@@ -137,6 +142,34 @@ def test_job_detail_accepts_full_company_name_for_truncated_list_name() -> None:
 
     result.job.company_name = "完全不同的公司"
     assert verify_job_target(selected, result) == ["JOB_COMPANY_MISMATCH"]
+
+
+def test_closes_only_detail_targets_created_for_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        BossJobDiscoveryAdapter,
+        "_close_target",
+        staticmethod(lambda cdp_url, target_id: closed.append((cdp_url, target_id))),
+    )
+    adapter = object.__new__(BossJobDiscoveryAdapter)
+    now = datetime.now(UTC)
+    batch = JobDiscoveryBatch(
+        platform=Platform.BOSS,
+        search_key="Java",
+        scroll_position=0,
+        scanned_at=now,
+        next_scan_at=now,
+        items=[
+            DiscoveredJob(summary=summary(1), detail_target_id="created-detail"),
+            DiscoveredJob(summary=summary(2)),
+        ],
+    )
+
+    adapter.close_details("http://127.0.0.1:9222", batch)
+
+    assert closed == [("http://127.0.0.1:9222", "created-detail")]
 
 
 @pytest.mark.parametrize(

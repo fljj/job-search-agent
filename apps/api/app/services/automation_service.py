@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AutomationDispatchRequest, AutomationSettingPayload
-from apps.api.app.services.action_service import execute_action
+from apps.api.app.services.action_service import (
+    PREWRITE_RETRYABLE_FAILURES,
+    approve_retry,
+    execute_action,
+)
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.rollout_service import (
     enforce_rollout_health,
@@ -295,6 +299,19 @@ def dispatch_proactive_greeting(
         select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == fingerprint)
     )
     if existing:
+        if (
+            existing.status == ActionStatus.FAILED_RETRYABLE.value
+            and existing.failure_code in PREWRITE_RETRYABLE_FAILURES
+        ):
+            approve_retry(session, existing.id)
+            result = execute_action(session, existing.id, cdp_url, executor)
+            return {
+                "decision": decision.value,
+                "reason_codes": ["GREETING_PREWRITE_RETRY"],
+                "action_id": result.id,
+                "action_status": result.status,
+                "failure_code": result.failure_code,
+            }
         return {
             "decision": "DENY",
             "reason_codes": ["GREETING_ALREADY_EXISTS"],

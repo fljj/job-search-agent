@@ -212,8 +212,9 @@ def _run_boss_job_discovery(
     raw_job_position = job_cursor.get("scroll_position")
     raw_seen_jobs = job_cursor.get("seen_job_ids")
     search_keys = get_settings().boss_job_searches
+    adapter = BossJobDiscoveryAdapter(get_browser_selectors())
     try:
-        job_batch = BossJobDiscoveryAdapter(get_browser_selectors()).scan(
+        job_batch = adapter.scan(
             cdp_url,
             search_key=str(
                 job_cursor.get("search_key")
@@ -251,14 +252,17 @@ def _run_boss_job_discovery(
     except (OSError, TimeoutError, ValueError):
         pause_run(session, run.id, ["JOB_DISCOVERY_UNAVAILABLE"])
         return
-    process_job_discovery_batch(
-        session,
-        run,
-        job_batch,
-        provider=build_llm_provider(get_settings()),
-        executor=executor,
-        cdp_url=cdp_url,
-    )
+    try:
+        process_job_discovery_batch(
+            session,
+            run,
+            job_batch,
+            provider=build_llm_provider(get_settings()),
+            executor=executor,
+            cdp_url=cdp_url,
+        )
+    finally:
+        adapter.close_details(cdp_url, job_batch)
     gray_event(
         logger,
         "JOB_SCAN_COMPLETED",

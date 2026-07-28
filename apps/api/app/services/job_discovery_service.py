@@ -143,9 +143,17 @@ def process_job_discovery_batch(
         record.action_id = (
             UUID(str(result["action_id"])) if result.get("action_id") else None
         )
-        if result.get("action_status") == "SUCCEEDED":
+        action_status = result.get("action_status")
+        if action_status == "SUCCEEDED":
             _finish(record, "CONTACTED", ["GREETING_SENT"])
             counts["contacted"] += 1
+        elif action_status == "FAILED_RETRYABLE":
+            _finish(
+                record,
+                "RETRYABLE",
+                [str(result.get("failure_code") or "GREETING_PREWRITE_FAILED")],
+            )
+            counts["skipped"] += 1
         else:
             raw_reasons = result.get("reason_codes")
             _finish(
@@ -159,12 +167,23 @@ def process_job_discovery_batch(
             )
             counts["skipped"] += 1
         _state_event(session, run, item, "RETURNING")
+    retryable_ids = {
+        record.external_job_id
+        for record in session.scalars(
+            select(db.JobDiscoveryRecord).where(
+                db.JobDiscoveryRecord.agent_run_id == run.id,
+                db.JobDiscoveryRecord.status == "RETRYABLE",
+            )
+        ).all()
+    }
     root_cursor = dict(run.cursor or {})
     root_cursor["job_discovery"] = {
         "search_key": batch.next_search_key or batch.search_key,
         "scroll_position": 0 if batch.exhausted else batch.scroll_position,
         "next_cursor": batch.next_cursor,
-        "seen_job_ids": batch.seen_job_ids,
+        "seen_job_ids": [
+            job_id for job_id in batch.seen_job_ids if job_id not in retryable_ids
+        ],
         "last_scan_at": batch.scanned_at.isoformat(),
         "next_scan_at": batch.next_scan_at.isoformat(),
         "exhausted": batch.exhausted,
