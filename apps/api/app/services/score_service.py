@@ -22,14 +22,25 @@ from apps.api.app.services.strategy_service import to_domain as strategy_to_doma
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
+from packages.scoring.engine import score_job as score_job_deterministically
 from packages.scoring.evidence import with_evidence_catalog
+from packages.scoring.hard_filters import evaluate_hard_filters
 from packages.scoring.llm_engine import (
     LLM_SCORING_VERSION,
     LlmScoreValidationError,
     is_automation_eligible,
     validate_llm_score,
 )
-from packages.scoring.models import CandidateProfile, CandidateSkill, ScoringContext
+from packages.scoring.models import (
+    DIMENSION_MAX,
+    CandidateProfile,
+    CandidateSkill,
+    RejectionReason,
+    ScoringContext,
+)
+
+HARD_FILTER_SCORING_VERSION = "hard-filter:1.0.0"
+HARD_FILTER_PROMPT_VERSION = "not-applicable"
 
 
 def create_score(
@@ -50,7 +61,17 @@ def create_score(
         raise ValueError("已停用策略不能用于新评分")
     if strategy.candidate_profile_id != profile.id:
         raise ValueError("策略与候选人资料不匹配")
-    llm_provider = provider or build_llm_provider(get_settings())
+    candidate = CandidateProfile(
+        name=profile.name, total_years=profile.total_years,
+        management_years=profile.management_years,
+        has_architecture_experience=profile.has_architecture_experience,
+        has_core_system_experience=profile.has_core_system_experience,
+        bachelor_full_time=profile.bachelor_full_time,
+        skills=[CandidateSkill(name=item.name, years=item.years, source=item.source,
+                               is_core=item.is_core) for item in profile.skills],
+        industry_experiences=[item.industry_code for item in profile.industries],
+        version=profile.version,
+    )
     parsed_record: db.ParsedJobDetail | None
     if request.parsed_job_detail_id:
         parsed_record = get_parsed_entity(session, request.parsed_job_detail_id)
@@ -59,16 +80,69 @@ def create_score(
     else:
         parsed_record = session.scalar(
             select(db.ParsedJobDetail)
-            .where(db.ParsedJobDetail.job_id == job.id)
-            .order_by(db.ParsedJobDetail.created_at.desc())
+            .where(
+                db.ParsedJobDetail.job_id == job.id,
+                db.ParsedJobDetail.parser_type == "RULE",
+            )
+            .order_by(
+                db.ParsedJobDetail.created_at.desc(),
+                db.ParsedJobDetail.id.desc(),
+            )
             .limit(1)
         )
         if parsed_record is None:
             parsed_response = parse_job(
-                session, job.id, "LLM", provider=llm_provider
+                session, job.id, "RULE"
             )
             parsed_record = get_parsed_entity(session, parsed_response.id)
     assert parsed_record is not None
+    context = _scoring_context(job, parsed_record, candidate, strategy)
+    rejections = evaluate_hard_filters(context)
+    if rejections:
+        return _persist_hard_filtered_score(
+            session,
+            job,
+            strategy,
+            profile,
+            parsed_record,
+            context,
+            rejections,
+            reassessment_key,
+        )
+
+    llm_provider = provider or build_llm_provider(get_settings())
+    if request.parsed_job_detail_id is None:
+        llm_parsed_record = session.scalar(
+            select(db.ParsedJobDetail)
+            .where(
+                db.ParsedJobDetail.job_id == job.id,
+                db.ParsedJobDetail.parser_type == "LLM",
+            )
+            .order_by(
+                db.ParsedJobDetail.created_at.desc(),
+                db.ParsedJobDetail.id.desc(),
+            )
+            .limit(1)
+        )
+        if llm_parsed_record is None:
+            parsed_response = parse_job(
+                session, job.id, "LLM", provider=llm_provider
+            )
+            llm_parsed_record = get_parsed_entity(session, parsed_response.id)
+        parsed_record = llm_parsed_record
+        context = _scoring_context(job, parsed_record, candidate, strategy)
+        rejections = evaluate_hard_filters(context)
+        if rejections:
+            return _persist_hard_filtered_score(
+                session,
+                job,
+                strategy,
+                profile,
+                parsed_record,
+                context,
+                rejections,
+                reassessment_key,
+            )
     base_fingerprint = _fingerprint(
         job.id,
         strategy,
@@ -86,25 +160,6 @@ def create_score(
     )
     if existing:
         return _response(session, existing)
-    candidate = CandidateProfile(
-        name=profile.name, total_years=profile.total_years,
-        management_years=profile.management_years,
-        has_architecture_experience=profile.has_architecture_experience,
-        has_core_system_experience=profile.has_core_system_experience,
-        bachelor_full_time=profile.bachelor_full_time,
-        skills=[CandidateSkill(name=item.name, years=item.years, source=item.source,
-                               is_core=item.is_core) for item in profile.skills],
-        industry_experiences=[item.industry_code for item in profile.industries],
-        version=profile.version,
-    )
-    context = with_evidence_catalog(
-        ScoringContext(
-            job=to_job_domain(job),
-            parsed_job=to_parsed_domain(parsed_record),
-            candidate=candidate,
-            strategy=strategy_to_domain(strategy),
-        )
-    )
     try:
         llm_result = llm_provider.score_job(context)
     except LlmProviderError as exc:
@@ -183,6 +238,104 @@ def create_score(
     return _response(session, score)
 
 
+def _scoring_context(
+    job: db.Job,
+    parsed_record: db.ParsedJobDetail,
+    candidate: CandidateProfile,
+    strategy: db.JobStrategy,
+) -> ScoringContext:
+    return with_evidence_catalog(
+        ScoringContext(
+            job=to_job_domain(job),
+            parsed_job=to_parsed_domain(parsed_record),
+            candidate=candidate,
+            strategy=strategy_to_domain(strategy),
+        )
+    )
+
+
+def _persist_hard_filtered_score(
+    session: Session,
+    job: db.Job,
+    strategy: db.JobStrategy,
+    profile: db.CandidateProfile,
+    parsed_record: db.ParsedJobDetail,
+    context: ScoringContext,
+    rejections: list[RejectionReason],
+    reassessment_key: str | None,
+) -> ScoreResponse:
+    fingerprint = _hard_filter_fingerprint(
+        job.id,
+        strategy,
+        profile,
+        parsed_record,
+        reassessment_key,
+    )
+    existing = session.scalar(
+        select(db.JobScore).where(db.JobScore.input_fingerprint == fingerprint)
+    )
+    if existing:
+        return _response(session, existing)
+    deterministic = score_job_deterministically(context)
+    score = db.JobScore(
+        job_id=job.id,
+        strategy_id=strategy.id,
+        candidate_profile_id=profile.id,
+        parsed_job_detail_id=parsed_record.id,
+        strategy_version=strategy.version,
+        profile_version=profile.version,
+        scoring_version=HARD_FILTER_SCORING_VERSION,
+        prompt_version=HARD_FILTER_PROMPT_VERSION,
+        llm_invocation_id=None,
+        input_fingerprint=fingerprint,
+        effective_job_status=deterministic.effective_job_status.value,
+        action_blockers=deterministic.action_blockers,
+        title_score=0,
+        skill_score=0,
+        experience_score=0,
+        location_score=0,
+        salary_score=0,
+        industry_score=0,
+        management_score=0,
+        total_score=0,
+        grade="C",
+        eligibility="FILTERED_OUT",
+        hard_rejected=True,
+        match_reasons=[],
+        risk_notes=["职位命中硬性排除规则，未调用大模型评分。"],
+        input_snapshot=context.model_dump(mode="json"),
+        llm_recommends_proactive_contact=False,
+        llm_contact_reason="职位命中硬性排除规则，未调用大模型。",
+        automation_eligible=False,
+        details=[
+            db.JobScoreDetail(
+                dimension=dimension,
+                rule_code="NOT_SCORED_HARD_FILTERED",
+                score_awarded=0,
+                max_score=max_score,
+                evidence_refs=[],
+                matched_facts={},
+                explanation="职位已被硬性排除，未进行AI评分。",
+                sort_order=index,
+            )
+            for index, (dimension, max_score) in enumerate(DIMENSION_MAX.items())
+        ],
+        rejections=[
+            db.JobRejection(
+                rule_code=item.rule_code,
+                message=item.message,
+                evidence=item.evidence,
+                sort_order=index,
+            )
+            for index, item in enumerate(rejections)
+        ],
+    )
+    session.add(score)
+    session.commit()
+    session.refresh(score)
+    return _response(session, score)
+
+
 def get_score(session: Session, score_id: object) -> ScoreResponse:
     score = session.get(db.JobScore, score_id)
     if score is None:
@@ -219,6 +372,26 @@ def _fingerprint(
     payload = [str(job_id), str(strategy.id), strategy.version, str(profile.id), profile.version,
                str(parsed.id), LLM_SCORING_VERSION, provider.provider_name,
                provider.model_name, provider.prompt_version("score_job")]
+    return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
+
+
+def _hard_filter_fingerprint(
+    job_id: object,
+    strategy: db.JobStrategy,
+    profile: db.CandidateProfile,
+    parsed: db.ParsedJobDetail,
+    reassessment_key: str | None,
+) -> str:
+    payload = [
+        str(job_id),
+        str(strategy.id),
+        strategy.version,
+        str(profile.id),
+        profile.version,
+        str(parsed.id),
+        HARD_FILTER_SCORING_VERSION,
+        reassessment_key,
+    ]
     return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
 

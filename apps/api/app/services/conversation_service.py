@@ -116,7 +116,7 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
     conversations = session.scalars(
         select(db.Conversation)
         .where(db.Conversation.user_id == DEFAULT_USER_ID)
-        .order_by(db.Conversation.created_at.desc())
+        .order_by(db.Conversation.created_at.desc(), db.Conversation.id.desc())
     ).all()
     items: list[dict[str, object]] = []
     for conversation in conversations:
@@ -133,14 +133,20 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
         draft = session.scalar(
             select(db.GeneratedDraft)
             .where(db.GeneratedDraft.conversation_id == conversation.id)
-            .order_by(db.GeneratedDraft.created_at.desc())
+            .order_by(
+                db.GeneratedDraft.created_at.desc(),
+                db.GeneratedDraft.id.desc(),
+            )
             .limit(1)
         )
         draft_decision = (
             session.scalar(
                 select(db.PolicyDecision)
                 .where(db.PolicyDecision.draft_id == draft.id)
-                .order_by(db.PolicyDecision.created_at.desc())
+                .order_by(
+                    db.PolicyDecision.created_at.desc(),
+                    db.PolicyDecision.id.desc(),
+                )
                 .limit(1)
             )
             if draft
@@ -152,7 +158,7 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
                 db.ActionQueue.conversation_id == conversation.id,
                 db.ActionQueue.action_type == "RESUME",
             )
-            .order_by(db.ActionQueue.created_at.desc())
+            .order_by(db.ActionQueue.created_at.desc(), db.ActionQueue.id.desc())
             .limit(1)
         )
         items.append(

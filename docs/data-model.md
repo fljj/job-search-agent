@@ -269,8 +269,9 @@ users
   最后/下次扫描时间、是否到末尾及最近 2000 个已见外部职位 ID。消息游标与职位游标
   使用不同子键，轮询心跳更新不得覆盖两者。
 - `job_discovery_records`：按运行保存外部职位 ID、公司、标题、招聘人、内容哈希、处理
-  状态、原因码及关联职位/评分/动作；`(agent_run_id, external_job_id)` 唯一，确保刷新、
-  重排和进程恢复后不会重复处理。
+  状态、原因码及关联职位/评分/动作；`retry_count` 和 `next_retry_at` 保存单飞重试次数
+  与下次允许时间；`(agent_run_id, external_job_id)` 唯一，确保刷新、重排和进程恢复后
+  不会重复处理。`(agent_run_id, status, next_retry_at)` 索引用于选择唯一队首重试。
 - `conversations.processing_lease_owner/processing_lease_expires_at`：消息发现的会话级
   短租约，防止多个执行者同时导入和决策同一对话。
 - `agent_run_events`：追加保存运行启动、租约轮询、草稿、动作、失败、熔断和恢复事件，不覆盖历史记录。

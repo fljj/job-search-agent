@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -13,9 +13,11 @@ from adapters.browser.job_discovery import (
     select_job_candidates,
     verify_job_target,
 )
+from apps.api.app.core.config import Settings
 from apps.api.app.services.job_discovery_service import (
     _is_prewrite_retryable,
     _job_safety_reasons,
+    _schedule_retry,
 )
 from packages.browser_worker.models import (
     BrowserJob,
@@ -246,6 +248,40 @@ def test_proactive_contact_requires_complete_safe_job(
     for field, value in changes.items():
         setattr(job, field, value)
     assert reason in _job_safety_reasons(job)
+
+
+def test_retry_uses_exponential_backoff_and_stops_after_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        boss_llm_retry_base_seconds=300,
+        boss_llm_retry_max_seconds=3600,
+        boss_job_retry_max_attempts=3,
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.job_discovery_service.get_settings",
+        lambda: settings,
+    )
+    record = SimpleNamespace(
+        retry_count=0,
+        status="DISCOVERED",
+        reason_codes=[],
+        next_retry_at=None,
+    )
+    now = datetime.now(UTC)
+
+    first = _schedule_retry(record, "LLM_RATE_LIMITED", now)
+    assert first == now + timedelta(seconds=300)
+    second = _schedule_retry(record, "LLM_RATE_LIMITED", now)
+    assert second == now + timedelta(seconds=600)
+    exhausted = _schedule_retry(record, "LLM_RATE_LIMITED", now)
+    assert exhausted is None
+    assert record.status == "SKIPPED"
+    assert record.reason_codes == [
+        "LLM_RATE_LIMITED",
+        "RETRY_ATTEMPTS_EXHAUSTED",
+    ]
 
 
 def test_only_prewrite_failure_allows_greeting_retry() -> None:

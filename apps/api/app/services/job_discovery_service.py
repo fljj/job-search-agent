@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from adapters.browser.job_discovery import DiscoveredJob, JobDiscoveryBatch
 from adapters.llm.errors import LlmProviderError
+from apps.api.app.core.config import get_settings
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.job import JobImportPayload
 from apps.api.app.schemas.score import ScoreRequest
@@ -22,6 +23,13 @@ from apps.api.app.services.score_service import create_score
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
 from packages.scoring.llm_engine import LlmScoreValidationError
+
+RETRYABLE_LLM_CODES = {
+    "LLM_RATE_LIMITED",
+    "LLM_TIMEOUT",
+    "LLM_NETWORK_ERROR",
+    "LLM_SERVICE_ERROR",
+}
 
 
 def process_job_discovery_batch(
@@ -47,7 +55,8 @@ def process_job_discovery_batch(
     if strategy is None:
         raise ValueError("Agent 策略不存在")
     counts = {"discovered": len(batch.items), "scored": 0, "contacted": 0, "skipped": 0}
-    for item in batch.items:
+    retry_backoff_until: datetime | None = None
+    for index, item in enumerate(batch.items):
         _state_event(session, run, item, "READING_CARD")
         record = _record_for_item(session, run, item)
         if record.status not in {"DISCOVERED", "RETRYABLE"}:
@@ -124,8 +133,19 @@ def process_job_discovery_batch(
                 ),
                 provider=provider,
             )
-            counts["scored"] += 1
             record.job_score_id = score.id
+            if score.hard_rejected:
+                _finish(
+                    record,
+                    "SKIPPED",
+                    [
+                        item.rule_code
+                        for item in score.rejection_reasons
+                    ] or ["HARD_FILTERED"],
+                )
+                counts["skipped"] += 1
+                continue
+            counts["scored"] += 1
             draft = create_greeting_draft(session, score.id, provider)
             _state_event(session, run, item, "AUTHORIZING")
             _state_event(session, run, item, "CONTACTING")
@@ -140,8 +160,23 @@ def process_job_discovery_batch(
                 platform=batch.platform.value,
             )
         except LlmProviderError as exc:
-            _finish(record, "RETRYABLE", [exc.code])
+            if exc.code in RETRYABLE_LLM_CODES:
+                retry_backoff_until = _schedule_retry(record, exc.code, current)
+                deferred_ids = {
+                    deferred.summary.external_job_id
+                    for deferred in batch.items[index:]
+                }
+                batch.seen_job_ids = [
+                    external_id
+                    for external_id in batch.seen_job_ids
+                    if external_id not in deferred_ids
+                ]
+            else:
+                _finish(record, "SKIPPED", [exc.code])
             counts["skipped"] += 1
+            if retry_backoff_until is not None:
+                counts["skipped"] += len(batch.items[index + 1:])
+                break
             continue
         except LlmScoreValidationError:
             _finish(record, "RETRYABLE", ["INVALID_SCORING_OUTPUT"])
@@ -155,10 +190,10 @@ def process_job_discovery_batch(
             _finish(record, "CONTACTED", ["GREETING_SENT"])
             counts["contacted"] += 1
         elif action_status == "FAILED_RETRYABLE":
-            _finish(
+            _schedule_retry(
                 record,
-                "RETRYABLE",
-                [str(result.get("failure_code") or "GREETING_PREWRITE_FAILED")],
+                str(result.get("failure_code") or "GREETING_PREWRITE_FAILED"),
+                current,
             )
             counts["skipped"] += 1
         else:
@@ -181,7 +216,9 @@ def process_job_discovery_batch(
         "next_cursor": batch.next_cursor,
         "seen_job_ids": batch.seen_job_ids,
         "last_scan_at": batch.scanned_at.isoformat(),
-        "next_scan_at": batch.next_scan_at.isoformat(),
+        "next_scan_at": (
+            retry_backoff_until or batch.next_scan_at
+        ).isoformat(),
         "exhausted": batch.exhausted,
         "refresh_before_scan": batch.refresh_before_next_scan,
         "switch_search_before_scan": batch.exhausted,
@@ -202,6 +239,13 @@ def job_scan_block_reasons(
         return ["EMERGENCY_STOP_ACTIVE"]
     if not rules.enabled or rules.paused or not rules.job_scan_enabled:
         return ["JOB_SCAN_DISABLED_OR_PAUSED"]
+    retry_record = next_retryable_job(session, run)
+    if (
+        retry_record is not None
+        and retry_record.next_retry_at is not None
+        and retry_record.next_retry_at > now
+    ):
+        return ["LLM_RETRY_BACKOFF_ACTIVE"]
     raw_cursor = (run.cursor or {}).get("job_discovery")
     if isinstance(raw_cursor, dict):
         raw_next = raw_cursor.get("next_scan_at")
@@ -227,6 +271,26 @@ def job_scan_block_reasons(
     if hour_count >= rules.hourly_scan_limit or day_count >= rules.daily_scan_limit:
         return ["JOB_SCAN_RATE_LIMIT_REACHED"]
     return []
+
+
+def next_retryable_job(
+    session: Session,
+    run: db.AgentRun,
+) -> db.JobDiscoveryRecord | None:
+    """只选择队首的一条重试记录，保证 LLM 重试单飞。"""
+    return session.scalar(
+        select(db.JobDiscoveryRecord)
+        .where(
+            db.JobDiscoveryRecord.agent_run_id == run.id,
+            db.JobDiscoveryRecord.status == "RETRYABLE",
+        )
+        .order_by(
+            db.JobDiscoveryRecord.next_retry_at.asc().nullsfirst(),
+            db.JobDiscoveryRecord.created_at.asc(),
+            db.JobDiscoveryRecord.id.asc(),
+        )
+        .limit(1)
+    )
 
 
 def _record_for_item(
@@ -361,6 +425,30 @@ def _finish(
 ) -> None:
     record.status = status
     record.reason_codes = reasons
+    if status != "RETRYABLE":
+        record.next_retry_at = None
+
+
+def _schedule_retry(
+    record: db.JobDiscoveryRecord,
+    reason_code: str,
+    now: datetime,
+) -> datetime | None:
+    settings = get_settings()
+    record.retry_count += 1
+    if record.retry_count >= settings.boss_job_retry_max_attempts:
+        record.status = "SKIPPED"
+        record.reason_codes = [reason_code, "RETRY_ATTEMPTS_EXHAUSTED"]
+        record.next_retry_at = None
+        return None
+    delay_seconds = min(
+        settings.boss_llm_retry_base_seconds * (2 ** (record.retry_count - 1)),
+        settings.boss_llm_retry_max_seconds,
+    )
+    record.status = "RETRYABLE"
+    record.reason_codes = [reason_code]
+    record.next_retry_at = now + timedelta(seconds=delay_seconds)
+    return record.next_retry_at
 
 
 def _event(

@@ -57,6 +57,7 @@ class BossJobDiscoveryAdapter:
         scroll_position: int = 0,
         previous_cursor: str | None = None,
         seen_job_ids: list[str] | None = None,
+        target_job_ids: set[str] | None = None,
         irrelevant_title_keywords: list[str] | None = None,
         limit: int = 20,
         interval_seconds: int = 30,
@@ -91,7 +92,12 @@ class BossJobDiscoveryAdapter:
             ):
                 raise ValueError("BOSS 职位列表结构不可用")
             candidates = select_job_candidates(
-                listing.jobs,
+                [
+                    item
+                    for item in listing.jobs
+                    if target_job_ids is None
+                    or item.external_job_id in target_job_ids
+                ],
                 seen_job_ids or [],
                 scroll_position=0,
                 limit=limit,

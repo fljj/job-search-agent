@@ -13,6 +13,8 @@
 - 日历：macOS 默认使用 Apple Calendar
 - 回复路由：到岗、薪资、地点和工作模式优先使用规则，候选人经历优先使用知识库，
   其余消息才调用 LLM；消息中心展示每条最新草稿的回复来源
+- 职位分析：先执行不消耗 Token 的硬性规则；命中后直接记录排除原因，只有通过的职位
+  才进入完整 JD 解析和 AI 评分
 
 API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
 状态的平台任务，不需要为 BOSS、脉脉和 Telegram 分别启动 Worker。
@@ -67,6 +69,11 @@ APPLE_CALENDAR_NAME=求职面试
 | `AGENT_CDP_URL` | `http://127.0.0.1:9222` | 专用 Chrome 的调试地址 |
 | `AGENT_POLL_INTERVAL_SECONDS` | `10` | Worker 轮询间隔 |
 | `AGENT_TICK_BATCH_SIZE` | `10` | 每轮最多处理数量 |
+| `BOSS_JOB_BATCH_SIZE` | `5` | BOSS 每批最多处理的职位数 |
+| `BOSS_JOB_SCAN_INTERVAL_SECONDS` | `180` | 完成一批后到下一批的最短间隔 |
+| `BOSS_LLM_RETRY_BASE_SECONDS` | `300` | 职位 LLM 暂时失败后的首次等待时间 |
+| `BOSS_LLM_RETRY_MAX_SECONDS` | `3600` | 职位重试退避的最长等待时间 |
+| `BOSS_JOB_RETRY_MAX_ATTEMPTS` | `5` | 单个职位最多累计尝试次数 |
 | `BOSS_JOB_SEARCH_LABELS` | `推荐,Java,区块链工程师` | BOSS 职位入口名称，必须与页面文字一致 |
 | `AGENT_LOG_DIR` | `~/Desktop/job-search-agent-gray/logs` | Worker 日志目录 |
 | `WORKER_STALE_SECONDS` | `60` | 超过该时间没有心跳则标记 Worker 异常 |

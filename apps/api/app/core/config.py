@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     llm_max_retries: int = Field(default=1, ge=0, le=3)
     agent_lease_seconds: int = Field(default=30, ge=5, le=300)
     agent_tick_batch_size: int = Field(default=10, ge=1, le=100)
+    boss_job_batch_size: int = Field(default=5, ge=1, le=20)
+    boss_job_scan_interval_seconds: int = Field(default=180, ge=30, le=3600)
+    boss_llm_retry_base_seconds: int = Field(default=300, ge=60, le=3600)
+    boss_llm_retry_max_seconds: int = Field(default=3600, ge=300, le=21600)
+    boss_job_retry_max_attempts: int = Field(default=5, ge=1, le=10)
     agent_failure_threshold: int = Field(default=3, ge=1, le=20)
     agent_poll_interval_seconds: int = Field(default=10, ge=1, le=300)
     agent_executor_mode: Literal["REAL", "FAKE"] = "REAL"

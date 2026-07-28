@@ -53,6 +53,25 @@ class FailingLlmProvider(FakeLlmProvider):
         raise LlmServiceError("测试模型故障")
 
 
+class CountingLlmProvider(FakeLlmProvider):
+    def __init__(self) -> None:
+        self.parse_calls = 0
+        self.score_calls = 0
+        self.greeting_calls = 0
+
+    def parse_job(self, request: object):  # type: ignore[no-untyped-def, override]
+        self.parse_calls += 1
+        return super().parse_job(request)  # type: ignore[arg-type]
+
+    def score_job(self, request: object):  # type: ignore[no-untyped-def, override]
+        self.score_calls += 1
+        return super().score_job(request)  # type: ignore[arg-type]
+
+    def generate_greeting(self, request: object):  # type: ignore[no-untyped-def, override]
+        self.greeting_calls += 1
+        return super().generate_greeting(request)  # type: ignore[arg-type]
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     database_url = os.getenv("TEST_DATABASE_URL")
@@ -773,6 +792,67 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
             now=proactive_now + timedelta(minutes=2),
         )
         assert repeated_counts["contacted"] == 0
+        hard_filtered_provider = CountingLlmProvider()
+        hard_filtered = BrowserJob(
+            external_job_id="hard-filtered-onsite-job",
+            title="Java后端工程师",
+            company_name="硬性排除测试公司",
+            industry="互联网",
+            location="北京",
+            work_mode="ONSITE",
+            salary_text="40K-45K",
+            recruiter_name="硬性排除测试招聘人",
+            description="5年以上Java、Spring Boot和MySQL经验",
+            source_status="OPEN",
+        )
+        hard_filtered_counts = process_job_discovery_batch(
+            discovery_session,
+            run_entity,
+            JobDiscoveryBatch(
+                platform=Platform.BOSS,
+                search_key="java",
+                scroll_position=2,
+                scanned_at=proactive_now + timedelta(minutes=3),
+                next_scan_at=proactive_now + timedelta(minutes=4),
+                seen_job_ids=["hard-filtered-onsite-job"],
+                exhausted=True,
+                items=[
+                    DiscoveredJob(
+                        summary={
+                            "external_job_id": "hard-filtered-onsite-job",
+                            "title": "Java后端工程师",
+                            "company_name": "硬性排除测试公司",
+                        },
+                        detail=ReadResult(
+                            platform=Platform.BOSS,
+                            status=SessionStatus.SESSION_READY,
+                            page_type=PageType.JOB,
+                            page_url=(
+                                "https://www.zhipin.com/job_detail/"
+                                "hard-filtered-onsite-job.html"
+                            ),
+                            page_title="Java后端工程师",
+                            content_hash="e" * 64,
+                            selector_version="fixture",
+                            job=hard_filtered,
+                        ),
+                    )
+                ],
+            ),
+            provider=hard_filtered_provider,
+            executor=FakeActionExecutor(),
+            cdp_url="http://127.0.0.1:9222",
+            now=proactive_now + timedelta(minutes=3),
+        )
+        assert hard_filtered_counts == {
+            "discovered": 1,
+            "scored": 0,
+            "contacted": 0,
+            "skipped": 1,
+        }
+        assert hard_filtered_provider.parse_calls == 0
+        assert hard_filtered_provider.score_calls == 0
+        assert hard_filtered_provider.greeting_calls == 0
     duplicate_start = client.post("/api/v1/automation/runs", json={
         "platform": "MOCK", "strategy_id": strategy_id,
     })

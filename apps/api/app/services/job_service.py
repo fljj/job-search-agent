@@ -68,7 +68,9 @@ def list_jobs(
         query = query.where(db.Job.id == job_id)
     if work_mode:
         query = query.where(db.Job.work_mode == work_mode)
-    jobs = session.scalars(query.order_by(db.Job.created_at.desc())).all()
+    jobs = session.scalars(
+        query.order_by(db.Job.created_at.desc(), db.Job.id.desc())
+    ).all()
     items: list[JobResponse] = []
     for job in jobs:
         latest_score = None
@@ -76,7 +78,7 @@ def list_jobs(
             latest_score = session.scalar(
                 select(db.JobScore)
                 .where(db.JobScore.job_id == job.id, db.JobScore.strategy_id == strategy_id)
-                .order_by(db.JobScore.created_at.desc())
+                .order_by(db.JobScore.created_at.desc(), db.JobScore.id.desc())
                 .limit(1)
             )
             if latest_score is None:
@@ -207,7 +209,10 @@ def list_parsed_details(
     query = select(db.ParsedJobDetail).where(db.ParsedJobDetail.job_id == job.id)
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = session.scalars(
-        query.order_by(db.ParsedJobDetail.created_at.desc())
+        query.order_by(
+            db.ParsedJobDetail.created_at.desc(),
+            db.ParsedJobDetail.id.desc(),
+        )
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()

@@ -105,8 +105,11 @@ export function JobPage() {
       { title: '地点', dataIndex: 'location' },
       { title: '薪资', dataIndex: 'salary_text', render: (value?: string) => value ?? '-' },
       { title: '评分', render: (_: unknown, job: Job) => job.latest_score
-        ? <Tag color={job.latest_score.total_score >= 80 ? 'green' : 'blue'}>
-          {job.latest_score.total_score} / {job.latest_score.grade}</Tag> : <Tag>待评分</Tag> },
+        ? job.latest_score.hard_rejected
+          ? <Tag color="red">硬性排除（未AI评分）</Tag>
+          : <Tag color={job.latest_score.total_score >= 80 ? 'green' : 'blue'}>
+            {job.latest_score.total_score} / {job.latest_score.grade}</Tag>
+        : <Tag>待评分</Tag> },
       { title: '硬性规则', render: (_: unknown, job: Job) => job.latest_score
         ? <Tag color={job.latest_score.hard_rejected ? 'red' : 'green'}>
           {job.latest_score.hard_rejected ? '已排除' : '通过'}</Tag> : <Tag>待评分</Tag> },

@@ -41,6 +41,7 @@ from apps.api.app.services.agent_service import pause_run, tick_run
 from apps.api.app.services.automation_service import _effective_rules
 from apps.api.app.services.job_discovery_service import (
     job_scan_block_reasons,
+    next_retryable_job,
     process_job_discovery_batch,
 )
 from apps.api.app.services.message_discovery_service import (
@@ -241,21 +242,11 @@ def _run_boss_job_discovery(
     )
     raw_job_position = job_cursor.get("scroll_position")
     raw_seen_jobs = job_cursor.get("seen_job_ids")
-    retryable_job_ids = set(
-        session.scalars(
-            select(db.JobDiscoveryRecord.external_job_id)
-            .join(
-                db.AgentRun,
-                db.AgentRun.id == db.JobDiscoveryRecord.agent_run_id,
-            )
-            .where(
-                db.AgentRun.user_id == run.user_id,
-                db.AgentRun.platform == run.platform,
-                db.JobDiscoveryRecord.status == "RETRYABLE",
-            )
-        ).all()
+    retry_record = next_retryable_job(session, run)
+    retry_job_id = (
+        retry_record.external_job_id if retry_record is not None else None
     )
-    persisted_seen_jobs = session.scalars(
+    persisted_seen_query = (
         select(db.JobDiscoveryRecord.external_job_id)
         .join(
             db.AgentRun,
@@ -264,13 +255,17 @@ def _run_boss_job_discovery(
         .where(
             db.AgentRun.user_id == run.user_id,
             db.AgentRun.platform == run.platform,
-            db.JobDiscoveryRecord.status != "RETRYABLE",
         )
-    ).all()
+    )
+    if retry_job_id is not None:
+        persisted_seen_query = persisted_seen_query.where(
+            db.JobDiscoveryRecord.external_job_id != retry_job_id
+        )
+    persisted_seen_jobs = session.scalars(persisted_seen_query).all()
     seen_job_ids = _merge_seen_job_ids(
         raw_seen_jobs,
         persisted_seen_jobs,
-        retryable_job_ids,
+        [retry_job_id] if retry_job_id else [],
     )
     search_keys = get_settings().boss_job_searches
     adapter = BossJobDiscoveryAdapter(get_browser_selectors())
@@ -300,13 +295,15 @@ def _run_boss_job_discovery(
                 else None
             ),
             seen_job_ids=seen_job_ids,
+            target_job_ids={retry_job_id} if retry_job_id else None,
             irrelevant_title_keywords=(
                 get_job_parser_config().irrelevant_title_keywords
             ),
             limit=min(
-                get_settings().agent_tick_batch_size,
+                1 if retry_job_id else get_settings().boss_job_batch_size,
                 rules.hourly_scan_limit,
             ),
+            interval_seconds=get_settings().boss_job_scan_interval_seconds,
         )
     except (OSError, TimeoutError, ValueError):
         pause_run(session, run.id, ["JOB_DISCOVERY_UNAVAILABLE"])
