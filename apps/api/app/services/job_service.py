@@ -55,6 +55,7 @@ def list_jobs(
     session: Session,
     page: int,
     page_size: int,
+    job_id: object | None = None,
     strategy_id: object | None = None,
     grade: str | None = None,
     eligibility: str | None = None,
@@ -63,6 +64,8 @@ def list_jobs(
     hard_rejected: bool | None = None,
 ) -> tuple[list[JobResponse], int]:
     query = select(db.Job).where(db.Job.user_id == DEFAULT_USER_ID)
+    if job_id is not None:
+        query = query.where(db.Job.id == job_id)
     if work_mode:
         query = query.where(db.Job.work_mode == work_mode)
     jobs = session.scalars(query.order_by(db.Job.created_at.desc())).all()
@@ -94,7 +97,13 @@ def list_jobs(
             "hard_rejected": latest_score.hard_rejected,
             "effective_job_status": latest_score.effective_job_status,
         }
-        items.append(_response(job, summary))
+        items.append(
+            _response(
+                job,
+                summary,
+                _communication_summary(session, job, latest_score),
+            )
+        )
     total = len(items)
     start = (page - 1) * page_size
     return items[start:start + page_size], total
@@ -255,13 +264,74 @@ def _domain_job(job: db.Job) -> JobInput:
     )
 
 
-def _response(job: db.Job, latest_score: dict[str, object] | None = None) -> JobResponse:
+def _response(
+    job: db.Job,
+    latest_score: dict[str, object] | None = None,
+    communication: dict[str, object] | None = None,
+) -> JobResponse:
     return JobResponse(
         id=job.id,
         content_hash=job.content_hash,
         latest_score=latest_score,
+        communication=communication,
         **_domain_job(job).model_dump(),
     )
+
+
+def _communication_summary(
+    session: Session,
+    job: db.Job,
+    latest_score: db.JobScore | None,
+) -> dict[str, object]:
+    conversation = session.scalar(
+        select(db.Conversation)
+        .where(db.Conversation.job_id == job.id)
+        .order_by(db.Conversation.created_at.desc())
+        .limit(1)
+    )
+    action = session.scalar(
+        select(db.ActionQueue)
+        .where(
+            db.ActionQueue.job_id == job.id,
+            db.ActionQueue.action_type == "GREETING",
+        )
+        .order_by(db.ActionQueue.created_at.desc())
+        .limit(1)
+    )
+    record = session.scalar(
+        select(db.JobDiscoveryRecord)
+        .where(db.JobDiscoveryRecord.job_id == job.id)
+        .order_by(db.JobDiscoveryRecord.updated_at.desc())
+        .limit(1)
+    )
+    if conversation is not None:
+        status = "CONVERSATION_ACTIVE"
+    elif action is not None and action.status == "SUCCEEDED":
+        status = "GREETING_SENT_PENDING_SYNC"
+    elif action is not None and action.status == "FAILED_RETRYABLE":
+        status = "GREETING_RETRY_PENDING"
+    elif action is not None and action.status == "OUTCOME_UNKNOWN":
+        status = "GREETING_OUTCOME_UNKNOWN"
+    elif action is not None and action.status in {
+        "APPROVED",
+        "EXECUTING",
+        "PENDING_APPROVAL",
+    }:
+        status = "GREETING_IN_PROGRESS"
+    elif action is not None:
+        status = "GREETING_FAILED"
+    elif latest_score is not None and latest_score.automation_eligible:
+        status = "READY_TO_CONTACT"
+    else:
+        status = "NOT_CONTACTED"
+    return {
+        "status": status,
+        "conversation_id": conversation.id if conversation else None,
+        "action_id": action.id if action else None,
+        "action_status": action.status if action else None,
+        "failure_code": action.failure_code if action else None,
+        "reason_codes": record.reason_codes if record else [],
+    }
 
 
 def _parsed_response(record: db.ParsedJobDetail) -> ParsedJobResponse:

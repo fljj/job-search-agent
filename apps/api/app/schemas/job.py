@@ -17,6 +17,7 @@ class JobResponse(JobInput):
     id: UUID
     content_hash: str
     latest_score: dict[str, object] | None = None
+    communication: dict[str, object] | None = None
 
 
 class JobImportResponse(BaseModel):

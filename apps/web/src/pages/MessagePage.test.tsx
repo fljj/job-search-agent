@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { MessagePage } from './MessagePage'
@@ -8,6 +8,7 @@ vi.mock('../api/client', () => ({ api: vi.fn() }))
 describe('MessagePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.location.hash = 'messages'
   })
 
   it('不匹配会话明确显示不会发送简历且不展示附件名', async () => {
@@ -37,4 +38,24 @@ describe('MessagePage', () => {
     expect(screen.queryByText('默认简历.pdf')).toBeNull()
   })
 
+  it('可以从消息跳转到对应职位', async () => {
+    vi.mocked(api).mockResolvedValue({
+      items: [{
+        id: 'conversation-1',
+        platform: 'BOSS',
+        recruiter_name: '招聘人',
+        state: 'ACTIVE',
+        company_name: '示例公司',
+        job_id: 'job-1',
+        job_title: 'Java后端',
+        qualification_status: 'FULL_MATCH',
+        qualification_evidence: [],
+      }],
+    })
+
+    render(<MessagePage />)
+
+    fireEvent.click(await screen.findByText('查看职位'))
+    expect(window.location.hash).toBe('#jobs?job_id=job-1')
+  })
 })

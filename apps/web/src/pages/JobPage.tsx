@@ -4,7 +4,9 @@ import { api } from '../api/client'
 
 interface Job { id: string; title: string; company_name: string; work_mode: string; location?: string;
   salary_text?: string; source: string; latest_score?: { id: string; total_score: number; grade: string;
-    eligibility: string; hard_rejected: boolean; effective_job_status: string } }
+    eligibility: string; hard_rejected: boolean; effective_job_status: string };
+  communication?: { status: string; conversation_id?: string; action_status?: string;
+    failure_code?: string; reason_codes: string[] } }
 interface Strategy { id: string; name: string; enabled: boolean }
 interface ScoreDetail { dimension: string; score: number | string; max_score: number | string;
   explanation: string; evidence_refs: string[]; rule_code: string }
@@ -26,6 +28,31 @@ const dimensionLabels: Record<string, string> = {
   management: '管理经验或岗位级别',
 }
 
+const communicationLabels: Record<string, string> = {
+  CONVERSATION_ACTIVE: '已有会话',
+  GREETING_SENT_PENDING_SYNC: '已打招呼，等待消息同步',
+  GREETING_RETRY_PENDING: '发送失败，等待重试',
+  GREETING_OUTCOME_UNKNOWN: '发送结果待确认',
+  GREETING_IN_PROGRESS: '正在发起沟通',
+  GREETING_FAILED: '发送失败',
+  READY_TO_CONTACT: '满足条件，尚未发起',
+  NOT_CONTACTED: '未发起沟通',
+}
+
+const communicationReasonLabels: Record<string, string> = {
+  APPROVED_TARGET_PAGE_NOT_FOUND: '发送时没有找到对应职位页',
+  APPROVED_TARGET_PAGE_AMBIGUOUS: '检测到多个相同职位页',
+  SUPPORTED_PAGE_ROOT_NOT_FOUND: '职位页面结构发生变化',
+  GREETING_ALREADY_EXISTS: '已有招呼动作',
+  AUTO_GREET_DISABLED: '主动沟通开关未开启',
+  SCORE_BELOW_AUTO_GREET_THRESHOLD: '评分未达到主动沟通门槛',
+}
+
+function linkedJobId() {
+  const query = window.location.hash.split('?')[1] ?? ''
+  return new URLSearchParams(query).get('job_id') ?? ''
+}
+
 export function JobPage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [strategies, setStrategies] = useState<Strategy[]>([])
@@ -33,8 +60,10 @@ export function JobPage() {
   const [workMode, setWorkMode] = useState<string>()
   const [grade, setGrade] = useState<string>()
   const [score, setScore] = useState<ScoreResult>()
+  const focusedJobId = linkedJobId()
   const load = () => {
     const query = new URLSearchParams()
+    if (focusedJobId) query.set('job_id', focusedJobId)
     if (workMode) query.set('work_mode', workMode)
     if (strategyId) query.set('strategy_id', strategyId)
     if (grade) query.set('grade', grade)
@@ -47,7 +76,9 @@ export function JobPage() {
       if (enabled) {
         setStrategyId(enabled.id)
         const jobData = await api<{ items: Job[] }>(
-          `/jobs?strategy_id=${encodeURIComponent(enabled.id)}`,
+          `/jobs?strategy_id=${encodeURIComponent(enabled.id)}${
+            focusedJobId ? `&job_id=${encodeURIComponent(focusedJobId)}` : ''
+          }`,
         )
         setJobs(jobData.items)
       } else {
@@ -55,7 +86,7 @@ export function JobPage() {
         setJobs(jobData.items)
       }
     })
-  }, [])
+  }, [focusedJobId])
   const openScore = async (scoreId: string) => setScore(await api<ScoreResult>(`/scores/${scoreId}`))
   return <Space direction="vertical" style={{ width: '100%' }}>
     <Alert type="info" showIcon message="职位由 Agent 自动发现、解析和评分"
@@ -79,6 +110,23 @@ export function JobPage() {
       { title: '硬性规则', render: (_: unknown, job: Job) => job.latest_score
         ? <Tag color={job.latest_score.hard_rejected ? 'red' : 'green'}>
           {job.latest_score.hard_rejected ? '已排除' : '通过'}</Tag> : <Tag>待评分</Tag> },
+      { title: '沟通进度', render: (_: unknown, job: Job) => {
+        const communication = job.communication
+        const reason = communication?.failure_code
+          ?? communication?.reason_codes?.[0]
+        return <Space direction="vertical" size={0}>
+          <Tag color={communication?.status === 'CONVERSATION_ACTIVE' ? 'green'
+            : communication?.status === 'GREETING_RETRY_PENDING'
+              || communication?.status === 'GREETING_FAILED' ? 'red' : 'blue'}>
+            {communicationLabels[communication?.status ?? 'NOT_CONTACTED'] ?? '状态待确认'}
+          </Tag>
+          {reason && <span>{communicationReasonLabels[reason] ?? reason}</span>}
+          {communication?.conversation_id && <Button type="link" size="small"
+            onClick={() => { window.location.hash = `messages?job_id=${job.id}` }}>
+            查看对应消息
+          </Button>}
+        </Space>
+      } },
       { title: '操作', render: (_: unknown, job: Job) => <Button
         disabled={!job.latest_score} onClick={() => job.latest_score && void openScore(job.latest_score.id)}>
         查看评分证据</Button> },

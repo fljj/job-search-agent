@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,7 +13,10 @@ from adapters.browser.job_discovery import (
     select_job_candidates,
     verify_job_target,
 )
-from apps.api.app.services.job_discovery_service import _job_safety_reasons
+from apps.api.app.services.job_discovery_service import (
+    _is_prewrite_retryable,
+    _job_safety_reasons,
+)
 from packages.browser_worker.models import (
     BrowserJob,
     BrowserJobSummary,
@@ -242,3 +246,17 @@ def test_proactive_contact_requires_complete_safe_job(
     for field, value in changes.items():
         setattr(job, field, value)
     assert reason in _job_safety_reasons(job)
+
+
+def test_only_prewrite_failure_allows_greeting_retry() -> None:
+    retryable = SimpleNamespace(
+        status="FAILED_RETRYABLE",
+        failure_code="APPROVED_TARGET_PAGE_NOT_FOUND",
+    )
+    unknown = SimpleNamespace(
+        status="OUTCOME_UNKNOWN",
+        failure_code="RESULT_NOT_OBSERVED",
+    )
+
+    assert _is_prewrite_retryable(retryable)  # type: ignore[arg-type]
+    assert not _is_prewrite_retryable(unknown)  # type: ignore[arg-type]

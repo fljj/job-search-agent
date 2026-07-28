@@ -7,7 +7,7 @@ import os
 import signal
 import socket
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from uuid import UUID
@@ -74,14 +74,17 @@ STOP_EVENT = threading.Event()
 
 
 def _merge_seen_job_ids(
-    cursor_items: object, persisted_items: Sequence[object]
+    cursor_items: object,
+    persisted_items: Sequence[object],
+    excluded_items: Collection[object] = (),
 ) -> list[str]:
     cursor_values = cursor_items if isinstance(cursor_items, list) else []
+    excluded = {str(item) for item in excluded_items}
     return list(
         dict.fromkeys(
             [
-                *(str(item) for item in cursor_values),
-                *(str(item) for item in persisted_items),
+                *(str(item) for item in cursor_values if str(item) not in excluded),
+                *(str(item) for item in persisted_items if str(item) not in excluded),
             ]
         )
     )
@@ -238,6 +241,20 @@ def _run_boss_job_discovery(
     )
     raw_job_position = job_cursor.get("scroll_position")
     raw_seen_jobs = job_cursor.get("seen_job_ids")
+    retryable_job_ids = set(
+        session.scalars(
+            select(db.JobDiscoveryRecord.external_job_id)
+            .join(
+                db.AgentRun,
+                db.AgentRun.id == db.JobDiscoveryRecord.agent_run_id,
+            )
+            .where(
+                db.AgentRun.user_id == run.user_id,
+                db.AgentRun.platform == run.platform,
+                db.JobDiscoveryRecord.status == "RETRYABLE",
+            )
+        ).all()
+    )
     persisted_seen_jobs = session.scalars(
         select(db.JobDiscoveryRecord.external_job_id)
         .join(
@@ -247,9 +264,14 @@ def _run_boss_job_discovery(
         .where(
             db.AgentRun.user_id == run.user_id,
             db.AgentRun.platform == run.platform,
+            db.JobDiscoveryRecord.status != "RETRYABLE",
         )
     ).all()
-    seen_job_ids = _merge_seen_job_ids(raw_seen_jobs, persisted_seen_jobs)
+    seen_job_ids = _merge_seen_job_ids(
+        raw_seen_jobs,
+        persisted_seen_jobs,
+        retryable_job_ids,
+    )
     search_keys = get_settings().boss_job_searches
     adapter = BossJobDiscoveryAdapter(get_browser_selectors())
     try:

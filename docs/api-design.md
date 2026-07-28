@@ -112,9 +112,13 @@
 
 ### `GET /api/v1/jobs`
 
-查询参数：`strategy_id`、`grade`、`eligibility`、`effective_job_status`、`hard_rejected`、`work_mode`、`page`、`page_size`。评分结果类筛选必须与 `strategy_id` 一起使用。
+查询参数：`job_id`、`strategy_id`、`grade`、`eligibility`、`effective_job_status`、
+`hard_rejected`、`work_mode`、`page`、`page_size`。评分结果类筛选必须与
+`strategy_id` 一起使用。
 
-当指定 `strategy_id` 时，返回该策略的最新评分摘要。
+当指定 `strategy_id` 时，返回该策略的最新评分摘要。每条职位同时返回
+`communication`，区分尚未发起、等待重试、已发送待同步和已有会话，并提供可选
+`conversation_id`、动作状态、失败码及原因码；评分通过不等于消息已经发送成功。
 
 ### `GET /api/v1/jobs/{job_id}`
 

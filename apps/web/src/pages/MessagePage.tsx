@@ -1,4 +1,4 @@
-import { Card, Space, Table, Tag } from 'antd'
+import { Button, Card, Space, Table, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
@@ -84,15 +84,30 @@ function decisionContent(item: ConversationSummary) {
 
 export function MessagePage() {
   const [items, setItems] = useState<ConversationSummary[]>([])
+  const linkedJobId = new URLSearchParams(
+    window.location.hash.split('?')[1] ?? '',
+  ).get('job_id')
   useEffect(() => {
     void api<{ items: ConversationSummary[] }>('/conversations').then((data) => setItems(data.items))
   }, [])
-  return <Card title="招聘沟通监控" extra={<Tag color="blue">普通沟通由 Agent 自动处理</Tag>}>
-    <Table rowKey="id" dataSource={items} columns={[
+  const visibleItems = linkedJobId
+    ? items.filter((item) => item.job_id === linkedJobId)
+    : items
+  return <Card title="招聘沟通监控" extra={<Space>
+    {linkedJobId && <Button onClick={() => { window.location.hash = 'messages' }}>显示全部消息</Button>}
+    <Tag color="blue">普通沟通由 Agent 自动处理</Tag>
+  </Space>}>
+    <Table rowKey="id" dataSource={visibleItems} columns={[
       { title: '平台', dataIndex: 'platform' },
       { title: '公司/职位', render: (_: unknown, item: ConversationSummary) =>
         <Space direction="vertical" size={0}><strong>{item.company_name ?? '-'}</strong>
           <span>{item.job_title ?? '-'}</span></Space> },
+      { title: '关联职位', render: (_: unknown, item: ConversationSummary) =>
+        item.job_id
+          ? <Button type="link" onClick={() => {
+            window.location.hash = `jobs?job_id=${item.job_id}`
+          }}>查看职位</Button>
+          : <Tag>职位未绑定</Tag> },
       { title: '招聘人', dataIndex: 'recruiter_name' },
       { title: '评分', render: (_: unknown, item: ConversationSummary) =>
         !item.job_id

@@ -53,6 +53,14 @@ def test_persisted_discovery_records_are_always_treated_as_seen() -> None:
     ) == ["cursor-job", "repeated-job", "retryable-job"]
 
 
+def test_retryable_discovery_records_are_removed_from_seen_cursor() -> None:
+    assert _merge_seen_job_ids(
+        ["cursor-job", "retryable-job"],
+        ["persisted-job"],
+        ["retryable-job"],
+    ) == ["cursor-job", "persisted-job"]
+
+
 def test_boss_job_search_labels_are_configurable() -> None:
     settings = Settings(
         _env_file=None,

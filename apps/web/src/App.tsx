@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Layout, Menu, Spin, Typography } from 'antd'
 
 const pages = {
@@ -13,6 +13,11 @@ const pages = {
 
 type PageKey = keyof typeof pages
 
+function pageFromHash(): PageKey {
+  const key = window.location.hash.slice(1).split('?')[0]
+  return key in pages ? key as PageKey : 'overview'
+}
+
 const labels: Record<PageKey, string> = {
   overview: '总览',
   jobs: '职位中心',
@@ -24,7 +29,16 @@ const labels: Record<PageKey, string> = {
 }
 
 export default function App() {
-  const [activeKey, setActiveKey] = useState<PageKey>('overview')
+  const [activeKey, setActiveKey] = useState<PageKey>(pageFromHash)
+  const [locationKey, setLocationKey] = useState(window.location.hash)
+  useEffect(() => {
+    const syncPage = () => {
+      setActiveKey(pageFromHash())
+      setLocationKey(window.location.hash)
+    }
+    window.addEventListener('hashchange', syncPage)
+    return () => window.removeEventListener('hashchange', syncPage)
+  }, [])
   const ActivePage = pages[activeKey]
   return <Layout style={{ minHeight: '100vh' }}>
     <Layout.Sider width={220} breakpoint="lg" collapsedWidth={0}>
@@ -32,7 +46,10 @@ export default function App() {
         无人值守求职 Agent
       </Typography.Title>
       <Menu theme="dark" mode="inline" selectedKeys={[activeKey]}
-        onClick={({ key }) => setActiveKey(key as PageKey)}
+        onClick={({ key }) => {
+          window.location.hash = key
+          setActiveKey(key as PageKey)
+        }}
         items={(Object.keys(labels) as PageKey[]).map((key) => ({ key, label: labels[key] }))} />
     </Layout.Sider>
     <Layout>
@@ -41,7 +58,7 @@ export default function App() {
       </Layout.Header>
       <Layout.Content style={{ padding: 24 }}>
         <Suspense fallback={<Spin tip="页面加载中" />}>
-          <ActivePage />
+          <ActivePage key={locationKey} />
         </Suspense>
       </Layout.Content>
     </Layout>

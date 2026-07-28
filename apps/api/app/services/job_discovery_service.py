@@ -11,6 +11,7 @@ from adapters.llm.errors import LlmProviderError
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.job import JobImportPayload
 from apps.api.app.schemas.score import ScoreRequest
+from apps.api.app.services.action_service import PREWRITE_RETRYABLE_FAILURES
 from apps.api.app.services.automation_service import (
     _effective_rules,
     dispatch_proactive_greeting,
@@ -100,7 +101,12 @@ def process_job_discovery_batch(
             counts["skipped"] += 1
             continue
         cooldown = _cooldown_reason(
-            session, job.company_name, source.recruiter_name, rules, current
+            session,
+            job.id,
+            job.company_name,
+            source.recruiter_name,
+            rules,
+            current,
         )
         if cooldown:
             _finish(record, "SKIPPED", [cooldown])
@@ -272,12 +278,13 @@ def _job_safety_reasons(job: object) -> list[str]:
 
 
 def _duplicate_reason(session: Session, job: db.Job) -> str | None:
-    if session.scalar(
-        select(db.ActionQueue.id).where(
+    existing_action = session.scalar(
+        select(db.ActionQueue).where(
             db.ActionQueue.action_type == "GREETING",
             db.ActionQueue.job_id == job.id,
         )
-    ):
+    )
+    if existing_action and not _is_prewrite_retryable(existing_action):
         return "JOB_ALREADY_CONTACTED"
     if session.scalar(
         select(db.Conversation.id).where(db.Conversation.job_id == job.id)
@@ -286,7 +293,13 @@ def _duplicate_reason(session: Session, job: db.Job) -> str | None:
     contacted = session.scalars(
         select(db.Job)
         .join(db.ActionQueue, db.ActionQueue.job_id == db.Job.id)
-        .where(db.ActionQueue.action_type == "GREETING", db.Job.id != job.id)
+        .where(
+            db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.status.in_(
+                ["APPROVED", "EXECUTING", "SUCCEEDED", "OUTCOME_UNKNOWN"]
+            ),
+            db.Job.id != job.id,
+        )
     ).all()
     for other in contacted:
         if other.company_name == job.company_name and other.title == job.title:
@@ -296,8 +309,16 @@ def _duplicate_reason(session: Session, job: db.Job) -> str | None:
     return None
 
 
+def _is_prewrite_retryable(action: db.ActionQueue) -> bool:
+    return (
+        action.status == "FAILED_RETRYABLE"
+        and action.failure_code in PREWRITE_RETRYABLE_FAILURES
+    )
+
+
 def _cooldown_reason(
     session: Session,
+    job_id: UUID,
     company: str,
     recruiter: str | None,
     rules: object,
@@ -309,6 +330,10 @@ def _cooldown_reason(
     if rules.company_cooldown_hours and session.scalar(
         select(db.ActionQueue.id).where(
             db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.status.in_(
+                ["APPROVED", "EXECUTING", "SUCCEEDED", "OUTCOME_UNKNOWN"]
+            ),
+            db.ActionQueue.job_id != job_id,
             db.ActionQueue.target_company == company,
             db.ActionQueue.created_at
             >= now - timedelta(hours=rules.company_cooldown_hours),
@@ -318,6 +343,10 @@ def _cooldown_reason(
     if recruiter and rules.recruiter_cooldown_hours and session.scalar(
         select(db.ActionQueue.id).where(
             db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.status.in_(
+                ["APPROVED", "EXECUTING", "SUCCEEDED", "OUTCOME_UNKNOWN"]
+            ),
+            db.ActionQueue.job_id != job_id,
             db.ActionQueue.target_recruiter == recruiter,
             db.ActionQueue.created_at
             >= now - timedelta(hours=rules.recruiter_cooldown_hours),
