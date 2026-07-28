@@ -12,7 +12,6 @@ from apps.api.app.core.config import get_settings
 from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AgentRunStartRequest, AutomationDispatchRequest
-from apps.api.app.services.action_service import PREWRITE_RETRYABLE_FAILURES
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
@@ -340,12 +339,10 @@ def _pending_drafts(
         )
         if decision is None or decision.decision != "ALLOW_AUTO":
             continue
-        existing_action = session.scalar(
-            select(db.ActionQueue).where(db.ActionQueue.draft_id == draft.id)
-        )
-        if existing_action and not (
-            existing_action.status == "FAILED_RETRYABLE"
-            and existing_action.failure_code in PREWRITE_RETRYABLE_FAILURES
+        if session.scalar(
+            select(db.ActionQueue.id).where(
+                db.ActionQueue.draft_id == draft.id
+            )
         ):
             continue
         conversation = session.get(db.Conversation, draft.conversation_id)

@@ -446,6 +446,19 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "draft_id": auto_draft["id"], "cdp_url": "http://127.0.0.1:9222",
     })
     assert auto_sent.json()["data"]["decision"] == "ALLOW_AUTO"
+    decline_sent = client.post("/api/v1/automation/dispatch", json={
+        "action_type": "MISMATCH_DECLINE",
+        "conversation_id": low_conversation["id"],
+        "draft_id": low_decline.json()["data"]["id"],
+        "cdp_url": "http://127.0.0.1:9222",
+    })
+    assert decline_sent.json()["data"]["action_status"] == "SUCCEEDED"
+    declined_conversation = next(
+        item
+        for item in client.get("/api/v1/conversations").json()["data"]["items"]
+        if item["id"] == low_conversation["id"]
+    )
+    assert declined_conversation["state"] == "DECLINED"
 
     time_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
         "external_message_id": "message-2", "content": "周二几点可以电话面试？",

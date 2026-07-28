@@ -208,11 +208,6 @@ def dispatch(
         resume,
         agent_run_id,
     )
-    if (
-        action.status == ActionStatus.FAILED_RETRYABLE.value
-        and action.failure_code in PREWRITE_RETRYABLE_FAILURES
-    ):
-        approve_retry(session, action.id)
     pending_task = session.scalar(select(db.ConfirmationTask).where(
         db.ConfirmationTask.decision_id == original.id,
         db.ConfirmationTask.status == "PENDING_APPROVAL",
@@ -221,6 +216,20 @@ def dispatch(
         pending_task.status = "SUPERSEDED"
     session.commit()
     result = execute_action(session, action.id, payload.cdp_url, executor)
+    if (
+        result.status == ActionStatus.SUCCEEDED.value
+        and payload.action_type == "MISMATCH_DECLINE"
+    ):
+        conversation.state = "DECLINED"
+        _audit(
+            session,
+            "CONVERSATION_DECLINED",
+            conversation.id,
+            "ACTIVE",
+            "DECLINED",
+            ["MISMATCH_DECLINE_SENT"],
+        )
+        session.commit()
     if result.status in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
         _pause_platform(session, conversation.platform, result.failure_code or result.status)
     enforce_rollout_health(session, conversation.platform)
