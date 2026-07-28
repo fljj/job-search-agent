@@ -233,6 +233,48 @@ def test_specific_skill_evidence_is_resolved_in_score_detail(
     assert detail.matched_facts["evidence_items"] == [java.model_dump(mode="json")]
 
 
+def test_job_content_evidence_can_support_title_direction(
+    evidence_context: ScoringContext,
+) -> None:
+    required_skill = next(
+        item
+        for item in evidence_context.evidence_items
+        if item.source_path == "parsed_job.required_skills"
+        and item.value == "Java"
+    )
+
+    assert required_skill.dimensions == ["skills", "title"]
+
+    output = output_for_total(evidence_context, 80)
+    title = next(item for item in output.dimensions if item.dimension == "title")
+    title.evidence_refs = [required_skill.id]
+
+    result = validate_llm_score(evidence_context, output)
+    detail = next(item for item in result.details if item.dimension == "title")
+
+    assert detail.matched_facts["evidence_items"] == [
+        required_skill.model_dump(mode="json")
+    ]
+
+
+def test_job_responsibilities_can_support_direction_experience_and_industry(
+    context: ScoringContext,
+) -> None:
+    responsibilities = context.parsed_job.model_copy(
+        update={"responsibilities": ["负责银行核心系统后端研发"]}
+    )
+    scored_context = with_evidence_catalog(
+        context.model_copy(update={"parsed_job": responsibilities})
+    )
+    evidence = next(
+        item
+        for item in scored_context.evidence_items
+        if item.source_path == "parsed_job.responsibilities"
+    )
+
+    assert evidence.dimensions == ["experience", "industry", "title"]
+
+
 def test_cross_dimension_evidence_is_rejected(
     evidence_context: ScoringContext,
 ) -> None:

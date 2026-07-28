@@ -15,7 +15,7 @@ from packages.scoring.models import (
     ScoringContext,
 )
 
-LLM_SCORING_VERSION = "llm:1.1.0"
+LLM_SCORING_VERSION = "llm:1.2.0"
 
 
 class LlmScoreValidationError(ValueError):

@@ -43,14 +43,19 @@ def with_evidence_catalog(context: ScoringContext) -> ScoringContext:
         ["title"],
     )
     add_list(
+        "parsed_job.responsibilities",
+        list(context.parsed_job.responsibilities),
+        ["title", "experience", "industry"],
+    )
+    add_list(
         "parsed_job.required_skills",
         list(context.parsed_job.required_skills),
-        ["skills"],
+        ["title", "skills"],
     )
     add_list(
         "parsed_job.preferred_skills",
         list(context.parsed_job.preferred_skills),
-        ["skills"],
+        ["title", "skills"],
     )
     add_list(
         "candidate.skills",

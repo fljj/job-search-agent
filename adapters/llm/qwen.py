@@ -32,7 +32,7 @@ PROMPTS: dict[str, tuple[str, str]] = {
         "不得在没有候选人出生信息时推断年龄不匹配。",
     ),
     "score_job": (
-        "job-score-v5",
+        "job-score-v6",
         "仅按输入评分契约输出JSON。必须返回title/skills/experience/location/salary/"
         "industry/management七维且每个维度恰好出现一次。固定满分为："
         "title=15，skills=25，experience=15，location=15，salary=15，"
@@ -41,6 +41,10 @@ PROMPTS: dict[str, tuple[str, str]] = {
         "input.evidence_items中的完整id，只能引用dimensions包含当前维度的条目；"
         "涉及技能、行业、规则或解析列表时必须引用实际使用的具体条目id，不得只引用"
         "集合路径。不得创造、缩写或修改证据id；不得解除硬性排除或修改阈值。"
+        "title维度表示岗位方向匹配，不是标题关键词机械匹配。标题明确时优先依据标题；"
+        "标题宽泛、使用业务名称或未出现目标技术词时，必须结合职责、必需技能和加分技能"
+        "判断其与策略目标方向的语义匹配，不能仅因标题未出现Java等关键词直接给0分；"
+        "正文明确属于无关岗位方向时仍应给0分。"
         "JD年龄限制只能作为岗位合规提示，不得在输入没有候选人出生信息时表述为年龄不匹配。"
         "不调用工具。",
     ),

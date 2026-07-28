@@ -16,6 +16,16 @@ interface ScoreResult {
   details: ScoreDetail[]; match_reasons: string[]; risk_notes: string[]
 }
 
+const dimensionLabels: Record<string, string> = {
+  title: '岗位方向',
+  skills: '技术栈',
+  experience: '工作经历',
+  location: '工作模式与地点',
+  salary: '薪资',
+  industry: '行业',
+  management: '管理经验或岗位级别',
+}
+
 export function JobPage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [strategies, setStrategies] = useState<Strategy[]>([])
@@ -92,7 +102,8 @@ export function JobPage() {
             description={score.action_blockers.join('、')} />}
         </Card>
         <Card title="七维评分与证据"><Table rowKey="dimension" pagination={false} dataSource={score.details} columns={[
-          { title: '维度', dataIndex: 'dimension' },
+          { title: '维度', dataIndex: 'dimension',
+            render: (dimension: string) => dimensionLabels[dimension] ?? dimension },
           { title: '得分', render: (_: unknown, item: ScoreDetail) => `${item.score} / ${item.max_score}` },
           { title: '规则', dataIndex: 'rule_code' }, { title: '说明', dataIndex: 'explanation' },
           { title: '证据', dataIndex: 'evidence_refs', render: (items: string[]) => items.join('、') || '-' },
