@@ -1,10 +1,15 @@
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from playwright.sync_api import Page, sync_playwright
 
-from adapters.browser.playwright_actions import PlaywrightActionExecutor
+from adapters.browser.playwright_actions import (
+    PlaywrightActionExecutor,
+    _reply_target_matches,
+)
 from adapters.browser.playwright_reader import PlaywrightPageReader
 from apps.api.app.core.browser_config import get_browser_selectors
 from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome
@@ -100,6 +105,38 @@ def test_sends_text_and_reads_back_result_on_fixture_page() -> None:
         assert page.locator("[data-direction='outbound']").filter(
             has_text="您好，可以发送。"
         ).count() == 1
+
+
+def test_reply_executor_can_open_unique_approved_conversation_from_list() -> None:
+    executor = PlaywrightActionExecutor(get_browser_selectors())
+    page = MagicMock()
+    page._evaluate.return_value = True
+    command = approved_command(
+        "REPLY",
+        conversation_key="derived:approved-conversation",
+        content="您好，可以发送。",
+    )
+
+    opened = executor._open_approved_conversation(
+        page,
+        get_browser_selectors().platforms["BOSS"],
+        command,
+    )
+
+    assert opened
+    expression = page._evaluate.call_args.args[0]
+    assert "derived:approved-conversation" in expression
+    assert json.dumps("张招聘") in expression
+
+
+def test_reply_target_is_reverified_after_opening_conversation() -> None:
+    with fixture_page("conversation-detail.html") as page:
+        result = read_fixture(page)
+        assert _reply_target_matches(result, approved_command("REPLY"))
+        assert not _reply_target_matches(
+            result,
+            approved_command("REPLY", recruiter="其他招聘人"),
+        )
 
 
 def test_starts_job_conversation_and_sends_greeting_once() -> None:

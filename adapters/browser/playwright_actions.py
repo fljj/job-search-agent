@@ -23,15 +23,32 @@ from adapters.browser.playwright_reader import (
 )
 from apps.api.app.core.recommendation_config import get_recommendation_rules
 from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome, ExecutionResult
-from packages.browser_worker.config import BrowserSelectorsConfig
+from packages.browser_worker.config import BrowserSelectorsConfig, PlatformSelectors
 from packages.browser_worker.extractor import extract_current_page
-from packages.browser_worker.models import Platform, SessionStatus
+from packages.browser_worker.models import Platform, ReadResult, SessionStatus
 
 
 def _conversation_key_matches(actual: str, expected: str | None) -> bool:
     if not expected:
         return False
     return expected.startswith("derived:") or actual == expected
+
+
+def _reply_target_matches(
+    result: ReadResult,
+    command: ApprovedCommand,
+) -> bool:
+    conversation = result.conversation
+    return bool(
+        result.status is SessionStatus.SESSION_READY
+        and conversation
+        and _conversation_key_matches(
+            conversation.external_conversation_id,
+            command.conversation_key,
+        )
+        and command.recruiter in conversation.recruiter_name
+        and command.job_title in (conversation.job_title or "")
+    )
 
 
 def _recommendation_card(command: ApprovedCommand) -> MaimaiRecommendationCard:
@@ -340,17 +357,23 @@ class PlaywrightActionExecutor:
                     check = extract_current_page(
                         page, platform, selectors, self.config.version
                     )
-                if (
-                    check.status is SessionStatus.SESSION_READY
-                    and check.conversation
-                    and _conversation_key_matches(
-                        check.conversation.external_conversation_id,
-                        command.conversation_key,
-                    )
-                    and command.recruiter in check.conversation.recruiter_name
-                    and command.job_title in (check.conversation.job_title or "")
-                ):
-                    matches.append(str(websocket_url))
+                    if _reply_target_matches(check, command):
+                        matches.append(str(websocket_url))
+                        continue
+                    if not page.exists(selectors.conversation_list_root):
+                        continue
+                    if not self._open_approved_conversation(
+                        page, selectors, command
+                    ):
+                        continue
+                    for _ in range(30):
+                        check = extract_current_page(
+                            page, platform, selectors, self.config.version
+                        )
+                        if _reply_target_matches(check, command):
+                            matches.append(str(websocket_url))
+                            break
+                        time.sleep(0.1)
             if not matches:
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_RETRYABLE,
@@ -367,6 +390,56 @@ class PlaywrightActionExecutor:
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
                 error_code="RAW_CDP_PREFLIGHT_ERROR",
             )
+
+    @staticmethod
+    def _open_approved_conversation(
+        page: RawCdpPageReader,
+        selectors: PlatformSelectors,
+        command: ApprovedCommand,
+    ) -> bool:
+        item_selector = selectors.conversation_list_items
+        id_attribute = selectors.conversation_list_item_id_attribute
+        id_json_key = selectors.conversation_list_item_id_json_key
+        recruiter_selector = selectors.conversation_list_item_recruiter
+        job_selector = selectors.conversation_list_item_job_title
+        company_selector = selectors.conversation_list_item_company
+        return bool(page._evaluate(
+            "(() => {"
+            f"const items = [...document.querySelectorAll({json.dumps(item_selector)})];"
+            f"const expectedId = {json.dumps(command.conversation_key)};"
+            f"const expectedRecruiter = {json.dumps(command.recruiter)};"
+            f"const expectedJob = {json.dumps(command.job_title)};"
+            f"const expectedCompany = {json.dumps(command.company)};"
+            f"const idAttribute = {json.dumps(id_attribute)};"
+            f"const idJsonKey = {json.dumps(id_json_key)};"
+            f"const recruiterSelector = {json.dumps(recruiter_selector)};"
+            f"const jobSelector = {json.dumps(job_selector)};"
+            f"const companySelector = {json.dumps(company_selector)};"
+            "const visible = items.filter(item => item.getClientRects().length > 0);"
+            "let matches = visible.filter(item => {"
+            " const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim() || '';"
+            " if (recruiter !== expectedRecruiter) return false;"
+            " if (expectedId?.startsWith('derived:')) return true;"
+            " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
+            " if (!raw) return false;"
+            " if (!idJsonKey) return raw === expectedId;"
+            " try { return String(JSON.parse(raw)[idJsonKey]) === expectedId; }"
+            " catch { return false; }"
+            "});"
+            "if (matches.length > 1) {"
+            " const narrowed = matches.filter(item => {"
+            "  const job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
+            "  const company = item.querySelector(companySelector)?.textContent?.trim() || '';"
+            "  const jobMatches = !expectedJob || job.includes(expectedJob) || expectedJob.includes(job);"
+            "  const companyMatches = !expectedCompany || company.includes(expectedCompany) || expectedCompany.includes(company);"
+            "  return jobMatches && companyMatches;"
+            " });"
+            " if (narrowed.length === 1) matches = narrowed;"
+            "}"
+            "if (matches.length !== 1) return false;"
+            "matches[0].click(); return true;"
+            "})()"
+        ))
 
     def _send_reply_on_raw_page(
         self,

@@ -106,7 +106,11 @@ def dispatch(
         raise ValueError("草稿与对话不匹配")
     if payload.action_type != draft.draft_type:
         raise ValueError("动作类型与草稿类型不匹配")
-    job = session.get(db.Job, conversation.job_id)
+    job = (
+        session.get(db.Job, conversation.job_id)
+        if conversation.job_id
+        else None
+    )
     inbound_action = payload.action_type != "GREETING"
     if job is None and not inbound_action:
         raise ResourceNotFoundError("职位不存在")
