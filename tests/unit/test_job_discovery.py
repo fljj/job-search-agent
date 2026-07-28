@@ -18,6 +18,7 @@ from apps.api.app.services.job_discovery_service import (
     _is_prewrite_retryable,
     _job_safety_reasons,
     _schedule_retry,
+    mark_retry_target_not_visible,
 )
 from packages.browser_worker.models import (
     BrowserJob,
@@ -296,3 +297,35 @@ def test_only_prewrite_failure_allows_greeting_retry() -> None:
 
     assert _is_prewrite_retryable(retryable)  # type: ignore[arg-type]
     assert not _is_prewrite_retryable(unknown)  # type: ignore[arg-type]
+
+
+def test_missing_retry_target_advances_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        boss_llm_retry_base_seconds=300,
+        boss_job_retry_max_attempts=3,
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.job_discovery_service.get_settings",
+        lambda: settings,
+    )
+    record = SimpleNamespace(
+        retry_count=0,
+        status="RETRYABLE",
+        reason_codes=["LLM_TIMEOUT"],
+        next_retry_at=None,
+    )
+    session = SimpleNamespace(commit=lambda: None)
+    now = datetime.now(UTC)
+
+    mark_retry_target_not_visible(  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
+        record,  # type: ignore[arg-type]
+        now=now,
+    )
+
+    assert record.retry_count == 1
+    assert record.reason_codes == ["JOB_RETRY_TARGET_NOT_VISIBLE"]
+    assert record.next_retry_at == now + timedelta(seconds=300)

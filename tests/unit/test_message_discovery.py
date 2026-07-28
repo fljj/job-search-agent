@@ -125,7 +125,11 @@ def test_linked_job_is_read_even_when_conversation_has_job_id(
     )
 
     assert discovered.job_detail is linked_job
-    linked_reader.assert_called_once_with(page, "http://127.0.0.1:9222")
+    linked_reader.assert_called_once_with(
+        page,
+        "http://127.0.0.1:9222",
+        cache=None,
+    )
 
 
 def test_boss_linked_job_url_falls_back_to_verified_component_job_id() -> None:
@@ -143,6 +147,34 @@ def test_boss_linked_job_url_falls_back_to_verified_component_job_id() -> None:
         "https://www.zhipin.com/job_detail/"
         "daddcedf0f6f79e40nJ609W6FVFR.html"
     )
+
+
+def test_linked_job_batch_cache_avoids_reopening_same_job() -> None:
+    adapter = MessageDiscoveryAdapter(
+        Platform.BOSS,
+        get_browser_selectors(),
+    )
+    page = MagicMock()
+    href = "https://www.zhipin.com/job_detail/job-1.html"
+    page.url = "https://www.zhipin.com/web/geek/chat"
+    page.attribute.return_value = href
+    cached = ReadResult(
+        platform=Platform.BOSS,
+        status=SessionStatus.SESSION_READY,
+        page_type=PageType.JOB,
+        page_url=href,
+        page_title="Java 后端",
+        content_hash="b" * 64,
+        selector_version="fixture",
+    )
+
+    result = adapter._read_linked_job(
+        page,
+        "http://127.0.0.1:9222",
+        cache={href: cached},
+    )
+
+    assert result is cached
 
 
 @pytest.mark.parametrize("value", ["../other", "javascript:alert(1)", "", None])
@@ -201,7 +233,7 @@ def test_message_key_uses_preview_when_platform_has_no_message_id() -> None:
     assert _message_key(item) != first_key
 
 
-def test_failed_outbound_only_or_unstable_read_is_not_marked_seen() -> None:
+def test_successful_reads_are_seen_but_failed_read_is_not() -> None:
     inbound = summary(1)
     outbound_only = summary(2)
     failed = summary(3)
@@ -252,7 +284,29 @@ def test_failed_outbound_only_or_unstable_read_is_not_marked_seen() -> None:
         ],
     )
 
-    assert keys == [_message_key(inbound)]
+    assert keys == [
+        _message_key(inbound),
+        _message_key(outbound_only),
+        _message_key(unstable),
+    ]
+
+
+def test_unstable_seen_conversation_is_reopened_only_when_unread() -> None:
+    item = summary(1)
+    item.last_message_id = None
+    item.last_message_text = None
+    item.unread_count = 0
+    seen = [_message_key(item)]
+
+    assert select_discovery_candidates(
+        [item], seen, scroll_position=0, limit=10
+    ) == []
+
+    item.unread_count = 1
+
+    assert select_discovery_candidates(
+        [item], seen, scroll_position=0, limit=10
+    ) == [item]
 
 
 def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:

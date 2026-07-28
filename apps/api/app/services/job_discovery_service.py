@@ -66,16 +66,24 @@ def process_job_discovery_batch(
         _state_event(session, run, item, "VERIFYING_JOB")
         if item.detail is None or item.detail.job is None or item.reason_codes:
             reasons = item.reason_codes or ["JOB_DETAIL_MISSING"]
-            status = (
-                "RETRYABLE"
-                if any(
-                    reason in {"JOB_DETAIL_OPEN_FAILED", "JOB_DETAIL_NOT_READY"}
+            retryable_reason = next(
+                (
+                    reason
                     for reason in reasons
-                )
-                else "SKIPPED"
+                    if reason in {"JOB_DETAIL_OPEN_FAILED", "JOB_DETAIL_NOT_READY"}
+                ),
+                None,
             )
-            _finish(record, status, reasons)
+            if retryable_reason:
+                retry_backoff_until = _schedule_retry(
+                    record, retryable_reason, current
+                )
+            else:
+                _finish(record, "SKIPPED", reasons)
             counts["skipped"] += 1
+            if retry_backoff_until is not None:
+                counts["skipped"] += len(batch.items[index + 1:])
+                break
             continue
         source = item.detail.job
         safety = _job_safety_reasons(source)
@@ -179,8 +187,13 @@ def process_job_discovery_batch(
                 break
             continue
         except LlmScoreValidationError:
-            _finish(record, "RETRYABLE", ["INVALID_SCORING_OUTPUT"])
+            retry_backoff_until = _schedule_retry(
+                record, "INVALID_SCORING_OUTPUT", current
+            )
             counts["skipped"] += 1
+            if retry_backoff_until is not None:
+                counts["skipped"] += len(batch.items[index + 1:])
+                break
             continue
         record.action_id = (
             UUID(str(result["action_id"])) if result.get("action_id") else None
@@ -283,6 +296,7 @@ def next_retryable_job(
         .where(
             db.JobDiscoveryRecord.agent_run_id == run.id,
             db.JobDiscoveryRecord.status == "RETRYABLE",
+            db.JobDiscoveryRecord.next_retry_at.is_not(None),
         )
         .order_by(
             db.JobDiscoveryRecord.next_retry_at.asc().nullsfirst(),
@@ -449,6 +463,21 @@ def _schedule_retry(
     record.reason_codes = [reason_code]
     record.next_retry_at = now + timedelta(seconds=delay_seconds)
     return record.next_retry_at
+
+
+def mark_retry_target_not_visible(
+    session: Session,
+    record: db.JobDiscoveryRecord,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """重试目标不在当前列表时也推进退避，防止无限切换职位入口。"""
+    _schedule_retry(
+        record,
+        "JOB_RETRY_TARGET_NOT_VISIBLE",
+        now or datetime.now(UTC),
+    )
+    session.commit()
 
 
 def _event(

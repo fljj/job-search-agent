@@ -41,6 +41,7 @@ from apps.api.app.services.agent_service import pause_run, tick_run
 from apps.api.app.services.automation_service import _effective_rules
 from apps.api.app.services.job_discovery_service import (
     job_scan_block_reasons,
+    mark_retry_target_not_visible,
     next_retryable_job,
     process_job_discovery_batch,
 )
@@ -317,6 +318,8 @@ def _run_boss_job_discovery(
             executor=executor,
             cdp_url=cdp_url,
         )
+        if retry_record is not None and not job_batch.items:
+            mark_retry_target_not_visible(session, retry_record)
     finally:
         adapter.close_details(cdp_url, job_batch)
     gray_event(

@@ -16,7 +16,6 @@ from packages.browser_worker.extractor import (
 )
 from packages.browser_worker.models import (
     BrowserConversationSummary,
-    MessageDirection,
     PageType,
     Platform,
     ReadResult,
@@ -88,8 +87,15 @@ class MessageDiscoveryAdapter:
                 scroll_position=scroll_position,
                 limit=limit,
             )
+            linked_job_cache: dict[str, ReadResult | None] = {}
             discovered = [
-                self._open_and_read(page, item, cdp_url) for item in candidates
+                self._open_and_read(
+                    page,
+                    item,
+                    cdp_url,
+                    linked_job_cache=linked_job_cache,
+                )
+                for item in candidates
             ]
             page._evaluate(
                 "(() => { const element = document.querySelector("
@@ -148,6 +154,8 @@ class MessageDiscoveryAdapter:
         page: RawCdpPageReader,
         summary: BrowserConversationSummary,
         cdp_url: str,
+        *,
+        linked_job_cache: dict[str, ReadResult | None] | None = None,
     ) -> DiscoveredConversation:
         clicked = page._evaluate(
             "(() => { const selector = "
@@ -197,7 +205,11 @@ class MessageDiscoveryAdapter:
                         summary.external_conversation_id
                     )
                 job_detail = (
-                    self._read_linked_job(page, cdp_url)
+                    self._read_linked_job(
+                        page,
+                        cdp_url,
+                        cache=linked_job_cache,
+                    )
                     if not reasons
                     else None
                 )
@@ -222,13 +234,19 @@ class MessageDiscoveryAdapter:
         )
 
     def _read_linked_job(
-        self, page: RawCdpPageReader, cdp_url: str
+        self,
+        page: RawCdpPageReader,
+        cdp_url: str,
+        *,
+        cache: dict[str, ReadResult | None] | None = None,
     ) -> ReadResult | None:
         href = self._linked_job_href(page)
         if not href:
             return None
         if (urlparse(href).hostname or "").lower() not in self.selectors.allowed_hosts:
             return None
+        if cache is not None and href in cache:
+            return cache[href]
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
             before = {str(item.get("id")) for item in json.loads(response.read())}
         request = Request(
@@ -242,7 +260,7 @@ class MessageDiscoveryAdapter:
             return None
         created_target_id = str(created_target.get("id") or "")
         opened_target_ids: set[str] = set()
-        for _ in range(100):
+        for _ in range(30):
             with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
                 targets = json.loads(response.read())
             for target in targets:
@@ -272,6 +290,8 @@ class MessageDiscoveryAdapter:
                             and result.job is not None
                         ):
                             job_page._evaluate("window.close()")
+                            if cache is not None:
+                                cache[href] = result
                             return result
                 except (OSError, TimeoutError, ValueError):
                     continue
@@ -280,6 +300,8 @@ class MessageDiscoveryAdapter:
             if not target_id:
                 continue
             self._close_target(cdp_url, target_id)
+        if cache is not None:
+            cache[href] = None
         return None
 
     def _linked_job_href(self, page: RawCdpPageReader) -> str | None:
@@ -403,7 +425,12 @@ def select_discovery_candidates(
     """列表重排后仍按最后消息去重，同时保留虚拟滚动位置。"""
     seen = set(seen_message_keys)
     window = items[scroll_position : scroll_position + limit]
-    return [item for item in window if _message_key(item) not in seen]
+    return [
+        item
+        for item in window
+        if _message_key(item) not in seen
+        or (not _has_stable_message_key(item) and item.unread_count > 0)
+    ]
 
 
 def _message_key(item: BrowserConversationSummary) -> str:
@@ -411,29 +438,29 @@ def _message_key(item: BrowserConversationSummary) -> str:
         return f"{item.external_conversation_id}:{item.last_message_id}"
     preview = " ".join((item.last_message_text or "").split())
     if not preview:
-        return f"{item.external_conversation_id}:UNKNOWN"
+        return f"{item.external_conversation_id}:conversation"
     preview_hash = hashlib.sha256(preview.encode()).hexdigest()
     return f"{item.external_conversation_id}:preview:{preview_hash}"
+
+
+def _has_stable_message_key(item: BrowserConversationSummary) -> bool:
+    return bool(
+        item.last_message_id
+        or " ".join((item.last_message_text or "").split())
+    )
 
 
 def _successfully_read_message_keys(
     candidates: list[BrowserConversationSummary],
     discovered: list[DiscoveredConversation],
 ) -> list[str]:
-    """只有确认读到入站正文后才去重，读取失败的会话留给下一轮重试。"""
+    """成功读取的稳定会话按最后消息去重，内容变化后才重新读取。"""
     keys: list[str] = []
     for summary, item in zip(candidates, discovered, strict=True):
         conversation = item.detail.conversation if item.detail else None
         if item.reason_codes or conversation is None:
             continue
-        if not any(
-            message.direction is MessageDirection.INBOUND
-            for message in conversation.messages
-        ):
-            continue
-        key = _message_key(summary)
-        if not key.endswith(":UNKNOWN"):
-            keys.append(key)
+        keys.append(_message_key(summary))
     return keys
 
 
