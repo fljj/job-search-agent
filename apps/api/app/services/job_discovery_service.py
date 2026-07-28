@@ -167,23 +167,12 @@ def process_job_discovery_batch(
             )
             counts["skipped"] += 1
         _state_event(session, run, item, "RETURNING")
-    retryable_ids = {
-        record.external_job_id
-        for record in session.scalars(
-            select(db.JobDiscoveryRecord).where(
-                db.JobDiscoveryRecord.agent_run_id == run.id,
-                db.JobDiscoveryRecord.status == "RETRYABLE",
-            )
-        ).all()
-    }
     root_cursor = dict(run.cursor or {})
     root_cursor["job_discovery"] = {
         "search_key": batch.next_search_key or batch.search_key,
         "scroll_position": 0 if batch.exhausted else batch.scroll_position,
         "next_cursor": batch.next_cursor,
-        "seen_job_ids": [
-            job_id for job_id in batch.seen_job_ids if job_id not in retryable_ids
-        ],
+        "seen_job_ids": batch.seen_job_ids,
         "last_scan_at": batch.scanned_at.isoformat(),
         "next_scan_at": batch.next_scan_at.isoformat(),
         "exhausted": batch.exhausted,

@@ -28,6 +28,7 @@ from scripts.run_agent_worker import (
     _build_executor,
     _discover_messages,
     _heartbeat_loop,
+    _merge_seen_job_ids,
     _process_maimai_recommendations,
     _single_worker_lock,
 )
@@ -43,6 +44,13 @@ def command() -> ApprovedCommand:
         recruiter="招聘人",
         content="您好",
     )
+
+
+def test_persisted_discovery_records_are_always_treated_as_seen() -> None:
+    assert _merge_seen_job_ids(
+        ["cursor-job", "repeated-job"],
+        ["repeated-job", "retryable-job"],
+    ) == ["cursor-job", "repeated-job", "retryable-job"]
 
 
 def test_boss_job_search_labels_are_configurable() -> None:

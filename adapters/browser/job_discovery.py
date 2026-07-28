@@ -290,9 +290,9 @@ def select_job_candidates(
     seen = set(seen_job_ids)
     return [
         item
-        for item in items[scroll_position : scroll_position + limit]
+        for item in items[scroll_position:]
         if item.external_job_id not in seen
-    ]
+    ][:limit]
 
 
 def next_job_search(

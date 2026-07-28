@@ -6,7 +6,7 @@ import os
 import signal
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from uuid import UUID
@@ -62,6 +62,20 @@ from packages.browser_worker.models import Platform
 logger = logging.getLogger(__name__)
 LOCK_PATH = "/tmp/job-search-agent-worker.lock"
 STOP_EVENT = threading.Event()
+
+
+def _merge_seen_job_ids(
+    cursor_items: object, persisted_items: Sequence[object]
+) -> list[str]:
+    cursor_values = cursor_items if isinstance(cursor_items, list) else []
+    return list(
+        dict.fromkeys(
+            [
+                *(str(item) for item in cursor_values),
+                *(str(item) for item in persisted_items),
+            ]
+        )
+    )
 
 
 def _send_worker_heartbeat(worker_id: str) -> None:
@@ -211,6 +225,18 @@ def _run_boss_job_discovery(
     )
     raw_job_position = job_cursor.get("scroll_position")
     raw_seen_jobs = job_cursor.get("seen_job_ids")
+    persisted_seen_jobs = session.scalars(
+        select(db.JobDiscoveryRecord.external_job_id)
+        .join(
+            db.AgentRun,
+            db.AgentRun.id == db.JobDiscoveryRecord.agent_run_id,
+        )
+        .where(
+            db.AgentRun.user_id == run.user_id,
+            db.AgentRun.platform == run.platform,
+        )
+    ).all()
+    seen_job_ids = _merge_seen_job_ids(raw_seen_jobs, persisted_seen_jobs)
     search_keys = get_settings().boss_job_searches
     adapter = BossJobDiscoveryAdapter(get_browser_selectors())
     try:
@@ -238,12 +264,7 @@ def _run_boss_job_discovery(
                 if job_cursor.get("next_cursor")
                 else None
             ),
-            seen_job_ids=[
-                str(item)
-                for item in (
-                    raw_seen_jobs if isinstance(raw_seen_jobs, list) else []
-                )
-            ],
+            seen_job_ids=seen_job_ids,
             limit=min(
                 get_settings().agent_tick_batch_size,
                 rules.hourly_scan_limit,

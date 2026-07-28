@@ -91,6 +91,21 @@ def test_virtual_list_selects_unseen_items_without_reusing_cumulative_offset() -
     ]
 
 
+def test_seen_items_do_not_hide_later_unseen_jobs_in_same_list() -> None:
+    items = [summary(index) for index in range(20)]
+
+    selected = select_job_candidates(
+        items,
+        [f"job-{index}" for index in range(10)],
+        scroll_position=0,
+        limit=5,
+    )
+
+    assert [item.external_job_id for item in selected] == [
+        f"job-{index}" for index in range(10, 15)
+    ]
+
+
 def test_virtual_list_exhausts_when_cursor_stops_and_no_new_job_is_visible() -> None:
     assert is_job_list_exhausted(0, "cursor-1", "cursor-1") is True
     assert is_job_list_exhausted(0, "cursor-2", "cursor-1") is False
