@@ -7,6 +7,7 @@ from adapters.browser.job_discovery import (
     DiscoveredJob,
     JobDiscoveryBatch,
     is_job_list_exhausted,
+    is_obviously_irrelevant_title,
     next_job_search,
     select_job_candidates,
     verify_job_target,
@@ -104,6 +105,28 @@ def test_seen_items_do_not_hide_later_unseen_jobs_in_same_list() -> None:
     assert [item.external_job_id for item in selected] == [
         f"job-{index}" for index in range(10, 15)
     ]
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["施工项目经理", "科技服务推广总监", "高级销售经理"],
+)
+def test_obviously_irrelevant_title_is_filtered_before_detail(title: str) -> None:
+    assert is_obviously_irrelevant_title(
+        title,
+        ["施工", "推广总监", "销售"],
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["银行系统研发", "高级 Java 后端工程师", "Vibe Coding工程师", "直播运营"],
+)
+def test_broad_or_target_title_still_requires_jd_analysis(title: str) -> None:
+    assert not is_obviously_irrelevant_title(
+        title,
+        ["施工", "推广总监", "销售"],
+    )
 
 
 def test_virtual_list_exhausts_when_cursor_stops_and_no_new_job_is_visible() -> None:

@@ -25,6 +25,7 @@ from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings
 from apps.api.app.core.database import SessionLocal
+from apps.api.app.core.job_parser_config import get_job_parser_config
 from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
@@ -265,6 +266,9 @@ def _run_boss_job_discovery(
                 else None
             ),
             seen_job_ids=seen_job_ids,
+            irrelevant_title_keywords=(
+                get_job_parser_config().irrelevant_title_keywords
+            ),
             limit=min(
                 get_settings().agent_tick_batch_size,
                 rules.hourly_scan_limit,

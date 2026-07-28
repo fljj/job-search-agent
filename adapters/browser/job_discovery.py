@@ -57,6 +57,7 @@ class BossJobDiscoveryAdapter:
         scroll_position: int = 0,
         previous_cursor: str | None = None,
         seen_job_ids: list[str] | None = None,
+        irrelevant_title_keywords: list[str] | None = None,
         limit: int = 20,
         interval_seconds: int = 30,
     ) -> JobDiscoveryBatch:
@@ -95,10 +96,19 @@ class BossJobDiscoveryAdapter:
                 scroll_position=0,
                 limit=limit,
             )
-            items = [
-                self._open_detail(cdp_url, page, summary)
-                for summary in candidates
-            ]
+            items = []
+            for summary in candidates:
+                if is_obviously_irrelevant_title(
+                    summary.title, irrelevant_title_keywords or []
+                ):
+                    items.append(
+                        DiscoveredJob(
+                            summary=summary,
+                            reason_codes=["TITLE_OBVIOUSLY_IRRELEVANT"],
+                        )
+                    )
+                else:
+                    items.append(self._open_detail(cdp_url, page, summary))
             page._evaluate(
                 "(() => { const element = document.querySelector("
                 f"{json.dumps(self.selectors.job_list_root)}); "
@@ -293,6 +303,17 @@ def select_job_candidates(
         for item in items[scroll_position:]
         if item.external_job_id not in seen
     ][:limit]
+
+
+def is_obviously_irrelevant_title(
+    title: str, irrelevant_keywords: list[str]
+) -> bool:
+    normalized_title = "".join(title.casefold().split())
+    return any(
+        "".join(keyword.casefold().split()) in normalized_title
+        for keyword in irrelevant_keywords
+        if keyword.strip()
+    )
 
 
 def next_job_search(

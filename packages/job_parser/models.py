@@ -68,6 +68,7 @@ class RuleParserConfig(BaseModel):
     headhunter_keywords: list[str] = Field(default_factory=list)
     internship_keywords: list[str] = Field(default_factory=list)
     full_time_bachelor_keywords: list[str] = Field(default_factory=list)
+    irrelevant_title_keywords: list[str] = Field(default_factory=list)
 
 
 class ParsedJob(BaseModel):
