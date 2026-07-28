@@ -26,7 +26,7 @@ from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
-from packages.conversation_agent.intents import classify_intents
+from packages.conversation_agent.intents import classify_intents, normalize_intents
 from packages.conversation_agent.llm_engine import (
     build_llm_reply,
     build_mismatch_decline,
@@ -272,6 +272,45 @@ def create_reply_draft(
             result,
             fingerprint,
             draft_type,
+            conversation.id,
+            message.id,
+            None,
+        )
+    strategy = (
+        session.get(db.JobStrategy, conversation.strategy_id)
+        if conversation.strategy_id
+        else None
+    )
+    if (
+        strategy is not None
+        and strategy.arrival_time_reply
+        and Intent.ARRIVAL_DATE in classify_intents(message.content)
+    ):
+        fingerprint = _fingerprint(
+            "REPLY",
+            message.id,
+            "ARRIVAL_TIME_REPLY",
+            strategy.version,
+            strategy.arrival_time_reply,
+        )
+        existing = session.scalar(
+            select(db.GeneratedDraft).where(
+                db.GeneratedDraft.input_fingerprint == fingerprint
+            )
+        )
+        if existing:
+            return _draft_response(session, existing)
+        return _persist_draft(
+            session,
+            DraftResult(
+                content=strategy.arrival_time_reply,
+                intents=[Intent.ARRIVAL_DATE],
+                confidence=1,
+                decision=Decision.ALLOW_AUTO,
+                reason_codes=["CONFIGURED_ARRIVAL_TIME_REPLY"],
+            ),
+            fingerprint,
+            "REPLY",
             conversation.id,
             message.id,
             None,
@@ -894,6 +933,9 @@ def _build_scored_reply(
             )
         ),
     ).data
+    classification.intents = normalize_intents(
+        message.content, classification.intents
+    )
     message.intents = [intent.value for intent in classification.intents]
     usable = [
         fact

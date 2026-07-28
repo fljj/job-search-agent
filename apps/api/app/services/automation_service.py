@@ -204,6 +204,11 @@ def dispatch(
         resume,
         agent_run_id,
     )
+    if (
+        action.status == ActionStatus.FAILED_RETRYABLE.value
+        and action.failure_code in PREWRITE_RETRYABLE_FAILURES
+    ):
+        approve_retry(session, action.id)
     pending_task = session.scalar(select(db.ConfirmationTask).where(
         db.ConfirmationTask.decision_id == original.id,
         db.ConfirmationTask.status == "PENDING_APPROVAL",

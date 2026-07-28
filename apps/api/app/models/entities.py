@@ -92,6 +92,9 @@ class JobStrategy(TimestampMixin, Base):
     accept_headhunter: Mapped[bool] = mapped_column(Boolean, default=True)
     headhunter_score_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     core_required_skills: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    arrival_time_reply: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
     reject_full_time_bachelor_required: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )

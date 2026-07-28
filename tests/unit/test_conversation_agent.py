@@ -5,7 +5,7 @@ import pytest
 
 from apps.api.app.services.conversation_service import _full_time_education_reply
 from packages.conversation_agent.generator import generate_greeting, generate_reply
-from packages.conversation_agent.intents import classify_intents
+from packages.conversation_agent.intents import classify_intents, normalize_intents
 from packages.conversation_agent.models import ConversationPolicyConfig, Decision, Intent
 from packages.knowledge_base.models import KnowledgeFact
 
@@ -30,6 +30,14 @@ def fact(**changes: object) -> KnowledgeFact:
 ])
 def test_classify_intents(content: str, expected: Intent) -> None:
     assert expected in classify_intents(content)
+
+
+def test_arrival_date_is_not_misclassified_as_interview_time() -> None:
+    assert classify_intents("最快到岗时间是多久？") == [Intent.ARRIVAL_DATE]
+    assert normalize_intents(
+        "最快到岗时间是多久？",
+        [Intent.ARRIVAL_DATE, Intent.INTERVIEW_TIME],
+    ) == [Intent.ARRIVAL_DATE]
 
 
 def test_verified_normal_fact_allows_automatic_reply() -> None:

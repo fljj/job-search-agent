@@ -16,6 +16,7 @@ from packages.browser_worker.extractor import (
 )
 from packages.browser_worker.models import (
     BrowserConversationSummary,
+    MessageDirection,
     PageType,
     Platform,
     ReadResult,
@@ -62,6 +63,11 @@ class MessageDiscoveryAdapter:
         limit: int = 20,
     ) -> MessageDiscoveryBatch:
         validate_local_cdp_url(cdp_url)
+        stable_seen_message_keys = [
+            key
+            for key in (seen_message_keys or [])
+            if not key.endswith(":UNKNOWN")
+        ]
         websocket_url = self._find_list_target(cdp_url)
         with RawCdpPageReader(websocket_url) as page:
             listing = extract_conversation_list(
@@ -78,7 +84,7 @@ class MessageDiscoveryAdapter:
             ]
             candidates = select_discovery_candidates(
                 eligible,
-                seen_message_keys or [],
+                stable_seen_message_keys,
                 scroll_position=scroll_position,
                 limit=limit,
             )
@@ -92,9 +98,10 @@ class MessageDiscoveryAdapter:
                 "element.dispatchEvent(new Event('scroll', {bubbles: true})); return true; })()"
             )
             next_position = min(len(eligible), scroll_position + limit)
-            updated_seen = [*(seen_message_keys or []), *[
-                _message_key(item) for item in candidates
-            ]]
+            updated_seen = [
+                *stable_seen_message_keys,
+                *_successfully_read_message_keys(candidates, discovered),
+            ]
             exhausted = next_position >= len(eligible) and not listing.cursor
             return MessageDiscoveryBatch(
                 platform=self.platform,
@@ -400,7 +407,34 @@ def select_discovery_candidates(
 
 
 def _message_key(item: BrowserConversationSummary) -> str:
-    return f"{item.external_conversation_id}:{item.last_message_id or 'UNKNOWN'}"
+    if item.last_message_id:
+        return f"{item.external_conversation_id}:{item.last_message_id}"
+    preview = " ".join((item.last_message_text or "").split())
+    if not preview:
+        return f"{item.external_conversation_id}:UNKNOWN"
+    preview_hash = hashlib.sha256(preview.encode()).hexdigest()
+    return f"{item.external_conversation_id}:preview:{preview_hash}"
+
+
+def _successfully_read_message_keys(
+    candidates: list[BrowserConversationSummary],
+    discovered: list[DiscoveredConversation],
+) -> list[str]:
+    """只有确认读到入站正文后才去重，读取失败的会话留给下一轮重试。"""
+    keys: list[str] = []
+    for summary, item in zip(candidates, discovered, strict=True):
+        conversation = item.detail.conversation if item.detail else None
+        if item.reason_codes or conversation is None:
+            continue
+        if not any(
+            message.direction is MessageDirection.INBOUND
+            for message in conversation.messages
+        ):
+            continue
+        key = _message_key(summary)
+        if not key.endswith(":UNKNOWN"):
+            keys.append(key)
+    return keys
 
 
 def _matches_partition(

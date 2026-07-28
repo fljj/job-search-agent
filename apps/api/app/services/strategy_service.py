@@ -90,6 +90,7 @@ def _apply(strategy: db.JobStrategy, payload: StrategyPayload) -> None:
     strategy.accept_headhunter = payload.accept_headhunter
     strategy.headhunter_score_cap = payload.headhunter_score_cap
     strategy.core_required_skills = payload.core_required_skills
+    strategy.arrival_time_reply = payload.arrival_time_reply
     strategy.reject_full_time_bachelor_required = (
         payload.reject_full_time_bachelor_required
     )
@@ -133,6 +134,7 @@ def _response(strategy: db.JobStrategy) -> StrategyResponse:
         accept_headhunter=strategy.accept_headhunter,
         headhunter_score_cap=strategy.headhunter_score_cap,
         core_required_skills=strategy.core_required_skills,
+        arrival_time_reply=strategy.arrival_time_reply,
         reject_full_time_bachelor_required=(
             strategy.reject_full_time_bachelor_required
         ),

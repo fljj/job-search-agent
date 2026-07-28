@@ -5,9 +5,12 @@ import pytest
 from sqlalchemy.orm import Session
 
 from adapters.browser.message_discovery import (
+    DiscoveredConversation,
     MessageDiscoveryAdapter,
     _matches_partition,
+    _message_key,
     _normalize_duplicate_conversation_ids,
+    _successfully_read_message_keys,
     _verify_target,
     select_discovery_candidates,
 )
@@ -184,6 +187,72 @@ def test_cursor_scans_100_reordered_conversations_without_duplicates() -> None:
     assert select_discovery_candidates(
         changed, seen, scroll_position=0, limit=100
     ) == [new_message]
+
+
+def test_message_key_uses_preview_when_platform_has_no_message_id() -> None:
+    item = summary(1)
+    item.last_message_id = None
+    item.last_message_text = "你好，方便聊聊吗"
+    first_key = _message_key(item)
+
+    item.last_message_text = "可以发一份简历吗"
+
+    assert first_key.startswith("conversation-1:preview:")
+    assert _message_key(item) != first_key
+
+
+def test_failed_outbound_only_or_unstable_read_is_not_marked_seen() -> None:
+    inbound = summary(1)
+    outbound_only = summary(2)
+    failed = summary(3)
+    unstable = summary(4)
+    unstable.last_message_id = None
+    unstable.last_message_text = None
+    inbound_detail = detail(inbound)
+    outbound_detail = detail(outbound_only)
+    unstable_detail = detail(unstable)
+    assert inbound_detail.conversation is not None
+    assert outbound_detail.conversation is not None
+    assert unstable_detail.conversation is not None
+    inbound_detail.conversation.messages = [
+        BrowserMessage(
+            external_message_id="inbound-1",
+            content="你好",
+            received_at=datetime.now(UTC),
+            direction="INBOUND",
+        )
+    ]
+    outbound_detail.conversation.messages = [
+        BrowserMessage(
+            external_message_id="outbound-1",
+            content="您好",
+            received_at=datetime.now(UTC),
+            direction="OUTBOUND",
+        )
+    ]
+    unstable_detail.conversation.messages = [
+        BrowserMessage(
+            external_message_id="inbound-unstable",
+            content="在吗",
+            received_at=datetime.now(UTC),
+            direction="INBOUND",
+        )
+    ]
+
+    keys = _successfully_read_message_keys(
+        [inbound, outbound_only, failed, unstable],
+        [
+            DiscoveredConversation(summary=inbound, detail=inbound_detail),
+            DiscoveredConversation(summary=outbound_only, detail=outbound_detail),
+            DiscoveredConversation(
+                summary=failed,
+                reason_codes=["CONVERSATION_DETAIL_NOT_READY"],
+            ),
+            DiscoveredConversation(summary=unstable, detail=unstable_detail),
+        ],
+    )
+
+    assert keys == [_message_key(inbound)]
 
 
 def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:

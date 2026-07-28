@@ -442,6 +442,31 @@ def _run_telegram_job_discovery(
     )
 
 
+def _tick_and_log(
+    session: Session,
+    run: db.AgentRun,
+    worker_id: str,
+    executor: ActionExecutor,
+) -> None:
+    result = tick_run(
+        session,
+        run.id,
+        worker_id,
+        executor=executor,
+    )
+    gray_event(
+        logger,
+        "CYCLE_COMPLETED",
+        worker_id=worker_id,
+        run_id=run.id,
+        status=result["status"],
+        processed_count=result["processed_count"],
+        action_count=result["action_count"],
+        failure_count=result["failure_count"],
+        pause_reason_codes=result["pause_reason_codes"],
+    )
+
+
 def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
     with SessionLocal() as session:
         run_ids = session.scalars(
@@ -465,6 +490,12 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                         cdp_url,
                         BossMessageDiscoveryAdapter(get_browser_selectors()),
                     ):
+                        continue
+                    run.executor_type = executor_type
+                    session.commit()
+                    # 回复动作依赖刚打开的消息页，必须在职位扫描改变页面前完成。
+                    _tick_and_log(session, run, worker_id, executor)
+                    if run.status != "RUNNING":
                         continue
                     rules = _effective_rules(
                         session, run.platform, run.strategy_id
@@ -494,6 +525,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                                 executor,
                                 rules,
                             )
+                    continue
                 elif run.platform == Platform.MAIMAI.value:
                     if not _discover_messages(
                         session,
@@ -536,23 +568,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                         )
                 run.executor_type = executor_type
                 session.commit()
-                result = tick_run(
-                    session,
-                    run_id,
-                    worker_id,
-                    executor=executor,
-                )
-                gray_event(
-                    logger,
-                    "CYCLE_COMPLETED",
-                    worker_id=worker_id,
-                    run_id=run_id,
-                    status=result["status"],
-                    processed_count=result["processed_count"],
-                    action_count=result["action_count"],
-                    failure_count=result["failure_count"],
-                    pause_reason_codes=result["pause_reason_codes"],
-                )
+                _tick_and_log(session, run, worker_id, executor)
         except ValueError as exc:
             gray_event(
                 logger,

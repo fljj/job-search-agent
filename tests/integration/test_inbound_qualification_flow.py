@@ -209,6 +209,27 @@ def test_explicit_inbound_resume_request_does_not_require_score(
     assert conversation.qualification_status == "FULL_MATCH"
     assert interview_request["status"] == "PENDING_APPROVAL"
 
+    strategy.arrival_time_reply = (
+        "我最快可以在一周内到岗，具体日期可以结合双方安排确认。"
+    )
+    strategy.version += 1
+    session.commit()
+    arrival_message = import_message(
+        session,
+        conversation.id,
+        MessagePayload(
+            external_message_id="arrival-date-question",
+            content="最快到岗时间是多久？",
+            received_at=datetime.now(UTC),
+        ),
+    )
+
+    arrival_draft = create_reply_draft(session, arrival_message.id)
+
+    assert arrival_draft.content == strategy.arrival_time_reply
+    assert arrival_draft.decision.value == "ALLOW_AUTO"
+    assert arrival_draft.reason_codes == ["CONFIGURED_ARRIVAL_TIME_REPLY"]
+
 
 def test_unbound_inbound_message_gets_safe_clarification(
     session: Session,

@@ -134,6 +134,7 @@ class Strategy(BaseModel):
     headhunter_score_cap: int | None = Field(default=None, ge=0, le=79)
     max_posted_days: int = Field(default=30, ge=1)
     core_required_skills: list[str] = Field(default_factory=list)
+    arrival_time_reply: str | None = Field(default=None, max_length=200)
     reject_full_time_bachelor_required: bool = False
     version: int = Field(default=1, ge=1)
 

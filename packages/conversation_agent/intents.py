@@ -22,4 +22,17 @@ INTENT_KEYWORDS: dict[Intent, tuple[str, ...]] = {
 def classify_intents(content: str) -> list[Intent]:
     lowered = content.lower()
     found = [intent for intent, words in INTENT_KEYWORDS.items() if any(word in lowered for word in words)]
-    return found or [Intent.UNCLEAR]
+    return normalize_intents(content, found) or [Intent.UNCLEAR]
+
+
+def normalize_intents(content: str, intents: list[Intent]) -> list[Intent]:
+    """用确定性规则消除会改变权限边界的模型意图冲突。"""
+    found = list(dict.fromkeys(intents))
+    if (
+        Intent.ARRIVAL_DATE in found
+        and Intent.PHONE_CALL not in found
+        and Intent.INTERVIEW_INVITATION not in found
+    ):
+        # “到岗时间”是普通事实询问，不能因包含泛化词“时间”而升级为面试排期。
+        found = [intent for intent in found if intent is not Intent.INTERVIEW_TIME]
+    return found
