@@ -29,7 +29,7 @@ class AutomationDecisionResponse(BaseModel):
 
 
 class AgentRunStartRequest(BaseModel):
-    platform: Literal["MOCK", "BOSS", "MAIMAI"]
+    platform: Literal["MOCK", "BOSS", "MAIMAI", "TELEGRAM"]
     strategy_id: UUID
 
 

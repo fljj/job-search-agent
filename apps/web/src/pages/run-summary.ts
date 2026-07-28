@@ -6,7 +6,7 @@ export interface RunSummaryItem {
   pause_reason_codes: string[]
 }
 
-const platformOrder = ['BOSS', 'MAIMAI']
+const platformOrder = ['BOSS', 'MAIMAI', 'TELEGRAM']
 const reconnectablePauseReasons = new Set([
   'MESSAGE_DISCOVERY_UNAVAILABLE',
   'JOB_DISCOVERY_UNAVAILABLE',

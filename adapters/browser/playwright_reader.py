@@ -153,11 +153,20 @@ class RawCdpPageReader(PageReader):
         return str(value) if value is not None else None
 
     def _evaluate(self, expression: str) -> Any:
+        result = self._command(
+            "Runtime.evaluate",
+            {"expression": expression, "returnByValue": True},
+        ).get("result", {})
+        if result.get("subtype") == "error":
+            raise ValueError("CDP 页面脚本执行失败")
+        return result.get("value")
+
+    def _command(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self.message_id += 1
         self.connection.send(json.dumps({
             "id": self.message_id,
-            "method": "Runtime.evaluate",
-            "params": {"expression": expression, "returnByValue": True},
+            "method": method,
+            "params": params,
         }))
         while True:
             response = json.loads(self.connection.recv(timeout=3))
@@ -165,10 +174,7 @@ class RawCdpPageReader(PageReader):
                 continue
             if "error" in response:
                 raise ValueError("CDP 页面读取失败")
-            result = response.get("result", {}).get("result", {})
-            if result.get("subtype") == "error":
-                raise ValueError("CDP 页面脚本执行失败")
-            return result.get("value")
+            return cast(dict[str, Any], response.get("result", {}))
 
 
 class PlaywrightReadOnlyAdapter:

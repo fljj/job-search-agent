@@ -1,6 +1,6 @@
 # job-search-agent
 
-面向 BOSS 直聘和脉脉的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
+面向 BOSS 直聘、脉脉和白名单 Telegram 招聘频道的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
 消息，并按规则发送网站内已有简历；电话和面试的具体时间、登录验证、验证码及安全异常
 仍由用户处理。
 
@@ -13,7 +13,7 @@
 - 日历：macOS 默认使用 Apple Calendar
 
 API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
-状态的平台任务，不需要为 BOSS 和脉脉分别启动 Worker。
+状态的平台任务，不需要为 BOSS、脉脉和 Telegram 分别启动 Worker。
 
 ## 2. 环境要求
 
@@ -259,7 +259,7 @@ BOSS 首次运行时，在“系统设置”的“BOSS 无人值守灰度”中�
 具体推荐规则见
 [config/recommendation-policy.json](config/recommendation-policy.json)。
 
-### 6.3 创建 BOSS 和脉脉 Run
+### 6.3 创建 BOSS、脉脉和 Telegram Run
 
 在“系统设置”底部的“Agent 运行”区域：
 
@@ -267,6 +267,13 @@ BOSS 首次运行时，在“系统设置”的“BOSS 无人值守灰度”中�
 2. 选择已经启用的求职策略。
 3. 点击“启动”。
 4. 再选择平台 `MAIMAI`，使用同一策略点击“启动”。
+5. 登录 Telegram Web A 后，再选择 `TELEGRAM`，使用同一策略点击“启动”。
+
+Telegram 使用同一个 Agent 专用 Chrome，并要求只保留一个
+`https://web.telegram.org/a/` 标签页。系统只扫描
+`config/telegram-policy.json` 中的频道；帖子复用现有求职策略评分，只有 80 分以上且
+明确提供 Telegram 联系人的职位才允许私聊。联系人必须通过 Telegram 全局搜索精确匹配；
+模型限流等暂时性失败按配置延迟重试，不会绕过评分直接发送。
 
 平台显示 `RUNNING` 只表示数据库任务已经启动；必须继续启动 Worker 才会实际扫描页面。
 

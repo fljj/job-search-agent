@@ -150,6 +150,9 @@ job-search-agent/
   在新标签打开详情并复核外部职位 ID、公司和标题；不评分、不授权发送。
 - `job_discovery_service`：持久化发现记录，编排导入、解析、评分、去重、冷却和主动招呼
   授权，并推进职位发现游标。
+- `telegram_jobs`：只读轮询白名单招聘频道，以频道 ID 和消息 ID 去重，提取完整帖子与
+  唯一 Telegram 联系人；通过 Telegram 原生会话入口切换频道，不读取 Cookie、账号密码
+  或 Telegram 内部存储。
 - `automation_service`：在发送前统一复核分数、硬排除、模型建议、猎头封顶、安全字段、
   开关、限速和幂等指纹。
 - `run_agent_worker.py`：串联全量会话消息发现与职位发现；已读但最后由招聘方发言的

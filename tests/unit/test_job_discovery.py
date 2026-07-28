@@ -109,23 +109,36 @@ def test_seen_items_do_not_hide_later_unseen_jobs_in_same_list() -> None:
 
 @pytest.mark.parametrize(
     "title",
-    ["施工项目经理", "科技服务推广总监", "高级销售经理"],
+    [
+        "施工项目经理",
+        "科技服务推广总监",
+        "高级销售经理",
+        "BD",
+        "Mod",
+        "风控战略分析师",
+    ],
 )
 def test_obviously_irrelevant_title_is_filtered_before_detail(title: str) -> None:
     assert is_obviously_irrelevant_title(
         title,
-        ["施工", "推广总监", "销售"],
+        ["施工", "推广总监", "销售", "BD", "Mod", "风控"],
     )
 
 
 @pytest.mark.parametrize(
     "title",
-    ["银行系统研发", "高级 Java 后端工程师", "Vibe Coding工程师", "直播运营"],
+    [
+        "银行系统研发",
+        "高级 Java 后端工程师",
+        "Vibe Coding工程师",
+        "直播运营",
+        "Web Developer",
+    ],
 )
 def test_broad_or_target_title_still_requires_jd_analysis(title: str) -> None:
     assert not is_obviously_irrelevant_title(
         title,
-        ["施工", "推广总监", "销售"],
+        ["施工", "推广总监", "销售", "BD", "Mod", "风控"],
     )
 
 

@@ -66,6 +66,8 @@ class PlaywrightActionExecutor:
                 accept=command.action_type.endswith("ACCEPT"),
                 rules=get_recommendation_rules(),
             )
+        if command.action_type == "GREETING" and command.platform == "TELEGRAM":
+            return self._execute_telegram_greeting(cdp_url, command)
         if command.action_type == "GREETING":
             return self._execute_greeting_over_raw_cdp(cdp_url, command)
         if command.action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
@@ -79,6 +81,192 @@ class PlaywrightActionExecutor:
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
                 error_code="PLAYWRIGHT_ERROR",
             )
+
+    def _execute_telegram_greeting(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        if not command.content or not command.recruiter.startswith("@"):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_FINAL,
+                error_code="TELEGRAM_TARGET_INVALID",
+            )
+        performed = False
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches = [
+                str(item["webSocketDebuggerUrl"])
+                for item in targets
+                if item.get("type") == "page"
+                and str(item.get("url") or "").startswith(
+                    "https://web.telegram.org/a/"
+                )
+                and item.get("webSocketDebuggerUrl")
+            ]
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="TELEGRAM_PAGE_NOT_UNIQUE",
+                )
+            username = command.recruiter.removeprefix("@")
+            with RawCdpPageReader(matches[0]) as page:
+                if not self._open_telegram_contact(page, username):
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="TELEGRAM_CONTACT_NOT_READY",
+                    )
+                already_sent = page._evaluate(
+                    "[...document.querySelectorAll('.Message.own')].some("
+                    "item => (item.innerText || '').includes("
+                    f"{json.dumps(command.content)}))"
+                )
+                if already_sent:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.SUCCEEDED,
+                        observed_content=command.content,
+                    )
+                composer = self._telegram_element_point(
+                    page,
+                    "[contenteditable=true][role=textbox][aria-label=Message]",
+                )
+                if composer is None:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="TELEGRAM_COMPOSER_FILL_FAILED",
+                    )
+                self._trusted_click(page, composer)
+                page._command("Input.insertText", {"text": command.content})
+                if not page._evaluate(
+                    "(() => { const element = document.querySelector("
+                    "'[contenteditable=true][role=textbox][aria-label=Message]');"
+                    f"return (element?.textContent || '').trim() === {json.dumps(command.content)};"
+                    "})()"
+                ):
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="TELEGRAM_COMPOSER_FILL_FAILED",
+                    )
+                performed = True
+                send_button = self._telegram_element_point(
+                    page,
+                    "button.send.main-button, button.Button.send, "
+                    "button[aria-label='Send Message']",
+                )
+                if send_button is None:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        error_code="TELEGRAM_SEND_BUTTON_NOT_READY",
+                    )
+                self._trusted_click(page, send_button)
+                for _ in range(50):
+                    observed = page._evaluate(
+                        "[...document.querySelectorAll('.Message.own')].some("
+                        "item => (item.innerText || '').includes("
+                        f"{json.dumps(command.content)}))"
+                    )
+                    if observed:
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.SUCCEEDED,
+                            external_reference=f"@{username}",
+                            observed_content=command.content,
+                        )
+                    time.sleep(0.1)
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="TELEGRAM_RESULT_NOT_OBSERVED",
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=(
+                    ExecutionOutcome.OUTCOME_UNKNOWN
+                    if performed
+                    else ExecutionOutcome.FAILED_RETRYABLE
+                ),
+                error_code="TELEGRAM_CDP_ERROR",
+            )
+
+    @staticmethod
+    def _open_telegram_contact(
+        page: RawCdpPageReader,
+        username: str,
+    ) -> bool:
+        search_ready = page._evaluate(
+            "(() => { const element = [...document.querySelectorAll("
+            "\"input[placeholder='Search']\")].find(item => "
+            "item.getClientRects().length > 0);"
+            "if (!element) return false;"
+            "const setter = Object.getOwnPropertyDescriptor("
+            "HTMLInputElement.prototype, 'value').set;"
+            "setter.call(element, '');"
+            "element.dispatchEvent(new Event('input', {bubbles:true}));"
+            "element.focus(); return true; })()"
+        )
+        if not search_ready:
+            return False
+        page._command("Input.insertText", {"text": f"@{username}"})
+        expected = username.lower()
+        for _ in range(50):
+            point = page._evaluate(
+                "(() => { const handle = [...document.querySelectorAll('.handle')].find("
+                f"item => (item.textContent || '').trim().toLowerCase() === {json.dumps(expected)}"
+                "); const element = handle?.closest('[role=button]');"
+                "if (!element) return null; const rect = element.getBoundingClientRect();"
+                "return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}; })()"
+            )
+            if isinstance(point, dict):
+                PlaywrightActionExecutor._trusted_click(page, point)
+                break
+            time.sleep(0.1)
+        else:
+            return False
+        for _ in range(50):
+            if page._evaluate(
+                "Boolean(document.querySelector("
+                "'[contenteditable=true][role=textbox][aria-label=Message]'))"
+            ):
+                return True
+            time.sleep(0.1)
+        return False
+
+    @staticmethod
+    def _telegram_element_point(
+        page: RawCdpPageReader,
+        selector: str,
+    ) -> dict[str, object] | None:
+        point = page._evaluate(
+            "(() => { const element = [...document.querySelectorAll("
+            f"{json.dumps(selector)})].find(item => item.getClientRects().length > 0);"
+            "if (!element || element.disabled) return null;"
+            "const rect = element.getBoundingClientRect();"
+            "return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}; })()"
+        )
+        return point if isinstance(point, dict) else None
+
+    @staticmethod
+    def _trusted_click(
+        page: RawCdpPageReader,
+        point: dict[str, object],
+    ) -> None:
+        x = point.get("x")
+        y = point.get("y")
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            raise ValueError("CDP 点击坐标无效")
+        coordinates = {
+            "x": float(x),
+            "y": float(y),
+            "button": "left",
+            "clickCount": 1,
+        }
+        page._command(
+            "Input.dispatchMouseEvent",
+            {"type": "mousePressed", **coordinates},
+        )
+        page._command(
+            "Input.dispatchMouseEvent",
+            {"type": "mouseReleased", **coordinates},
+        )
 
     def _execute_greeting_over_raw_cdp(
         self,

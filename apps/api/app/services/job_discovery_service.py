@@ -131,6 +131,7 @@ def process_job_discovery_batch(
                 cdp_url,
                 executor=executor,
                 agent_run_id=run.id,
+                platform=batch.platform.value,
             )
         except LlmProviderError as exc:
             _finish(record, "RETRYABLE", [exc.code])

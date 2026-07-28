@@ -310,9 +310,13 @@ def is_obviously_irrelevant_title(
 ) -> bool:
     normalized_title = "".join(title.casefold().split())
     return any(
-        "".join(keyword.casefold().split()) in normalized_title
+        (
+            normalized_title == normalized_keyword
+            if normalized_keyword.isascii() and len(normalized_keyword) <= 3
+            else normalized_keyword in normalized_title
+        )
         for keyword in irrelevant_keywords
-        if keyword.strip()
+        if (normalized_keyword := "".join(keyword.casefold().split()))
     )
 
 

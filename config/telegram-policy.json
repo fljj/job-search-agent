@@ -1,0 +1,14 @@
+{
+  "channels": [
+    {
+      "channel_id": "-1001698016813",
+      "name": "DeJob求职交流群"
+    },
+    {
+      "channel_id": "-1001572924402",
+      "name": "abetterpath 招聘求职"
+    }
+  ],
+  "scan_limit_per_channel": 10,
+  "retry_delay_seconds": 300
+}

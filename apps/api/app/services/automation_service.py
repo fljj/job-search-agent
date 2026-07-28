@@ -229,6 +229,7 @@ def dispatch_proactive_greeting(
     *,
     executor: ActionExecutor,
     agent_run_id: UUID,
+    platform: str = "BOSS",
 ) -> dict[str, object]:
     job = session.get(db.Job, job_id)
     draft = session.get(db.GeneratedDraft, draft_id)
@@ -237,7 +238,7 @@ def dispatch_proactive_greeting(
     if draft is None or draft.user_id != DEFAULT_USER_ID:
         raise ResourceNotFoundError("招呼草稿不存在")
     score = _score_for_draft(session, draft, job.id)
-    rules = _effective_rules(session, "BOSS", score.strategy_id)
+    rules = _effective_rules(session, platform, score.strategy_id)
     original = session.scalar(
         select(db.PolicyDecision)
         .where(db.PolicyDecision.draft_id == draft.id)
@@ -245,7 +246,7 @@ def dispatch_proactive_greeting(
     )
     if original is None:
         raise ValueError("招呼草稿缺少原始策略决策")
-    counts = _rate_counts(session, "BOSS")
+    counts = _rate_counts(session, platform)
     context = AutomationContext(
         action_type="GREETING",
         score=score.total_score,
@@ -268,12 +269,13 @@ def dispatch_proactive_greeting(
         decision = AutomationDecision.DENY
         reasons = missing
     if decision is AutomationDecision.ALLOW_AUTO:
-        rollout_allowed, rollout_reasons = evaluate_rollout_action(
-            session, "BOSS", "GREETING", rules.daily_limit
-        )
-        if not rollout_allowed:
-            decision = AutomationDecision.DENY
-            reasons = rollout_reasons
+        if platform in {"BOSS", "MAIMAI"}:
+            rollout_allowed, rollout_reasons = evaluate_rollout_action(
+                session, platform, "GREETING", rules.daily_limit
+            )
+            if not rollout_allowed:
+                decision = AutomationDecision.DENY
+                reasons = rollout_reasons
     policy = db.PolicyDecision(
         user_id=DEFAULT_USER_ID,
         draft_id=draft.id,
@@ -293,7 +295,7 @@ def dispatch_proactive_greeting(
         session.commit()
         return {"decision": decision.value, "reason_codes": reasons}
     fingerprint = hashlib.sha256(
-        f"BOSS:GREETING:{job.external_job_id or job.id}".encode()
+        f"{platform}:GREETING:{job.external_job_id or job.id}".encode()
     ).hexdigest()
     existing = session.scalar(
         select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == fingerprint)
@@ -329,8 +331,10 @@ def dispatch_proactive_greeting(
         action_type="GREETING",
         status=ActionStatus.APPROVED.value,
         content=draft.content,
-        delivery_mode="PLATFORM_DEFAULT",
-        platform="BOSS",
+        delivery_mode=(
+            "PLATFORM_DEFAULT" if platform == "BOSS" else "CUSTOM"
+        ),
+        platform=platform,
         target_company=job.company_name,
         target_job_title=job.title,
         target_recruiter=recruiter_name,
@@ -344,8 +348,9 @@ def dispatch_proactive_greeting(
     session.commit()
     result = execute_action(session, action.id, cdp_url, executor)
     if result.status in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
-        _pause_platform(session, "BOSS", result.failure_code or result.status)
-    enforce_rollout_health(session, "BOSS")
+        _pause_platform(session, platform, result.failure_code or result.status)
+    if platform in {"BOSS", "MAIMAI"}:
+        enforce_rollout_health(session, platform)
     return {
         "decision": decision.value,
         "reason_codes": reasons,
