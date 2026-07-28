@@ -194,7 +194,10 @@ users
   `(user_id, platform, external_conversation_id)` 唯一。策略、职位绑定和资格成熟度变化
   必须记录审计。删除职位时 `job_id` 置空，不级联删除对话历史。
 - `messages`：原始消息、方向、多意图和状态；`(conversation_id, external_message_id)` 唯一。
-- `generated_drafts`：招呼或回复草稿、事实引用、置信度、风险和生成器版本；`input_fingerprint` 唯一。
+- `generated_drafts`：招呼或回复草稿、事实引用、置信度、风险、生成器版本和可空
+  `reply_source`；`input_fingerprint` 唯一。`reply_source` 取值为
+  `RULE_TEMPLATE/KNOWLEDGE_BASE/LLM/HUMAN`。迁移前历史数据保持 `NULL`，迁移后由应用层
+  保证所有新草稿写入来源。
 - `policy_decisions`：动作类型、权限结果、原因码、策略版本和输入快照。
 - `confirmation_tasks`：只保存电话、面试具体时间和日历写操作的 `PENDING_APPROVAL` 数据；`decision_id` 唯一。
 

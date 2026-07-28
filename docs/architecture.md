@@ -54,6 +54,9 @@ job-search-agent/
 │   ├── audit/
 │   ├── browser_worker/
 │   ├── conversation_agent/
+│   │   ├── router.py
+│   │   ├── rules/           # 到岗、薪资、地点、工作模式
+│   │   └── knowledge/       # 候选人资料结构化回复
 │   ├── job_parser/
 │   ├── knowledge_base/
 │   ├── llm/
@@ -137,7 +140,8 @@ job-search-agent/
 
 - `policy_engine`：统一返回 `ALLOW_AUTO/REQUIRE_CONFIRMATION/DENY`；
 - `knowledge_base`：维护有来源和敏感度的用户事实；
-- `conversation_agent`：意图识别、事实检索和回复草稿；
+- `conversation_agent`：通过 Reply Router 按规则、知识库、LLM、人工待处理的顺序选择
+  回复来源；规则与知识库层不依赖 LLM，生成结果仍交由策略决策和动作队列处理；
 - `resume_selector`：选择附件并判断发送前置条件；
 - `scheduling`：解析邀请、查询冲突和创建确认任务；
 - `browser_worker`：读取页面或执行已授权操作；
@@ -315,10 +319,11 @@ JD、招聘方消息和网页文本均视为不可信数据，不得与系统指
 
 ```text
 入站消息 → 程序初步识别意图 → 更新 UNKNOWN / ROUGH_MATCH / FULL_MATCH / MISMATCH
-→ 在存在有效职位评分和 LLM 时生成事实受限回复，否则使用确定性安全澄清
+→ Reply Router（Rule > Knowledge > LLM > Human）
+→ 规则/知识库直接生成，未命中时才在存在有效职位评分和 LLM 时生成事实受限回复
 → MISMATCH 生成婉拒；否则检索当前有效知识项并继续沟通
 → 生成事实受限草稿或简历发送建议 → 程序执行权限与证据校验
-→ 仅电话/面试具体时间创建 PENDING_APPROVAL 确认任务
+→ 电话/面试具体时间或 LLM 完全不可用的安全降级创建 PENDING_APPROVAL 确认任务
 ```
 
 本阶段流程在决策和确认数据处终止，不依赖或调用 `browser_worker`。

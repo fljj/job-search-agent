@@ -1,6 +1,7 @@
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -11,7 +12,7 @@ from adapters.browser.message_discovery import (
     DiscoveredConversation,
     MessageDiscoveryBatch,
 )
-from adapters.llm.errors import LlmConfigurationError
+from adapters.llm.errors import LlmConfigurationError, LlmRateLimitError
 from apps.api.app.core.database import Base
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AutomationDispatchRequest
@@ -224,10 +225,14 @@ def test_explicit_inbound_resume_request_does_not_require_score(
         ),
     )
 
-    arrival_draft = create_reply_draft(session, arrival_message.id)
+    llm_provider = Mock()
+    llm_provider.classify_message.side_effect = LlmRateLimitError("限流")
+    arrival_draft = create_reply_draft(session, arrival_message.id, llm_provider)
 
     assert arrival_draft.content == strategy.arrival_time_reply
     assert arrival_draft.decision.value == "ALLOW_AUTO"
+    assert arrival_draft.reply_source.value == "RULE_TEMPLATE"
+    llm_provider.classify_message.assert_not_called()
     assert arrival_draft.reason_codes == ["CONFIGURED_ARRIVAL_TIME_REPLY"]
 
 

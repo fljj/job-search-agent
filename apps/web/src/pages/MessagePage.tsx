@@ -9,6 +9,7 @@ interface ConversationSummary {
   qualification_status: 'UNKNOWN' | 'ROUGH_MATCH' | 'FULL_MATCH' | 'MISMATCH'
   qualification_evidence: string[]
   latest_draft_type?: string; latest_draft_content?: string
+  latest_reply_source?: string
   latest_draft_decision?: string; latest_draft_reason_codes?: string[]
   resume_action_status?: string; resume_attachment_name?: string
 }
@@ -48,6 +49,13 @@ const decisionLabels: Record<string, string> = {
   ALLOW_AUTO: '允许自动执行',
   REQUIRE_CONFIRMATION: '等待人工确认',
   DENY: '不会执行',
+}
+
+const replySourceLabels: Record<string, string> = {
+  RULE_TEMPLATE: '规则回复',
+  KNOWLEDGE_BASE: '知识库回复',
+  LLM: 'AI生成',
+  HUMAN: '人工处理',
 }
 
 const actionStatusLabels: Record<string, string> = {
@@ -140,6 +148,9 @@ export function MessagePage() {
             </Tag>
             {item.latest_draft_decision
               && <Tag>{decisionLabels[item.latest_draft_decision] ?? '已完成规则判断'}</Tag>}
+            <Tag>{item.latest_reply_source
+              ? replySourceLabels[item.latest_reply_source] ?? '来源未知'
+              : '历史未记录来源'}</Tag>
           </Space>}
           <span>{decisionContent(item)}</span>
         </Space> },

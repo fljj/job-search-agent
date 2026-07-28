@@ -27,12 +27,15 @@ from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.conversation_agent.intents import classify_intents, normalize_intents
+from packages.conversation_agent.knowledge.profile_answer import CandidateKnowledge
 from packages.conversation_agent.llm_engine import (
     build_llm_reply,
     build_mismatch_decline,
     has_valid_conversation_evidence,
 )
-from packages.conversation_agent.models import Decision, DraftResult, Intent
+from packages.conversation_agent.models import Decision, DraftResult, Intent, ReplySource
+from packages.conversation_agent.router import ReplyRouteContext, route_reply
+from packages.conversation_agent.rules.salary import SalaryExpectation
 from packages.knowledge_base.models import KnowledgeFact
 from packages.llm.models import (
     ConversationEvaluation,
@@ -175,6 +178,7 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
                 "latest_grade": score.grade if score else None,
                 "latest_draft_type": draft.draft_type if draft else None,
                 "latest_draft_content": draft.content if draft else None,
+                "latest_reply_source": draft.reply_source if draft else None,
                 "latest_draft_decision": (
                     draft_decision.decision if draft_decision else None
                 ),
@@ -224,16 +228,13 @@ def create_reply_draft(
             conversation.id,
             message.id,
             None,
+            reply_source=ReplySource.KNOWLEDGE_BASE,
         )
     qualification, qualification_evidence = refresh_qualification(
         session, conversation, message=message
     )
-    if qualification.value in {"UNKNOWN", "MISMATCH"}:
-        draft_type = (
-            "MISMATCH_DECLINE"
-            if qualification.value == "MISMATCH"
-            else "REPLY"
-        )
+    if qualification.value == "MISMATCH":
+        draft_type = "MISMATCH_DECLINE"
         fingerprint = _fingerprint(
             draft_type,
             conversation.id if draft_type == "MISMATCH_DECLINE" else message.id,
@@ -247,26 +248,16 @@ def create_reply_draft(
         )
         if existing:
             return _draft_response(session, existing)
-        if draft_type == "MISMATCH_DECLINE":
-            prior_decline = session.scalar(
-                select(db.GeneratedDraft).where(
-                    db.GeneratedDraft.conversation_id == conversation.id,
-                    db.GeneratedDraft.draft_type == "MISMATCH_DECLINE",
-                )
+        prior_decline = session.scalar(
+            select(db.GeneratedDraft).where(
+                db.GeneratedDraft.conversation_id == conversation.id,
+                db.GeneratedDraft.draft_type == "MISMATCH_DECLINE",
             )
-            if prior_decline:
-                return _draft_response(session, prior_decline)
-            result = build_mismatch_decline(qualification_evidence)
-            message.status = "MISMATCH_DECLINED"
-        else:
-            result = DraftResult(
-                content="感谢联系。方便介绍一下岗位方向、工作地点、工作模式和大致薪资范围吗？",
-                intents=[Intent.JOB_DETAIL],
-                confidence=1,
-                risk_codes=["JOB_CONTEXT_INCOMPLETE"],
-                decision=Decision.ALLOW_AUTO,
-                reason_codes=["SAFE_JOB_CLARIFICATION"],
-            )
+        )
+        if prior_decline:
+            return _draft_response(session, prior_decline)
+        result = build_mismatch_decline(qualification_evidence)
+        message.status = "MISMATCH_DECLINED"
         return _persist_draft(
             session,
             result,
@@ -275,23 +266,49 @@ def create_reply_draft(
             conversation.id,
             message.id,
             None,
+            reply_source=ReplySource.RULE_TEMPLATE,
         )
     strategy = (
         session.get(db.JobStrategy, conversation.strategy_id)
         if conversation.strategy_id
         else None
     )
-    if (
-        strategy is not None
-        and strategy.arrival_time_reply
-        and Intent.ARRIVAL_DATE in classify_intents(message.content)
-    ):
+    route = route_reply(
+        message.content,
+        _reply_route_context(session, strategy),
+    )
+    if route.result is not None:
         fingerprint = _fingerprint(
             "REPLY",
             message.id,
-            "ARRIVAL_TIME_REPLY",
-            strategy.version,
-            strategy.arrival_time_reply,
+            route.source,
+            route.result.reason_codes,
+            strategy.version if strategy else None,
+            _knowledge_versions(session),
+        )
+        existing = session.scalar(
+            select(db.GeneratedDraft).where(
+                db.GeneratedDraft.input_fingerprint == fingerprint
+            )
+        )
+        if existing:
+            return _draft_response(session, existing)
+        return _persist_draft(
+            session,
+            route.result,
+            fingerprint,
+            "REPLY",
+            conversation.id,
+            message.id,
+            None,
+            reply_source=route.source,
+        )
+    if qualification.value == "UNKNOWN":
+        fingerprint = _fingerprint(
+            "REPLY",
+            message.id,
+            "SAFE_JOB_CLARIFICATION",
+            conversation.qualification_version,
         )
         existing = session.scalar(
             select(db.GeneratedDraft).where(
@@ -303,17 +320,19 @@ def create_reply_draft(
         return _persist_draft(
             session,
             DraftResult(
-                content=strategy.arrival_time_reply,
-                intents=[Intent.ARRIVAL_DATE],
+                content="感谢联系。方便介绍一下岗位方向、工作地点、工作模式和大致薪资范围吗？",
+                intents=[Intent.JOB_DETAIL],
                 confidence=1,
+                risk_codes=["JOB_CONTEXT_INCOMPLETE"],
                 decision=Decision.ALLOW_AUTO,
-                reason_codes=["CONFIGURED_ARRIVAL_TIME_REPLY"],
+                reason_codes=["SAFE_JOB_CLARIFICATION"],
             ),
             fingerprint,
             "REPLY",
             conversation.id,
             message.id,
             None,
+            reply_source=ReplySource.RULE_TEMPLATE,
         )
     llm_provider = _optional_llm_provider(provider)
     score = _current_score(session, conversation)
@@ -338,16 +357,22 @@ def create_reply_draft(
     existing = session.scalar(select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint))
     if existing:
         return _draft_response(session, existing)
+    reply_source = ReplySource.LLM
     if score is not None and llm_provider is not None:
-        result = _build_scored_reply(
-            session,
-            conversation,
-            message,
-            score,
-            llm_provider,
-        )
+        try:
+            result = _build_scored_reply(
+                session,
+                conversation,
+                message,
+                score,
+                llm_provider,
+            )
+        except LlmProviderError as exc:
+            result = _llm_failure_handoff(exc.code)
+            reply_source = ReplySource.HUMAN
     else:
-        result = _safe_job_detail_clarification()
+        result = _llm_failure_handoff("LLM_UNAVAILABLE")
+        reply_source = ReplySource.HUMAN
     return _persist_draft(
         session,
         result,
@@ -356,6 +381,7 @@ def create_reply_draft(
         conversation.id,
         message.id,
         score.id if score else None,
+        reply_source=reply_source,
     )
 
 
@@ -433,7 +459,10 @@ def create_greeting_draft(
     ):
         result.decision = Decision.DENY
         result.reason_codes = ["JOB_NOT_ELIGIBLE_OR_OPEN"]
-    return _persist_draft(session, result, fingerprint, "GREETING", None, None, score.id)
+    return _persist_draft(
+        session, result, fingerprint, "GREETING", None, None, score.id,
+        reply_source=ReplySource.LLM,
+    )
 
 
 def create_resume_draft(
@@ -582,6 +611,7 @@ def create_resume_draft(
                 "version": conversation.qualification_version,
             },
         },
+        reply_source=ReplySource.RULE_TEMPLATE,
     )
 
 
@@ -625,6 +655,7 @@ def edit_draft(session: Session, draft_id: object, content: str) -> DraftRespons
         risk_codes=["USER_EDITED_CONTENT"],
         input_fingerprint=fingerprint,
         generator_version="manual-user-edit-v1",
+        reply_source=ReplySource.HUMAN.value,
     )
     session.add(edited)
     session.flush()
@@ -701,6 +732,7 @@ def _persist_draft(
     conversation_id: object | None, message_id: object | None, score_id: object | None,
     resume_id: object | None = None,
     decision_metadata: dict[str, object] | None = None,
+    reply_source: ReplySource = ReplySource.LLM,
 ) -> DraftResponse:
     draft = db.GeneratedDraft(
         user_id=DEFAULT_USER_ID, conversation_id=conversation_id, message_id=message_id,
@@ -709,6 +741,7 @@ def _persist_draft(
         fact_ids=[str(item) for item in result.fact_ids], confidence=Decimal(str(result.confidence)),
         risk_codes=result.risk_codes, input_fingerprint=fingerprint,
         generator_version=GENERATOR_VERSION,
+        reply_source=reply_source.value,
     )
     session.add(draft)
     session.flush()
@@ -747,6 +780,7 @@ def _draft_response(session: Session, draft: db.GeneratedDraft) -> DraftResponse
         raise RuntimeError("草稿缺少策略决策")
     task = session.scalar(select(db.ConfirmationTask).where(db.ConfirmationTask.decision_id == decision.id))
     return DraftResponse(id=draft.id, draft_type=draft.draft_type, content=draft.content,
+                         reply_source=draft.reply_source,
                          intents=draft.intents, fact_ids=draft.fact_ids,
                          confidence=float(draft.confidence), risk_codes=draft.risk_codes,
                          decision=decision.decision, reason_codes=decision.reason_codes,
@@ -768,6 +802,69 @@ def _knowledge_facts(session: Session) -> list[KnowledgeFact]:
 
 def _knowledge_versions(session: Session) -> list[tuple[str, int]]:
     return sorted((str(item.id), item.version) for item in get_knowledge_entities(session))
+
+
+def _reply_route_context(
+    session: Session,
+    strategy: db.JobStrategy | None,
+) -> ReplyRouteContext:
+    profile = session.scalar(
+        select(db.CandidateProfile).where(
+            db.CandidateProfile.user_id == DEFAULT_USER_ID
+        )
+    )
+    facts = [
+        fact for fact in _knowledge_facts(session)
+        if fact.allowed_for_auto_reply
+        and fact.sensitivity.value == "NORMAL"
+        and fact.is_current(datetime.now(UTC))
+    ]
+    candidate_knowledge = (
+        CandidateKnowledge(
+            name=profile.name,
+            total_years=profile.total_years,
+            management_years=profile.management_years,
+            profile_id=profile.id,
+            skills=[
+                (skill.id, skill.name, skill.years)
+                for skill in sorted(
+                    profile.skills,
+                    key=lambda item: (not item.is_core, item.normalized_name),
+                )
+            ],
+            facts=facts,
+        )
+        if profile is not None
+        else None
+    )
+    if strategy is None:
+        return ReplyRouteContext(candidate_knowledge=candidate_knowledge)
+    return ReplyRouteContext(
+        arrival_time_reply=strategy.arrival_time_reply,
+        salary_expectations=[
+            SalaryExpectation(
+                work_mode=rule.work_mode,
+                currency=rule.currency,
+                expected_monthly_k=rule.expected_monthly_k,
+            )
+            for rule in sorted(
+                strategy.salary_rules,
+                key=lambda item: item.work_mode,
+            )
+        ],
+        onsite_locations=[
+            location.location_name
+            for rule in strategy.work_mode_rules
+            if rule.enabled and rule.work_mode == "ONSITE"
+            for location in rule.locations
+        ],
+        enabled_work_modes=[
+            rule.work_mode
+            for rule in strategy.work_mode_rules
+            if rule.enabled
+        ],
+        candidate_knowledge=candidate_knowledge,
+    )
 
 
 def _reply_context(
@@ -892,6 +989,17 @@ def _safe_job_detail_clarification() -> DraftResult:
         risk_codes=["LLM_OR_FORMAL_SCORE_UNAVAILABLE"],
         decision=Decision.ALLOW_AUTO,
         reason_codes=["SAFE_JOB_DETAIL_CLARIFICATION"],
+    )
+
+
+def _llm_failure_handoff(failure_code: str) -> DraftResult:
+    return DraftResult(
+        content="这条消息需要人工确认后回复。",
+        intents=[Intent.UNCLEAR],
+        confidence=0,
+        risk_codes=[failure_code],
+        decision=Decision.REQUIRE_CONFIRMATION,
+        reason_codes=["LLM_FAILURE_REQUIRES_HUMAN"],
     )
 
 

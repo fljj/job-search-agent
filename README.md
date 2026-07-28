@@ -11,6 +11,8 @@
 - Worker：通过 Playwright 连接本机已登录的 Chrome CDP 会话
 - LLM：默认使用智谱 `glm-5.2`
 - 日历：macOS 默认使用 Apple Calendar
+- 回复路由：到岗、薪资、地点和工作模式优先使用规则，候选人经历优先使用知识库，
+  其余消息才调用 LLM；消息中心展示每条最新草稿的回复来源
 
 API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
 状态的平台任务，不需要为 BOSS、脉脉和 Telegram 分别启动 Worker。

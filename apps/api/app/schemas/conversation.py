@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from packages.conversation_agent.models import Decision, Intent
+from packages.conversation_agent.models import Decision, Intent, ReplySource
 from packages.knowledge_base.models import Sensitivity
 
 
@@ -62,6 +62,7 @@ class DraftResponse(BaseModel):
     id: UUID
     draft_type: str
     content: str
+    reply_source: ReplySource | None = None
     intents: list[Intent]
     fact_ids: list[UUID]
     confidence: float

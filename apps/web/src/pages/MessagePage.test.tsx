@@ -24,6 +24,7 @@ describe('MessagePage', () => {
         qualification_evidence: ['JOB_DIRECTION_CONFLICT'],
         latest_draft_type: 'RESUME',
         latest_draft_content: '默认简历.pdf',
+        latest_reply_source: 'RULE_TEMPLATE',
         latest_draft_decision: 'DENY',
         latest_draft_reason_codes: ['RESUME_SEND_DENIED', 'JOB_DIRECTION_CONFLICT'],
       }],
@@ -35,6 +36,7 @@ describe('MessagePage', () => {
     expect(screen.getAllByText('岗位方向不符合求职方向').length).toBeGreaterThan(0)
     expect(screen.getByText('不发送简历')).toBeTruthy()
     expect(screen.getByText('不会执行')).toBeTruthy()
+    expect(screen.getByText('规则回复')).toBeTruthy()
     expect(screen.queryByText('默认简历.pdf')).toBeNull()
   })
 

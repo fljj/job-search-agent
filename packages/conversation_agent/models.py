@@ -30,6 +30,13 @@ class Decision(StrEnum):
     DENY = "DENY"
 
 
+class ReplySource(StrEnum):
+    RULE_TEMPLATE = "RULE_TEMPLATE"
+    KNOWLEDGE_BASE = "KNOWLEDGE_BASE"
+    LLM = "LLM"
+    HUMAN = "HUMAN"
+
+
 class DraftResult(BaseModel):
     content: str
     intents: list[Intent]
