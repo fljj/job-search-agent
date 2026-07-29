@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 
 from apps.api.app.core.config import Settings
-from packages.audit.gray_logging import configure_gray_logging, gray_event
 from packages.audit.redaction import RedactingFilter, redact_text
+from packages.audit.runtime_logging import configure_runtime_logging, runtime_event
 
 
 def test_redacts_tokens_api_keys_and_database_passwords() -> None:
@@ -26,16 +26,16 @@ def test_logging_filter_clears_unsafe_arguments() -> None:
     assert record.getMessage() == "API_KEY=***"
 
 
-def test_gray_log_is_rotating_structured_and_redacted(tmp_path: Path) -> None:
+def test_runtime_log_is_rotating_structured_and_redacted(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,
         agent_log_dir=str(tmp_path),
         agent_log_max_bytes=1_000_000,
         agent_log_backup_count=2,
     )
-    log_path = configure_gray_logging(settings)
-    logger = logging.getLogger("gray-test")
-    gray_event(logger, "TEST_EVENT", run_id="run-1", detail="API_KEY=secret")
+    log_path = configure_runtime_logging(settings)
+    logger = logging.getLogger("runtime-test")
+    runtime_event(logger, "TEST_EVENT", run_id="run-1", detail="API_KEY=secret")
     for handler in logging.getLogger().handlers:
         handler.flush()
 

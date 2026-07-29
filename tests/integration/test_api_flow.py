@@ -95,103 +95,6 @@ def client() -> Iterator[TestClient]:
         test_engine.dispose()
 
 
-def test_rollout_requires_ordered_daily_manual_transitions(
-    client: TestClient,
-) -> None:
-    created = client.put(
-        "/api/v1/automation/rollouts",
-        json={
-            "platform": "BOSS",
-            "minimum_stage_hours": 24,
-            "reply_daily_limit": 5,
-            "greeting_daily_limit": 3,
-        },
-    )
-    assert created.status_code == 200
-    rollout = created.json()["data"]
-    assert rollout["status"] == "PAUSED"
-    assert rollout["current_level"] == 1
-    assert all(value == 0 for value in rollout["safety_metrics"].values())
-
-    activated = client.post(
-        "/api/v1/automation/rollouts/BOSS/transition",
-        json={"action": "ACTIVATE", "expected_version": rollout["version"]},
-    )
-    assert activated.status_code == 200
-    active = activated.json()["data"]
-    assert active["status"] == "ACTIVE"
-    assert active["current_level"] == 1
-
-    too_early = client.post(
-        "/api/v1/automation/rollouts/BOSS/transition",
-        json={"action": "ADVANCE", "expected_version": active["version"]},
-    )
-    assert too_early.status_code == 400
-    assert "尚需运行" in too_early.json()["error"]["message"]
-
-    rollout_engine = create_engine(os.environ["TEST_DATABASE_URL"])
-    with Session(rollout_engine) as session:
-        row = session.scalar(
-            select(entities.RolloutControl).where(
-                entities.RolloutControl.platform == "BOSS"
-            )
-        )
-        assert row is not None
-        row.stage_started_at = datetime.now(UTC) - timedelta(hours=25)
-        session.commit()
-    rollout_engine.dispose()
-    advanced = client.post(
-        "/api/v1/automation/rollouts/BOSS/transition",
-        json={"action": "ADVANCE", "expected_version": active["version"]},
-    )
-    assert advanced.status_code == 200
-    advanced_rollout = advanced.json()["data"]
-    assert advanced_rollout["current_level"] == 2
-
-    stale_pause = client.post(
-        "/api/v1/automation/rollouts/BOSS/transition",
-        json={"action": "PAUSE", "expected_version": rollout["version"]},
-    )
-    assert stale_pause.status_code == 409
-
-    paused = client.post(
-        "/api/v1/automation/rollouts/BOSS/transition",
-        json={"action": "PAUSE", "expected_version": advanced_rollout["version"]},
-    )
-    assert paused.status_code == 200
-    assert paused.json()["data"]["status"] == "PAUSED"
-
-
-def test_maimai_rollout_can_enter_audited_formal_takeover(
-    client: TestClient,
-) -> None:
-    created = client.put(
-        "/api/v1/automation/rollouts",
-        json={
-            "platform": "MAIMAI",
-            "minimum_stage_hours": 24,
-            "reply_daily_limit": 5,
-            "greeting_daily_limit": 3,
-        },
-    )
-    assert created.status_code == 200
-    rollout = created.json()["data"]
-    assert rollout["platform"] == "MAIMAI"
-    assert rollout["current_level"] == 1
-
-    activated = client.post(
-        "/api/v1/automation/rollouts/MAIMAI/transition",
-        json={
-            "action": "ACTIVATE_FORMAL",
-            "expected_version": rollout["version"],
-        },
-    )
-    assert activated.status_code == 200
-    formal = activated.json()["data"]
-    assert formal["status"] == "ACTIVE"
-    assert formal["current_level"] == 6
-
-
 def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     mock_settings = Settings(_env_file=None, calendar_provider="MOCK")
     monkeypatch.setattr(
@@ -703,20 +606,6 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     with Session(lease_engine, expire_on_commit=False) as discovery_session:
         run_entity = discovery_session.get(entities.AgentRun, discovery_run_id)
         assert run_entity is not None
-        discovery_session.add(
-            entities.RolloutControl(
-                user_id=run_entity.user_id,
-                platform="BOSS",
-                status="ACTIVE",
-                current_level=4,
-                previous_level=3,
-                stage_started_at=proactive_now - timedelta(hours=24),
-                minimum_stage_hours=24,
-                reply_daily_limit=5,
-                greeting_daily_limit=3,
-            )
-        )
-        discovery_session.flush()
         proactive_counts = process_job_discovery_batch(
             discovery_session,
             run_entity,

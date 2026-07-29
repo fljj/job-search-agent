@@ -89,7 +89,7 @@ APPLE_CALENDAR_NAME=求职面试
 | `BOSS_LLM_RETRY_MAX_SECONDS` | `3600` | 职位局部重试的最长等待时间 |
 | `BOSS_JOB_RETRY_MAX_ATTEMPTS` | `5` | 单个职位非全局故障的最多尝试次数 |
 | `BOSS_JOB_SEARCH_LABELS` | `推荐,Java,区块链工程师` | BOSS 职位入口名称，必须与页面文字一致 |
-| `AGENT_LOG_DIR` | `~/Desktop/job-search-agent-gray/logs` | Worker 日志目录 |
+| `AGENT_LOG_DIR` | `~/Desktop/job-search-agent/logs` | Worker 日志目录 |
 | `WORKER_STALE_SECONDS` | `60` | 超过该时间没有心跳则标记 Worker 异常 |
 
 完整配置及默认值见 [.env.example](.env.example)。
@@ -267,10 +267,11 @@ curl -X PUT http://127.0.0.1:8000/api/v1/automation/settings \
 已有配置优先在前端修改。调用 `PUT` 会按提交内容更新对应范围，不要在不了解当前限额
 时直接覆盖生产配置。
 
-### 6.2 初始化平台控制
+### 6.2 平台自动化控制
 
-BOSS 首次运行时，在“系统设置”的“BOSS 无人值守灰度”中点击“初始化”，然后启用
-当前级别。系统支持逐级验证；正式接管仍受安全指标和服务端门禁限制。
+BOSS 和脉脉 Run 启用后直接按“系统设置”中的正式自动化配置运行，不需要初始化或升级
+运行级别。全局、平台和策略开关、动作限额、紧急停止、平台异常暂停、LLM 熔断、幂等
+去重和电话/面试时间人工确认仍然生效。
 
 脉脉的普通消息与系统推荐使用同一个 MAIMAI Run。系统推荐是否启用、是否允许同意后
 发送平台资料，分别由：
@@ -369,13 +370,13 @@ API 和前端用于控制及观察；Worker 才负责持续读取招聘平台和
 Worker 日志默认写入：
 
 ```text
-~/Desktop/job-search-agent-gray/logs/agent-gray.log
+~/Desktop/job-search-agent/logs/agent.log
 ```
 
 查看最新日志：
 
 ```bash
-tail -f ~/Desktop/job-search-agent-gray/logs/agent-gray.log
+tail -f ~/Desktop/job-search-agent/logs/agent.log
 ```
 
 日志包含扫描、动作、暂停和对账事件，不应包含 API Key、Cookie 或完整消息正文。
@@ -427,11 +428,11 @@ RESTORE_DATABASE_URL='postgresql+psycopg://.../job_agent_restore_test' \
   scripts/restore_rehearsal.sh backups/job-search-agent-YYYYMMDD-HHMMSS.dump
 ```
 
-清理灰度历史会删除职位、评分、会话、动作、审计和排期数据。先预览，确认目标后才执行：
+清理运行历史会删除职位、评分、会话、动作、审计和排期数据。先预览，确认目标后才执行：
 
 ```bash
-python scripts/reset_gray_data.py --confirm-database job_agent
-python scripts/reset_gray_data.py --confirm-database job_agent --execute
+python scripts/reset_runtime_data.py --confirm-database job_agent
+python scripts/reset_runtime_data.py --confirm-database job_agent --execute
 ```
 
 不要在日常启动过程中执行数据重置。

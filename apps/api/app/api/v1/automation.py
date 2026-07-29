@@ -13,7 +13,6 @@ from apps.api.app.schemas.automation import (
     AutomationDispatchRequest,
     AutomationSettingPayload,
 )
-from apps.api.app.schemas.rollout import RolloutCreateRequest, RolloutTransitionRequest
 from apps.api.app.services.agent_service import (
     get_run,
     list_runs,
@@ -36,12 +35,6 @@ from apps.api.app.services.operations_service import (
     process_reconciliation_queue,
     verify_successful_actions,
 )
-from apps.api.app.services.rollout_service import (
-    get_or_create_rollout,
-    list_rollouts,
-    rollout_status,
-    transition_rollout,
-)
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
@@ -55,35 +48,6 @@ def settings(session: Session = Depends(get_session)) -> dict[str, object]:
 def save_setting(payload: AutomationSettingPayload,
                  session: Session = Depends(get_session)) -> dict[str, object]:
     return response(upsert_setting(session, payload))
-
-
-@router.get("/rollouts")
-def rollouts(session: Session = Depends(get_session)) -> dict[str, object]:
-    return response({"items": list_rollouts(session)})
-
-
-@router.put("/rollouts")
-def save_rollout(
-    payload: RolloutCreateRequest,
-    session: Session = Depends(get_session),
-) -> dict[str, object]:
-    return response(get_or_create_rollout(session, payload))
-
-
-@router.get("/rollouts/{platform}")
-def get_rollout(
-    platform: str, session: Session = Depends(get_session)
-) -> dict[str, object]:
-    return response(rollout_status(session, platform))
-
-
-@router.post("/rollouts/{platform}/transition")
-def transition(
-    platform: str,
-    payload: RolloutTransitionRequest,
-    session: Session = Depends(get_session),
-) -> dict[str, object]:
-    return response(transition_rollout(session, platform, payload))
 
 
 @router.post("/dispatch")

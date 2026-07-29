@@ -1,14 +1,11 @@
-"""清除灰度运行历史，保留候选人长期配置。"""
+"""清除运行历史，保留候选人长期配置。"""
 
 import argparse
-from datetime import UTC, datetime
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
 
 from apps.api.app.core.database import SessionLocal, engine
-from apps.api.app.models import entities as db
-from apps.api.app.services.user_service import DEFAULT_USER_ID
 
 PRESERVED_TABLES = {
     "alembic_version",
@@ -61,39 +58,13 @@ def main() -> None:
         if quoted:
             connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
     with SessionLocal() as session:
-        if session.get(db.User, DEFAULT_USER_ID):
-            session.add(
-                db.RolloutControl(
-                    user_id=DEFAULT_USER_ID,
-                    platform="BOSS",
-                    status="PAUSED",
-                    current_level=1,
-                    previous_level=1,
-                    stage_started_at=datetime.now(UTC),
-                    minimum_stage_hours=24,
-                    reply_daily_limit=5,
-                    greeting_daily_limit=3,
-                )
-            )
-            session.commit()
         remaining = {
             table: session.scalar(
                 text(f'SELECT count(*) FROM "{table}"')  # noqa: S608
             )
             for table in operational
         }
-        rollout = session.scalar(
-            select(db.RolloutControl).where(
-                db.RolloutControl.user_id == DEFAULT_USER_ID,
-                db.RolloutControl.platform == "BOSS",
-            )
-        )
     print(f"remaining_operational_counts={remaining}")
-    print(
-        "rollout=BOSS:PAUSED:1"
-        if rollout is not None
-        else "rollout=not-created-no-default-user"
-    )
 
 
 if __name__ == "__main__":

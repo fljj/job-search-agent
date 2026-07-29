@@ -38,17 +38,6 @@ function mockOverviewApi() {
         },
       }
     }
-    if (path === '/automation/rollouts') {
-      return {
-        items: [{
-          status: 'ACTIVE',
-          current_level: 6,
-          level_name: '全量运行',
-          remaining_hours: 0,
-          safety_metrics: {},
-        }],
-      }
-    }
     if (path === '/automation/runs/boss-run/resume') return pausedRun
     return {}
   })
@@ -109,7 +98,6 @@ describe('OverviewPage 重新连接', () => {
       if (path === '/automation/runs') return { items: [] }
       if (path === '/automation/actions') return { items: [] }
       if (path === '/conversations') return { items: [] }
-      if (path === '/automation/rollouts') return { items: [] }
       return {}
     })
     const successSpy = vi.spyOn(message, 'success').mockImplementation(() => undefined as never)

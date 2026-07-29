@@ -190,7 +190,7 @@ def test_message_discovery_reuses_platform_cursor(
         "scripts.run_agent_worker.persist_discovery_batch",
         persist,
     )
-    monkeypatch.setattr("scripts.run_agent_worker.gray_event", lambda *_, **__: None)
+    monkeypatch.setattr("scripts.run_agent_worker.runtime_event", lambda *_, **__: None)
 
     assert _discover_messages(
         session, run, "worker-1", "http://127.0.0.1:9222", adapter

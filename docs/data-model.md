@@ -348,18 +348,14 @@ SESSION_PAUSED
   MANUAL_REQUIRED`、尝试次数、下次尝试、截止时间和最后错误码。
 - 对账任务只能只读回查平台，不能授权或重发 `OUTCOME_UNKNOWN` 动作。
 
-### 8.7 第十三阶段灰度控制
+### 8.7 正式自动化控制
 
-- `rollout_controls`：按 `(user_id, platform)` 唯一保存真实平台灰度状态。
-- `status` 仅为 `ACTIVE/PAUSED`；`current_level/previous_level` 限定为 1 至 6。
-- `stage_started_at` 和 `minimum_stage_hours` 决定最早升级时间，最短不得低于 24 小时。
-- `reply_daily_limit` 最大为 5，`greeting_daily_limit` 最大为 3；第六级改用正式自动化
-  配置的每日上限。
-- `version` 用于升级、正式接管、暂停和回退的乐观并发控制。常规升级必须严格加一；
-  用户明确授权且安全指标全为零时，正式接管可以审计事件形式直接进入第六级。
-- 灰度转换和自动回退追加写入 `audit_events`，保存前后级别及触发指标；不覆盖历史。
-- 安全指标从 `action_queue`、`action_attempts`、`reconciliation_tasks`、草稿和评分记录
-  计算，不由浏览器或前端自行上报成功。
+- 不保存运行级别；BOSS 和脉脉 Run 启用后直接按正式自动化配置运行。
+- `automation_settings` 按全局、平台和策略范围保存开关、限额、工作时段和紧急停止。
+- `agent_runs` 保存平台运行、暂停原因、游标和租约；`llm_circuit_breakers` 保存模型全局
+  熔断状态。
+- 动作、尝试、回读、对账和审计仍分别由 `action_queue`、`action_attempts`、
+  `reconciliation_tasks` 和 `audit_events` 保存，不因取消运行级别而弱化。
 
 ## 9. 幂等设计
 

@@ -629,29 +629,6 @@ class AutomationSetting(TimestampMixin, Base):
     )
 
 
-class RolloutControl(TimestampMixin, Base):
-    __tablename__ = "rollout_controls"
-    __table_args__ = (
-        UniqueConstraint("user_id", "platform"),
-        CheckConstraint("current_level BETWEEN 1 AND 6", name="ck_rollout_level"),
-        CheckConstraint("previous_level BETWEEN 1 AND 6", name="ck_rollout_previous_level"),
-        CheckConstraint("minimum_stage_hours >= 24", name="ck_rollout_minimum_hours"),
-        CheckConstraint("reply_daily_limit BETWEEN 1 AND 5", name="ck_rollout_reply_limit"),
-        CheckConstraint("greeting_daily_limit BETWEEN 1 AND 3", name="ck_rollout_greeting_limit"),
-    )
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    platform: Mapped[str] = mapped_column(String(30))
-    status: Mapped[str] = mapped_column(String(20), default="PAUSED")
-    current_level: Mapped[int] = mapped_column(Integer, default=1)
-    previous_level: Mapped[int] = mapped_column(Integer, default=1)
-    stage_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    minimum_stage_hours: Mapped[int] = mapped_column(Integer, default=24)
-    reply_daily_limit: Mapped[int] = mapped_column(Integer, default=5)
-    greeting_daily_limit: Mapped[int] = mapped_column(Integer, default=3)
-    version: Mapped[int] = mapped_column(Integer, default=1)
-
-
 class ActionAttempt(Base):
     __tablename__ = "action_attempts"
     __table_args__ = (UniqueConstraint("action_id", "attempt_number"),)

@@ -7,11 +7,11 @@ from apps.api.app.core.config import Settings
 from packages.audit.redaction import RedactingFilter
 
 
-def configure_gray_logging(settings: Settings) -> Path:
-    """配置灰度运行日志；文件轮转且所有输出经过凭证脱敏。"""
+def configure_runtime_logging(settings: Settings) -> Path:
+    """配置正式运行日志；文件轮转且所有输出经过凭证脱敏。"""
     log_dir = Path(settings.agent_log_dir).expanduser()
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "agent-gray.log"
+    log_path = log_dir / "agent.log"
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
@@ -35,8 +35,8 @@ def configure_gray_logging(settings: Settings) -> Path:
     return log_path
 
 
-def gray_event(logger: logging.Logger, event: str, **fields: object) -> None:
-    """输出可机器检索的灰度事件，不接受消息正文、Cookie 或密钥字段。"""
+def runtime_event(logger: logging.Logger, event: str, **fields: object) -> None:
+    """输出可机器检索的运行事件，不接受消息正文、Cookie 或密钥字段。"""
     logger.info(
         json.dumps(
             {"event": event, **fields},

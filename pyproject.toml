@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "job-search-agent"
 version = "0.1.0"
-description = "无人值守求职 Agent：职位发现、评分、招聘沟通与安全灰度"
+description = "无人值守求职 Agent：职位发现、评分、招聘沟通与安全执行"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "alembic>=1.13,<2",

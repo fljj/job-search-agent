@@ -20,29 +20,22 @@ interface Operations {
     failure_code?: string; probe_attempt_count: number; next_probe_at?: string
   }
 }
-interface Rollout {
-  status: string; current_level: number; level_name: string; remaining_hours: number
-  safety_metrics: Record<string, number>
-}
-
 export function OverviewPage() {
   const [runs, setRuns] = useState<Run[]>([])
   const [actions, setActions] = useState<Action[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [operations, setOperations] = useState<Operations>()
-  const [rollout, setRollout] = useState<Rollout>()
   const [reconnectingRunId, setReconnectingRunId] = useState<string>()
   const [retryingLlm, setRetryingLlm] = useState(false)
   const load = async () => {
-    const [runData, actionData, conversationData, operationData, rolloutData] = await Promise.all([
+    const [runData, actionData, conversationData, operationData] = await Promise.all([
       api<{ items: Run[] }>('/automation/runs'),
       api<{ items: Action[] }>('/automation/actions'),
       api<{ items: Conversation[] }>('/conversations'),
       api<Operations>('/automation/operations/status'),
-      api<{ items: Rollout[] }>('/automation/rollouts'),
     ])
     setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
-    setOperations(operationData); setRollout(rolloutData.items[0])
+    setOperations(operationData)
   }
   const reconnect = async (run: Run) => {
     setReconnectingRunId(run.id)
@@ -78,16 +71,14 @@ export function OverviewPage() {
       api<{ items: Action[] }>('/automation/actions'),
       api<{ items: Conversation[] }>('/conversations'),
       api<Operations>('/automation/operations/status'),
-      api<{ items: Rollout[] }>('/automation/rollouts'),
-    ]).then(([runData, actionData, conversationData, operationData, rolloutData]) => {
+    ]).then(([runData, actionData, conversationData, operationData]) => {
       setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
-      setOperations(operationData); setRollout(rolloutData.items[0])
+      setOperations(operationData)
     })
   }, [])
   const currentRuns = activeRuns(runs)
   const processedCount = currentRuns.reduce((sum, item) => sum + item.processed_count, 0)
   const currentWorkers = activeWorkers(operations?.workers)
-  const safetyErrors = Object.values(rollout?.safety_metrics ?? {}).reduce((sum, value) => sum + value, 0)
   const llmCircuit = operations?.llm_circuit
   return <Space direction="vertical" size="large" style={{ width: '100%' }}>
     {llmCircuit && llmCircuit.status !== 'CLOSED' && <Alert type="error" showIcon
@@ -100,9 +91,9 @@ export function OverviewPage() {
           重新加载配置并重试 LLM
         </Button>
       </Space>} />}
-    {(!operations?.database_ready || !operations?.llm_configured || safetyErrors > 0) &&
+    {(!operations?.database_ready || !operations?.llm_configured) &&
       <Alert type="error" showIcon message="Agent 当前存在阻断项"
-        description="请在系统设置中检查数据库、LLM、灰度安全指标和平台会话。" />}
+        description="请在系统设置中检查数据库、LLM 和平台会话。" />}
     <Row gutter={[16, 16]}>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="Agent 状态"
         value={agentStatusText(runs)} /></Card></Col>
@@ -134,11 +125,8 @@ export function OverviewPage() {
             : currentWorkers[0]?.status === 'STALE' ? 'orange'
               : currentWorkers.length === 1 ? 'green' : 'default'
         }>{workerStatusText(operations?.workers)}</Tag> },
-        { key: 'rollout', label: 'BOSS 灰度', children: rollout
-          ? `${rollout.current_level} - ${rollout.level_name}（${rollout.status}）` : '未初始化' },
         { key: 'unknown', label: '未知结果', children: operations?.unknown_action_count ?? 0 },
         { key: 'discrepancies', label: '审计差异', children: operations?.discrepancies.length ?? 0 },
-        { key: 'safety', label: '安全错误', children: safetyErrors },
         { key: 'conversations', label: '活跃会话', children:
           conversations.filter((item) => !['ENDED', 'DECLINED'].includes(item.state)).length },
       ]} />

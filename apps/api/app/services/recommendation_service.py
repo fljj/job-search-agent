@@ -16,7 +16,6 @@ from apps.api.app.models import entities as db
 from apps.api.app.services.action_service import execute_action, reconcile_action
 from apps.api.app.services.automation_service import _effective_rules
 from apps.api.app.services.errors import ResourceNotFoundError
-from apps.api.app.services.rollout_service import evaluate_rollout_action
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.actions import ActionExecutor
 from packages.policy_engine.automation import AutomationRules
@@ -220,14 +219,9 @@ def _persist_card(
         enabled = enabled and automation.maimai_recommendation_resume_enabled
         if not enabled:
             row.reason_codes = [*reasons, "RECOMMENDATION_RESUME_DISABLED"]
-    rollout_allowed, rollout_reasons = evaluate_rollout_action(
-        session, "MAIMAI", action_type, automation.daily_limit
-    )
-    if enabled and rollout_allowed:
+    if enabled:
         action = _create_action(session, row, run, strategy, action_type)
         row.action_id = action.id
-    elif enabled:
-        row.reason_codes = [*row.reason_codes, *rollout_reasons]
     _audit(session, row)
     return row
 
@@ -257,23 +251,6 @@ def _authorize_existing_recommendation(
         and not automation.maimai_recommendation_resume_enabled
     ):
         return
-    rollout_allowed, rollout_reasons = evaluate_rollout_action(
-        session, "MAIMAI", action_type, automation.daily_limit
-    )
-    if not rollout_allowed:
-        row.reason_codes = list(dict.fromkeys([*row.reason_codes, *rollout_reasons]))
-        return
-    row.reason_codes = [
-        code
-        for code in row.reason_codes
-        if code
-        not in {
-            "ROLLOUT_NOT_CONFIGURED",
-            "ROLLOUT_PAUSED",
-            "ROLLOUT_ACTION_NOT_ENABLED",
-            "ROLLOUT_DAILY_LIMIT_REACHED",
-        }
-    ]
     action = _create_action(session, row, run, strategy, action_type)
     row.action_id = action.id
     _audit(session, row)

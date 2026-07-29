@@ -37,12 +37,6 @@ interface OperationsStatus {
   reconciliation_tasks: Array<{ id: string; action_id: string; status: string; attempt_count: number }>
   discrepancies: Array<{ code: string; action_id: string }>
 }
-interface RolloutStatus {
-  platform: string; status: string; current_level: number; level_name: string
-  previous_level: number; stage_started_at: string; minimum_stage_hours: number
-  remaining_hours: number; reply_daily_limit: number; greeting_daily_limit: number
-  safety_metrics: Record<string, number>; version: number
-}
 interface StrategyOption { id: string; name: string; enabled: boolean }
 
 export function AutomationPage() {
@@ -53,23 +47,21 @@ export function AutomationPage() {
   const [platform, setPlatform] = useState('BOSS')
   const [strategyId, setStrategyId] = useState('')
   const [operations, setOperations] = useState<OperationsStatus>()
-  const [rollout, setRollout] = useState<RolloutStatus>()
   const [strategies, setStrategies] = useState<StrategyOption[]>([])
   const currentWorkers = activeWorkers(operations?.workers)
   const showRequestError = (error: unknown) =>
     message.error(error instanceof Error ? error.message : '操作失败，请稍后重试')
 
   const load = async () => {
-    const [llmStatus, runList, actionList, operationStatus, rolloutList, strategyList] = await Promise.all([
+    const [llmStatus, runList, actionList, operationStatus, strategyList] = await Promise.all([
       api<LlmStatus>('/system/llm-status'),
       api<{ items: AgentRun[] }>('/automation/runs'),
       api<{ items: AutomaticAction[] }>('/automation/actions'),
       api<OperationsStatus>('/automation/operations/status'),
-      api<{ items: RolloutStatus[] }>('/automation/rollouts'),
       api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
     ])
     setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
-    setOperations(operationStatus); setRollout(rolloutList.items.find((item) => item.platform === 'BOSS'))
+    setOperations(operationStatus)
     setStrategies(strategyList.items)
   }
   useEffect(() => {
@@ -78,11 +70,10 @@ export function AutomationPage() {
       api<{ items: AgentRun[] }>('/automation/runs'),
       api<{ items: AutomaticAction[] }>('/automation/actions'),
       api<OperationsStatus>('/automation/operations/status'),
-      api<{ items: RolloutStatus[] }>('/automation/rollouts'),
       api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
-    ]).then(([llmStatus, runList, actionList, operationStatus, rolloutList, strategyList]) => {
+    ]).then(([llmStatus, runList, actionList, operationStatus, strategyList]) => {
       setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
-      setOperations(operationStatus); setRollout(rolloutList.items.find((item) => item.platform === 'BOSS'))
+      setOperations(operationStatus)
       setStrategies(strategyList.items)
       if (strategyList.items.length === 1) setStrategyId(strategyList.items[0].id)
     })
@@ -107,28 +98,9 @@ export function AutomationPage() {
     await api('/automation/operations/reconciliation/run', { method: 'POST' })
     await load(); message.success('已执行一轮安全对账')
   }
-  const initializeRollout = async () => {
-    await api('/automation/rollouts', {
-      method: 'PUT',
-      body: JSON.stringify({
-        platform: 'BOSS', minimum_stage_hours: 24,
-        reply_daily_limit: 5, greeting_daily_limit: 3,
-      }),
-    })
-    await load(); message.success('BOSS 灰度已初始化为暂停的一级只读')
-  }
-  const transitionRollout = async (action: 'ACTIVATE' | 'PAUSE' | 'ADVANCE' | 'ROLLBACK') => {
-    if (!rollout) return
-    await api('/automation/rollouts/BOSS/transition', {
-      method: 'POST',
-      body: JSON.stringify({ action, expected_version: rollout.version }),
-    })
-    await load(); message.success('灰度状态已更新')
-  }
-
   return <Space direction="vertical" style={{ width: '100%' }} size="large">
     <Alert type="info" showIcon message="无人值守运行仍受服务端安全门禁控制"
-      description="Agent 自动发现职位和消息、评分、沟通及按条件发送简历；灰度升级、平台验证异常、未知结果和电话面试时间仍按安全规则处理。" />
+      description="Agent 启用后直接按正式配置自动发现职位和消息、评分、沟通及按条件发送简历；平台验证异常、未知结果和电话面试时间仍按安全规则处理。" />
 
     <Card title="LLM 配置状态">
       <Descriptions items={[
@@ -161,34 +133,6 @@ export function AutomationPage() {
         onClick={() => void reconcile().catch(showRequestError)}>
         执行对账
       </Button>
-    </Card>
-
-    <Card title="BOSS 无人值守灰度">
-      {!rollout ? <Button type="primary"
-        onClick={() => void initializeRollout().catch(showRequestError)}>
-        初始化一级只读灰度
-      </Button> : <>
-        <Descriptions items={[
-          { key: 'level', label: '当前级别', children: `${rollout.current_level} - ${rollout.level_name}` },
-          { key: 'status', label: '状态', children: <Tag color={statusColor(rollout.status)}>{rollout.status}</Tag> },
-          { key: 'started', label: '本级开始', children: new Date(rollout.stage_started_at).toLocaleString() },
-          { key: 'remaining', label: '升级等待', children: `${rollout.remaining_hours} 小时` },
-          { key: 'reply', label: '灰度回复上限', children: `${rollout.reply_daily_limit}/日` },
-          { key: 'greeting', label: '灰度招呼上限', children: `${rollout.greeting_daily_limit}/日` },
-          { key: 'metrics', label: '安全指标', children: Object.entries(rollout.safety_metrics)
-            .map(([key, value]) => `${key}:${value}`).join('、') },
-        ]} />
-        <Space wrap>
-          <Button type="primary" disabled={rollout.status === 'ACTIVE'}
-            onClick={() => void transitionRollout('ACTIVATE').catch(showRequestError)}>启用当前级别</Button>
-          <Button danger disabled={rollout.status !== 'ACTIVE'}
-            onClick={() => void transitionRollout('PAUSE').catch(showRequestError)}>暂停灰度</Button>
-          <Button disabled={rollout.status !== 'ACTIVE' || rollout.remaining_hours > 0 || rollout.current_level >= 6}
-            onClick={() => void transitionRollout('ADVANCE').catch(showRequestError)}>升级一级</Button>
-          <Button disabled={rollout.current_level <= 1 && rollout.status === 'PAUSED'}
-            onClick={() => void transitionRollout('ROLLBACK').catch(showRequestError)}>回退一级</Button>
-        </Space>
-      </>}
     </Card>
 
     <Card title="Agent 运行">

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     reconciliation_batch_size: int = Field(default=10, ge=1, le=100)
     audit_retention_days: int = Field(default=365, ge=30, le=3650)
     run_event_retention_days: int = Field(default=90, ge=7, le=3650)
-    agent_log_dir: str = "~/Desktop/job-search-agent-gray/logs"
+    agent_log_dir: str = "~/Desktop/job-search-agent/logs"
     agent_log_max_bytes: int = Field(default=20_000_000, ge=1_000_000)
     agent_log_backup_count: int = Field(default=14, ge=1, le=100)
 

@@ -67,12 +67,8 @@ from apps.api.app.services.recommendation_service import (
     dispatch_recommendation,
     scan_recommendations,
 )
-from apps.api.app.services.rollout_service import (
-    allows_rollout_job_scan,
-    enforce_rollout_health,
-)
-from packages.audit.gray_logging import configure_gray_logging, gray_event
 from packages.audit.redaction import install_redacting_filter
+from packages.audit.runtime_logging import configure_runtime_logging, runtime_event
 from packages.browser_worker.actions import ActionExecutor
 from packages.browser_worker.models import PageType, Platform, ReadResult, SessionStatus
 
@@ -195,7 +191,7 @@ def _discover_messages(
         if executor is not None
         else "SKIPPED"
     )
-    gray_event(
+    runtime_event(
         logger,
         "MESSAGE_SCAN_COMPLETED",
         worker_id=worker_id,
@@ -249,7 +245,7 @@ def _process_maimai_recommendations(
                 cdp_url,
                 executor=executor,
             )
-    gray_event(
+    runtime_event(
         logger,
         "RECOMMENDATION_SCAN_COMPLETED",
         worker_id=worker_id,
@@ -366,7 +362,7 @@ def _run_boss_job_discovery(
             mark_retry_target_not_visible(session, retry_record)
     finally:
         adapter.close_details(cdp_url, job_batch)
-    gray_event(
+    runtime_event(
         logger,
         "JOB_SCAN_COMPLETED",
         worker_id=worker_id,
@@ -465,7 +461,7 @@ def _run_telegram_job_discovery(
         executor=executor,
         cdp_url=cdp_url,
     )
-    gray_event(
+    runtime_event(
         logger,
         "TELEGRAM_JOB_SCAN_COMPLETED",
         worker_id=worker_id,
@@ -486,7 +482,7 @@ def _tick_and_log(
         worker_id,
         executor=executor,
     )
-    gray_event(
+    runtime_event(
         logger,
         "CYCLE_COMPLETED",
         worker_id=worker_id,
@@ -508,7 +504,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
         with SessionLocal() as circuit_session:
             if llm_circuit_is_open(circuit_session):
                 break
-        gray_event(logger, "CYCLE_STARTED", worker_id=worker_id, run_id=run_id)
+        runtime_event(logger, "CYCLE_STARTED", worker_id=worker_id, run_id=run_id)
         try:
             with SessionLocal() as session:
                 run = session.get(db.AgentRun, run_id)
@@ -537,13 +533,12 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     if (
                         rules.job_scan_enabled
                         and not rules.emergency_stop
-                        and allows_rollout_job_scan(session, run.platform)
                     ):
                         scan_blockers = job_scan_block_reasons(
                             session, run, rules, datetime.now(UTC)
                         )
                         if scan_blockers:
-                            gray_event(
+                            runtime_event(
                                 logger,
                                 "JOB_SCAN_SKIPPED",
                                 worker_id=worker_id,
@@ -581,7 +576,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     rules = _effective_rules(session, run.platform, run.strategy_id)
                     scan_blockers = job_scan_block_reasons(session, run, rules, datetime.now(UTC))
                     if scan_blockers:
-                        gray_event(
+                        runtime_event(
                             logger,
                             "TELEGRAM_JOB_SCAN_SKIPPED",
                             worker_id=worker_id,
@@ -601,7 +596,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                 session.commit()
                 _tick_and_log(session, run, worker_id, executor)
         except ValueError as exc:
-            gray_event(
+            runtime_event(
                 logger,
                 "CYCLE_SKIPPED",
                 worker_id=worker_id,
@@ -609,7 +604,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                 reason=type(exc).__name__,
             )
         except Exception:
-            gray_event(
+            runtime_event(
                 logger,
                 "CYCLE_FAILED",
                 worker_id=worker_id,
@@ -622,8 +617,6 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
 def maintenance_once(cdp_url: str) -> None:
     with SessionLocal() as session:
         process_reconciliation_queue(session, cdp_url)
-        enforce_rollout_health(session, "BOSS")
-        enforce_rollout_health(session, "MAIMAI")
         apply_retention(session)
 
 
@@ -634,10 +627,10 @@ def _request_stop(_signum: int, _frame: object) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = get_settings()
-    log_path = configure_gray_logging(settings)
+    log_path = configure_runtime_logging(settings)
     install_redacting_filter()
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
-    gray_event(
+    runtime_event(
         logger,
         "WORKER_STARTING",
         worker_id=worker_id,
@@ -685,7 +678,7 @@ def main() -> None:
                                 settings,
                                 build_llm_provider(settings),
                             )
-                            gray_event(
+                            runtime_event(
                                 logger,
                                 "LLM_CIRCUIT_WAITING",
                                 worker_id=worker_id,
