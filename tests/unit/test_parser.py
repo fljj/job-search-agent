@@ -1,4 +1,7 @@
-from packages.job_parser.models import JobInput, RuleParserConfig, WorkMode
+import pytest
+from pydantic import ValidationError
+
+from packages.job_parser.models import JobInput, ParsedJob, RuleParserConfig, WorkMode
 from packages.job_parser.rule_parser import RuleJobParser
 
 
@@ -100,3 +103,8 @@ def test_calendar_year_without_experience_requirement_is_ignored() -> None:
     )
 
     assert parser().parse(job).years_required is None
+
+
+def test_parsed_job_rejects_calendar_year_as_experience() -> None:
+    with pytest.raises(ValidationError, match="less than or equal to 50"):
+        ParsedJob(years_required=2021)

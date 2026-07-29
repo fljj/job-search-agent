@@ -155,7 +155,10 @@ def test_message_discovery_reuses_platform_cursor(
                 "partition": "UNREAD",
                 "scroll_position": 20,
                 "seen_message_keys": ["chat-1:message-1"],
-            }
+            },
+            "message_discovery_health": {
+                "consecutive_failure_count": 2,
+            },
         },
     )
     batch = MessageDiscoveryBatch(
@@ -205,9 +208,10 @@ def test_message_discovery_reuses_platform_cursor(
         limit=10,
     )
     assert persisted == [batch]
+    assert "message_discovery_health" not in (run.cursor or {})
 
 
-def test_message_discovery_failure_pauses_only_current_platform_run(
+def test_message_discovery_pauses_only_after_consecutive_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = MagicMock(spec=Session)
@@ -221,12 +225,17 @@ def test_message_discovery_failure_pauses_only_current_platform_run(
         lambda _session, run_id, _reasons: paused.append(run_id),
     )
 
+    for _ in range(2):
+        assert not _discover_messages(
+            session,
+            maimai_run,
+            "worker-1",
+            "http://127.0.0.1:9222",
+            adapter,
+        )
+        assert paused == []
     assert not _discover_messages(
-        session,
-        maimai_run,
-        "worker-1",
-        "http://127.0.0.1:9222",
-        adapter,
+        session, maimai_run, "worker-1", "http://127.0.0.1:9222", adapter
     )
     assert paused == [maimai_run.id]
     assert boss_run.id not in paused

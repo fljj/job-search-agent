@@ -130,7 +130,7 @@ users
 
 ### 3.14 `parsed_job_details`
 
-字段：`id`、`job_id`、`parser_type`、`parser_version`、`required_skills JSONB`、`preferred_skills JSONB`、`years_required`、`management_required`、`architecture_required`、`seniority_level`、`responsibilities JSONB`、`salary_normalized JSONB`、`confidence`、`warnings JSONB`、`created_at`。
+字段：`id`、`job_id`、`parser_type`、`parser_version`、`required_skills JSONB`、`preferred_skills JSONB`、`years_required`、`management_required`、`architecture_required`、`seniority_level`、`responsibilities JSONB`、`salary_normalized JSONB`、`confidence`、`warnings JSONB`、`created_at`。`years_required` 在领域入口限制为 `0–50` 年，年份或其他异常大数不得进入持久化。
 
 解析结果新增不覆盖。建议索引：`(job_id, created_at DESC)`。
 
@@ -277,6 +277,8 @@ users
   和消息 ID、扫描时间、是否到末尾及最近 500 个 `conversation_id:last_message_id`
   去重键；BOSS 与脉脉运行分别持有自己的游标，扫描到末尾后滚动位置归零，新消息仍
   可被发现。脉脉缺少平台消息 ID时使用稳定会话 ID和受控消息预览生成内容指纹。
+  `message_discovery_health` 子键记录连续失败次数、最近失败时间和异常类型；成功扫描后
+  清除，不作为长期业务数据。
 - `agent_runs.cursor.job_discovery`：第十阶段保存搜索条件键、虚拟滚动位置、下一游标、
   最后/下次扫描时间、是否到末尾及最近 2000 个已见外部职位 ID。消息游标与职位游标
   使用不同子键，轮询心跳更新不得覆盖两者。

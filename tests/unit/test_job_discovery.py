@@ -363,6 +363,15 @@ def test_only_prewrite_failure_allows_greeting_retry() -> None:
     assert not _is_prewrite_retryable(unknown)  # type: ignore[arg-type]
 
 
+def test_telegram_contact_not_ready_allows_safe_greeting_retry() -> None:
+    retryable = SimpleNamespace(
+        status="FAILED_RETRYABLE",
+        failure_code="TELEGRAM_CONTACT_NOT_READY",
+    )
+
+    assert _is_prewrite_retryable(retryable)  # type: ignore[arg-type]
+
+
 def test_missing_retry_target_advances_backoff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

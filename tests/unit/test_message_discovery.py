@@ -10,10 +10,10 @@ from adapters.browser.message_discovery import (
     DiscoveredConversation,
     MessageDiscoveryAdapter,
     MessageDiscoveryBatch,
+    _attempted_message_keys,
     _matches_partition,
     _message_key,
     _normalize_duplicate_conversation_ids,
-    _successfully_read_message_keys,
     _verify_target,
     select_discovery_candidates,
 )
@@ -329,13 +329,16 @@ def test_message_key_uses_preview_when_platform_has_no_message_id() -> None:
     assert _message_key(item) != first_key
 
 
-def test_successful_reads_are_seen_but_failed_read_is_not() -> None:
+def test_stable_failed_read_is_seen_until_message_changes() -> None:
     inbound = summary(1)
     outbound_only = summary(2)
     failed = summary(3)
     unstable = summary(4)
+    failed_unstable = summary(5)
     unstable.last_message_id = None
     unstable.last_message_text = None
+    failed_unstable.last_message_id = None
+    failed_unstable.last_message_text = None
     inbound_detail = detail(inbound)
     outbound_detail = detail(outbound_only)
     unstable_detail = detail(unstable)
@@ -367,8 +370,8 @@ def test_successful_reads_are_seen_but_failed_read_is_not() -> None:
         )
     ]
 
-    keys = _successfully_read_message_keys(
-        [inbound, outbound_only, failed, unstable],
+    keys = _attempted_message_keys(
+        [inbound, outbound_only, failed, unstable, failed_unstable],
         [
             DiscoveredConversation(summary=inbound, detail=inbound_detail),
             DiscoveredConversation(summary=outbound_only, detail=outbound_detail),
@@ -377,13 +380,19 @@ def test_successful_reads_are_seen_but_failed_read_is_not() -> None:
                 reason_codes=["CONVERSATION_DETAIL_NOT_READY"],
             ),
             DiscoveredConversation(summary=unstable, detail=unstable_detail),
+            DiscoveredConversation(
+                summary=failed_unstable,
+                reason_codes=["CONVERSATION_DETAIL_NOT_READY"],
+            ),
         ],
     )
 
     assert keys == [
         _message_key(inbound),
         _message_key(outbound_only),
+        _message_key(failed),
         _message_key(unstable),
+        _message_key(failed_unstable),
     ]
 
 

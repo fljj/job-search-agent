@@ -78,6 +78,7 @@ from packages.browser_worker.models import PageType, Platform, ReadResult, Sessi
 logger = logging.getLogger(__name__)
 LOCK_PATH = "/tmp/job-search-agent-worker.lock"
 STOP_EVENT = threading.Event()
+MESSAGE_DISCOVERY_PAUSE_AFTER_FAILURES = 3
 
 
 def _merge_seen_job_ids(
@@ -175,9 +176,34 @@ def _discover_messages(
             known_linked_job_ids=known_linked_job_ids,
             limit=get_settings().agent_tick_batch_size,
         )
-    except (OSError, TimeoutError, ValueError):
-        pause_run(session, run.id, ["MESSAGE_DISCOVERY_UNAVAILABLE"])
+    except (OSError, TimeoutError, ValueError) as exc:
+        root_cursor = dict(run.cursor or {})
+        raw_health = root_cursor.get("message_discovery_health")
+        health = raw_health if isinstance(raw_health, dict) else {}
+        failure_count = int(health.get("consecutive_failure_count") or 0) + 1
+        root_cursor["message_discovery_health"] = {
+            "consecutive_failure_count": failure_count,
+            "last_failure_at": datetime.now(UTC).isoformat(),
+            "last_error_type": type(exc).__name__,
+        }
+        run.cursor = root_cursor
+        runtime_event(
+            logger,
+            "MESSAGE_DISCOVERY_FAILED",
+            worker_id=worker_id,
+            run_id=run.id,
+            platform=run.platform,
+            error_type=type(exc).__name__,
+            failure_count=failure_count,
+        )
+        if failure_count >= MESSAGE_DISCOVERY_PAUSE_AFTER_FAILURES:
+            pause_run(session, run.id, ["MESSAGE_DISCOVERY_UNAVAILABLE"])
+        else:
+            session.commit()
         return False
+    root_cursor = dict(run.cursor or {})
+    if root_cursor.pop("message_discovery_health", None) is not None:
+        run.cursor = root_cursor
     record_ready_platform_session(session, run, cdp_url)
     counts = persist_discovery_batch(session, run, worker_id, batch)
     consent_statuses = (
@@ -390,15 +416,9 @@ def _run_telegram_job_discovery(
     cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
     raw_seen = cursor.get("seen_job_ids")
     seen_post_ids = [str(item) for item in (raw_seen if isinstance(raw_seen, list) else [])]
-    retry_before = datetime.now(UTC) - timedelta(seconds=policy.retry_delay_seconds)
-    retryable_ids = set(
-        session.scalars(
-            select(db.JobDiscoveryRecord.external_job_id).where(
-                db.JobDiscoveryRecord.agent_run_id == run.id,
-                db.JobDiscoveryRecord.status == "RETRYABLE",
-                db.JobDiscoveryRecord.updated_at <= retry_before,
-            )
-        ).all()
+    retry_record = next_retryable_job(session, run)
+    retryable_ids = (
+        {retry_record.external_job_id} if retry_record is not None else set()
     )
     adapter = TelegramJobDiscoveryAdapter(policy)
     try:
@@ -469,6 +489,11 @@ def _run_telegram_job_discovery(
         executor=executor,
         cdp_url=cdp_url,
     )
+    if retry_record is not None and not any(
+        item.summary.external_job_id == retry_record.external_job_id
+        for item in items
+    ):
+        mark_retry_target_not_visible(session, retry_record, now=now)
     runtime_event(
         logger,
         "TELEGRAM_JOB_SCAN_COMPLETED",

@@ -123,9 +123,19 @@ def test_qwen_does_not_retry_non_network_error(error: Exception) -> None:
 
 
 def test_factory_switches_provider_without_exposing_key() -> None:
-    assert isinstance(build_llm_provider(Settings(llm_provider="FAKE")), FakeLlmProvider)
+    assert isinstance(
+        build_llm_provider(Settings(_env_file=None, llm_provider="FAKE")),
+        FakeLlmProvider,
+    )
     with pytest.raises(LlmConfigurationError, match="模型未配置") as captured:
-        build_llm_provider(Settings(llm_provider="QWEN", llm_api_key=None))
+        build_llm_provider(
+            Settings(
+                _env_file=None,
+                llm_provider="QWEN",
+                llm_api_key=None,
+                qwen_api_key=None,
+            )
+        )
     assert "secret" not in str(captured.value).lower()
 
 

@@ -76,7 +76,7 @@ class RuleParserConfig(BaseModel):
 class ParsedJob(BaseModel):
     required_skills: list[str] = Field(default_factory=list)
     preferred_skills: list[str] = Field(default_factory=list)
-    years_required: Decimal | None = Field(default=None, ge=0)
+    years_required: Decimal | None = Field(default=None, ge=0, le=50)
     management_required: bool = False
     architecture_required: bool = False
     seniority_level: SeniorityLevel = SeniorityLevel.UNKNOWN

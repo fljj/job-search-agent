@@ -115,7 +115,7 @@ class MessageDiscoveryAdapter:
             next_position = min(len(eligible), scroll_position + limit)
             updated_seen = [
                 *stable_seen_message_keys,
-                *_successfully_read_message_keys(candidates, discovered),
+                *_attempted_message_keys(candidates, discovered),
             ]
             exhausted = next_position >= len(eligible) and not listing.cursor
             return MessageDiscoveryBatch(
@@ -473,18 +473,14 @@ def _has_stable_message_key(item: BrowserConversationSummary) -> bool:
     )
 
 
-def _successfully_read_message_keys(
+def _attempted_message_keys(
     candidates: list[BrowserConversationSummary],
     discovered: list[DiscoveredConversation],
 ) -> list[str]:
-    """成功读取的稳定会话按最后消息去重，内容变化后才重新读取。"""
-    keys: list[str] = []
-    for summary, item in zip(candidates, discovered, strict=True):
-        conversation = item.detail.conversation if item.detail else None
-        if item.reason_codes or conversation is None:
-            continue
-        keys.append(_message_key(summary))
-    return keys
+    """本轮已尝试项均去重；稳定键等内容变化，不稳定键由上层定时释放。"""
+    if len(candidates) != len(discovered):
+        raise ValueError("消息候选项与读取结果数量不一致")
+    return [_message_key(summary) for summary in candidates]
 
 
 def _matches_partition(
