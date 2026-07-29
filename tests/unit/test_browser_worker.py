@@ -7,7 +7,12 @@ from adapters.browser.playwright_reader import validate_local_cdp_url
 from apps.api.app.core.browser_config import get_browser_selectors
 from packages.browser_worker.config import PlatformSelectors
 from packages.browser_worker.extractor import extract_current_page
-from packages.browser_worker.models import PageType, Platform, SessionStatus
+from packages.browser_worker.models import (
+    PageType,
+    Platform,
+    PlatformConsentType,
+    SessionStatus,
+)
 from packages.browser_worker.ports import ElementReader
 
 
@@ -113,16 +118,61 @@ def test_extracts_conversation_messages() -> None:
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")
     page.visible = {selectors.login_marker, selectors.conversation_root}
     page.texts = {selectors.recruiter: "张HR"}
-    page.attributes = {
-        (selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"
+    page.attributes = {(selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"}
+    page.element_lists = {
+        selectors.message_items: [
+            FakeElement(
+                texts={selectors.message_content: "请发一份简历"},
+                attributes={("", selectors.message_id_attribute): "message-1"},
+            )
+        ]
     }
-    page.element_lists = {selectors.message_items: [FakeElement(
-        texts={selectors.message_content: "请发一份简历"},
-        attributes={("", selectors.message_id_attribute): "message-1"},
-    )]}
     result = extract_current_page(page, Platform.BOSS, selectors, "v1")
     assert result.page_type is PageType.CONVERSATION
-    assert result.conversation and result.conversation.messages[0].external_message_id == "message-1"
+    assert (
+        result.conversation and result.conversation.messages[0].external_message_id == "message-1"
+    )
+
+
+def test_extracts_only_pending_exact_platform_consent_cards() -> None:
+    selectors = get_browser_selectors().platforms["BOSS"]
+    page = FakePage(url="https://www.zhipin.com/web/geek/chat")
+    page.visible = {selectors.login_marker, selectors.conversation_root}
+    page.texts = {selectors.recruiter: "张先生"}
+    page.attributes = {(selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"}
+    page.element_lists = {
+        selectors.consent_cards: [
+            FakeElement(
+                texts={
+                    selectors.consent_card_title: ("我想要和您交换联系方式，您是否同意"),
+                    selectors.consent_card_buttons: "同意",
+                },
+                attributes={(selectors.consent_card_buttons, "class"): "card-btn"},
+            ),
+            FakeElement(
+                texts={
+                    selectors.consent_card_title: ("我想要一份您的附件简历，您是否同意"),
+                    selectors.consent_card_buttons: "同意",
+                },
+                attributes={(selectors.consent_card_buttons, "class"): "card-btn disabled"},
+            ),
+            FakeElement(
+                texts={
+                    selectors.consent_card_title: "这不是受支持的平台动作",
+                    selectors.consent_card_buttons: "同意",
+                }
+            ),
+        ]
+    }
+
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+
+    assert result.conversation is not None
+    assert len(result.conversation.platform_consents) == 2
+    assert result.conversation.platform_consents[0].consent_type is (PlatformConsentType.CONTACT)
+    assert result.conversation.platform_consents[0].pending is True
+    assert result.conversation.platform_consents[1].consent_type is (PlatformConsentType.RESUME)
+    assert result.conversation.platform_consents[1].pending is False
 
 
 def test_extracts_real_boss_conversation_list_id_from_d_c() -> None:
@@ -176,9 +226,7 @@ def test_extracts_real_boss_conversation_dom_shape() -> None:
         selectors.recruiter: "李剑",
         selectors.conversation_job_title: "java开发工程师（代招职位）",
     }
-    page.attributes = {
-        (selectors.conversation_id, selectors.conversation_id_attribute): "62001"
-    }
+    page.attributes = {(selectors.conversation_id, selectors.conversation_id_attribute): "62001"}
     page.element_lists = {
         selectors.message_items: [
             FakeElement(
@@ -262,9 +310,7 @@ def test_invalid_message_time_stops_conversation_read() -> None:
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")
     page.visible = {selectors.login_marker, selectors.conversation_root}
     page.texts = {selectors.recruiter: "张HR"}
-    page.attributes = {
-        (selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"
-    }
+    page.attributes = {(selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"}
     page.element_lists = {
         selectors.message_items: [
             FakeElement(
@@ -281,11 +327,14 @@ def test_invalid_message_time_stops_conversation_read() -> None:
     assert result.reason_codes == ["INVALID_MESSAGE_TIME"]
 
 
-@pytest.mark.parametrize(("visible_extra", "expected", "reason"), [
-    ("verification", SessionStatus.SESSION_AUTH_REQUIRED, "VERIFICATION_REQUIRED"),
-    ("no_login", SessionStatus.SESSION_AUTH_REQUIRED, "LOGIN_REQUIRED"),
-    ("unknown_page", SessionStatus.SESSION_PAGE_CHANGED, "SUPPORTED_PAGE_ROOT_NOT_FOUND"),
-])
+@pytest.mark.parametrize(
+    ("visible_extra", "expected", "reason"),
+    [
+        ("verification", SessionStatus.SESSION_AUTH_REQUIRED, "VERIFICATION_REQUIRED"),
+        ("no_login", SessionStatus.SESSION_AUTH_REQUIRED, "LOGIN_REQUIRED"),
+        ("unknown_page", SessionStatus.SESSION_PAGE_CHANGED, "SUPPORTED_PAGE_ROOT_NOT_FOUND"),
+    ],
+)
 def test_stops_on_unsafe_or_changed_page(
     visible_extra: str, expected: SessionStatus, reason: str
 ) -> None:
@@ -304,8 +353,9 @@ def test_stops_on_unsafe_or_changed_page(
 
 def test_stops_when_expected_target_does_not_match() -> None:
     page, selectors = job_page(Platform.BOSS)
-    result = extract_current_page(page, Platform.BOSS, selectors, "v1",
-                                  expected_company="另一家公司")
+    result = extract_current_page(
+        page, Platform.BOSS, selectors, "v1", expected_company="另一家公司"
+    )
     assert result.status is SessionStatus.SESSION_TARGET_MISMATCH
     assert result.reason_codes == ["JOB_TARGET_MISMATCH"]
 

@@ -63,6 +63,9 @@ class PlatformSelectors(BaseModel):
     resume_items: str
     resume_confirm_button: str
     sent_resume_items: str
+    consent_cards: str | None = None
+    consent_card_title: str | None = None
+    consent_card_buttons: str | None = None
 
 
 class BrowserSelectorsConfig(BaseModel):

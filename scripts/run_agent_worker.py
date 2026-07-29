@@ -50,6 +50,7 @@ from apps.api.app.services.llm_circuit_service import (
     probe_llm_circuit,
 )
 from apps.api.app.services.message_discovery_service import (
+    execute_pending_platform_consents,
     persist_discovery_batch,
     process_next_inbound_job_score,
     record_ready_platform_session,
@@ -136,6 +137,7 @@ def _discover_messages(
     worker_id: str,
     cdp_url: str,
     adapter: MessageDiscoveryAdapter,
+    executor: ActionExecutor | None = None,
 ) -> bool:
     raw_cursor = (run.cursor or {}).get("message_discovery")
     cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
@@ -145,9 +147,7 @@ def _discover_messages(
         session.scalars(
             select(db.Conversation.external_conversation_id).where(
                 db.Conversation.platform == run.platform,
-                db.Conversation.state.in_(
-                    ["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]
-                ),
+                db.Conversation.state.in_(["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]),
             )
         ).all()
     )
@@ -157,8 +157,7 @@ def _discover_messages(
             partition="ALL",
             scroll_position=raw_position if isinstance(raw_position, int) else 0,
             seen_message_keys=[
-                str(item)
-                for item in (raw_seen if isinstance(raw_seen, list) else [])
+                str(item) for item in (raw_seen if isinstance(raw_seen, list) else [])
             ],
             excluded_conversation_ids=terminal_conversation_ids,
             limit=get_settings().agent_tick_batch_size,
@@ -168,10 +167,19 @@ def _discover_messages(
         return False
     record_ready_platform_session(session, run, cdp_url)
     counts = persist_discovery_batch(session, run, worker_id, batch)
-    inbound_score_status = process_next_inbound_job_score(
-        session,
-        run,
-        build_llm_provider(get_settings()),
+    consent_statuses = (
+        execute_pending_platform_consents(session, run, cdp_url, executor)
+        if executor is not None
+        else []
+    )
+    inbound_score_status = (
+        process_next_inbound_job_score(
+            session,
+            run,
+            build_llm_provider(get_settings()),
+        )
+        if executor is not None
+        else "SKIPPED"
     )
     gray_event(
         logger,
@@ -183,6 +191,7 @@ def _discover_messages(
         imported_count=counts["imported"],
         paused_count=counts["paused"],
         inbound_score_status=inbound_score_status,
+        consent_action_statuses=consent_statuses,
         exhausted=batch.exhausted,
         cursor=batch.scroll_position,
     )
@@ -260,15 +269,11 @@ def _run_boss_job_discovery(
 
     assert isinstance(rules, AutomationRules)
     raw_job_cursor = (run.cursor or {}).get("job_discovery")
-    job_cursor = (
-        raw_job_cursor if isinstance(raw_job_cursor, dict) else {}
-    )
+    job_cursor = raw_job_cursor if isinstance(raw_job_cursor, dict) else {}
     raw_job_position = job_cursor.get("scroll_position")
     raw_seen_jobs = job_cursor.get("seen_job_ids")
     retry_record = next_retryable_job(session, run)
-    retry_job_id = (
-        retry_record.external_job_id if retry_record is not None else None
-    )
+    retry_job_id = retry_record.external_job_id if retry_record is not None else None
     persisted_seen_query = (
         select(db.JobDiscoveryRecord.external_job_id)
         .join(
@@ -300,28 +305,20 @@ def _run_boss_job_discovery(
                 or (search_keys[0] if search_keys else "CURRENT_SEARCH")
             ),
             search_keys=search_keys,
-            refresh_before_scan=bool(
-                job_cursor.get("refresh_before_scan", False)
-            ),
+            refresh_before_scan=bool(job_cursor.get("refresh_before_scan", False)),
             switch_search_before_scan=bool(
                 job_cursor.get(
                     "switch_search_before_scan",
                     not bool(raw_job_cursor),
                 )
             ),
-            scroll_position=(
-                raw_job_position if isinstance(raw_job_position, int) else 0
-            ),
+            scroll_position=(raw_job_position if isinstance(raw_job_position, int) else 0),
             previous_cursor=(
-                str(job_cursor["next_cursor"])
-                if job_cursor.get("next_cursor")
-                else None
+                str(job_cursor["next_cursor"]) if job_cursor.get("next_cursor") else None
             ),
             seen_job_ids=seen_job_ids,
             target_job_ids={retry_job_id} if retry_job_id else None,
-            irrelevant_title_keywords=(
-                get_job_parser_config().irrelevant_title_keywords
-            ),
+            irrelevant_title_keywords=(get_job_parser_config().irrelevant_title_keywords),
             limit=min(
                 1 if retry_job_id else get_settings().boss_job_batch_size,
                 rules.hourly_scan_limit,
@@ -371,13 +368,8 @@ def _run_telegram_job_discovery(
     raw_cursor = (run.cursor or {}).get("job_discovery")
     cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
     raw_seen = cursor.get("seen_job_ids")
-    seen_post_ids = [
-        str(item)
-        for item in (raw_seen if isinstance(raw_seen, list) else [])
-    ]
-    retry_before = datetime.now(UTC) - timedelta(
-        seconds=policy.retry_delay_seconds
-    )
+    seen_post_ids = [str(item) for item in (raw_seen if isinstance(raw_seen, list) else [])]
+    retry_before = datetime.now(UTC) - timedelta(seconds=policy.retry_delay_seconds)
     retryable_ids = set(
         session.scalars(
             select(db.JobDiscoveryRecord.external_job_id).where(
@@ -391,9 +383,7 @@ def _run_telegram_job_discovery(
     try:
         discovered = adapter.scan(
             cdp_url,
-            seen_post_ids=[
-                item for item in seen_post_ids if item not in retryable_ids
-            ],
+            seen_post_ids=[item for item in seen_post_ids if item not in retryable_ids],
         )
     except (OSError, TimeoutError, ValueError):
         pause_run(session, run.id, ["TELEGRAM_DISCOVERY_UNAVAILABLE"])
@@ -421,14 +411,9 @@ def _run_telegram_job_discovery(
                         platform=Platform.TELEGRAM,
                         status=SessionStatus.SESSION_READY,
                         page_type=PageType.JOB,
-                        page_url=(
-                            "https://web.telegram.org/a/"
-                            f"#{post.channel_id}"
-                        ),
+                        page_url=(f"https://web.telegram.org/a/#{post.channel_id}"),
                         page_title=post.channel_name,
-                        content_hash=hashlib.sha256(
-                            post.job.description.encode()
-                        ).hexdigest(),
+                        content_hash=hashlib.sha256(post.job.description.encode()).hexdigest(),
                         selector_version="telegram-web-a-v1",
                         job=post.job,
                     )
@@ -514,6 +499,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                         worker_id,
                         cdp_url,
                         BossMessageDiscoveryAdapter(get_browser_selectors()),
+                        executor,
                     ):
                         continue
                     run.executor_type = executor_type
@@ -522,9 +508,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     _tick_and_log(session, run, worker_id, executor)
                     if run.status != "RUNNING":
                         continue
-                    rules = _effective_rules(
-                        session, run.platform, run.strategy_id
-                    )
+                    rules = _effective_rules(session, run.platform, run.strategy_id)
                     if (
                         rules.job_scan_enabled
                         and not rules.emergency_stop
@@ -561,6 +545,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             get_browser_selectors(),
                             get_recommendation_rules(),
                         ),
+                        executor,
                     ):
                         continue
                     if not _process_maimai_recommendations(
@@ -568,12 +553,8 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     ):
                         continue
                 elif run.platform == Platform.TELEGRAM.value:
-                    rules = _effective_rules(
-                        session, run.platform, run.strategy_id
-                    )
-                    scan_blockers = job_scan_block_reasons(
-                        session, run, rules, datetime.now(UTC)
-                    )
+                    rules = _effective_rules(session, run.platform, run.strategy_id)
+                    scan_blockers = job_scan_block_reasons(session, run, rules, datetime.now(UTC))
                     if scan_blockers:
                         gray_event(
                             logger,

@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
@@ -14,6 +15,7 @@ from apps.api.app.models import entities as db
 from apps.api.app.schemas.conversation import ConversationPayload, MessagePayload
 from apps.api.app.schemas.job import JobImportPayload
 from apps.api.app.schemas.score import ScoreRequest
+from apps.api.app.services.action_service import execute_action
 from apps.api.app.services.conversation_service import (
     create_conversation,
     import_message,
@@ -23,7 +25,12 @@ from apps.api.app.services.llm_circuit_service import open_llm_circuit
 from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID
-from packages.browser_worker.models import BrowserMessage, MessageDirection
+from packages.browser_worker.actions import ActionExecutor
+from packages.browser_worker.models import (
+    BrowserMessage,
+    BrowserPlatformConsent,
+    MessageDirection,
+)
 from packages.llm.ports import LlmProvider
 from packages.scoring.llm_engine import LlmScoreValidationError
 
@@ -119,9 +126,7 @@ def process_next_inbound_job_score(
         session.commit()
         return "LLM_BLOCKED"
     except LlmScoreValidationError:
-        retry_at = current + timedelta(
-            seconds=get_settings().boss_llm_retry_base_seconds
-        )
+        retry_at = current + timedelta(seconds=get_settings().boss_llm_retry_base_seconds)
         root_cursor["inbound_job_scoring"] = {
             "next_retry_at": retry_at.isoformat(),
             "conversation_id": str(conversation.id),
@@ -201,9 +206,7 @@ def persist_discovery_batch(
         if conversation.state in TERMINAL_CONVERSATION_STATES:
             counts["skipped"] += 1
             continue
-        if not _acquire_conversation_lease(
-            session, conversation.id, worker_id, current
-        ):
+        if not _acquire_conversation_lease(session, conversation.id, worker_id, current):
             counts["skipped"] += 1
             continue
         detail = item.detail.conversation
@@ -213,9 +216,7 @@ def persist_discovery_batch(
         conversation.job_id = job.id if job else None
         conversation.strategy_id = run.strategy_id
         conversation.latest_job_score_id = score.id if score else None
-        conversation.observed_company_name = (
-            detail.company_name or item.summary.company_name
-        )
+        conversation.observed_company_name = detail.company_name or item.summary.company_name
         conversation.observed_job_title = detail.job_title or item.summary.job_title
         conversation.observed_external_job_id = (
             detail.external_job_id or item.summary.external_job_id
@@ -278,6 +279,14 @@ def persist_discovery_batch(
         if latest_inbound is not None:
             # 既有消息可能早于完整 JD 入库；职位重新绑定后必须用新事实刷新资格。
             refresh_qualification(session, conversation, message=latest_inbound)
+        _queue_platform_consents(
+            session,
+            run,
+            conversation,
+            job,
+            detail.platform_consents,
+            current,
+        )
         conversation.processing_lease_owner = None
         conversation.processing_lease_expires_at = None
         reasons = ["CONVERSATION_IMPORTED"]
@@ -290,9 +299,7 @@ def persist_discovery_batch(
     root_cursor = dict(run.cursor or {})
     previous_message_cursor = root_cursor.get("message_discovery")
     previous_message_cursor = (
-        previous_message_cursor
-        if isinstance(previous_message_cursor, dict)
-        else {}
+        previous_message_cursor if isinstance(previous_message_cursor, dict) else {}
     )
     seen_message_keys, unstable_rescan_at = _next_seen_message_keys(
         batch,
@@ -307,9 +314,7 @@ def persist_discovery_batch(
         "last_conversation_id": (
             batch.items[-1].summary.external_conversation_id if batch.items else None
         ),
-        "last_message_id": (
-            batch.items[-1].summary.last_message_id if batch.items else None
-        ),
+        "last_message_id": (batch.items[-1].summary.last_message_id if batch.items else None),
         "last_scan_at": batch.scanned_at.isoformat(),
         "seen_message_keys": seen_message_keys,
         "unstable_rescan_at": unstable_rescan_at.isoformat(),
@@ -320,6 +325,112 @@ def persist_discovery_batch(
     return counts
 
 
+def execute_pending_platform_consents(
+    session: Session,
+    run: db.AgentRun,
+    cdp_url: str,
+    executor: ActionExecutor,
+) -> list[str]:
+    action_ids = session.scalars(
+        select(db.ActionQueue.id)
+        .where(
+            db.ActionQueue.agent_run_id == run.id,
+            db.ActionQueue.action_type.in_(
+                [
+                    "RESUME_CONSENT_ACCEPT",
+                    "CONTACT_CONSENT_ACCEPT",
+                ]
+            ),
+            db.ActionQueue.status == "APPROVED",
+        )
+        .order_by(db.ActionQueue.created_at.asc())
+        .limit(1)
+    ).all()
+    statuses = []
+    for action_id in action_ids:
+        result = execute_action(session, action_id, cdp_url, executor)
+        statuses.append(result.status)
+    return statuses
+
+
+def _queue_platform_consents(
+    session: Session,
+    run: db.AgentRun,
+    conversation: db.Conversation,
+    job: db.Job | None,
+    consents: list[BrowserPlatformConsent],
+    current: datetime,
+) -> None:
+    if conversation.qualification_status not in {"ROUGH_MATCH", "FULL_MATCH"}:
+        return
+    score = (
+        session.get(db.JobScore, conversation.latest_job_score_id)
+        if conversation.latest_job_score_id
+        else None
+    )
+    if score is not None and score.hard_rejected:
+        return
+    for consent in consents:
+        if not consent.pending:
+            continue
+        action_type = (
+            "RESUME_CONSENT_ACCEPT"
+            if consent.consent_type.value == "RESUME"
+            else "CONTACT_CONSENT_ACCEPT"
+        )
+        external_id = consent.external_consent_id
+        fingerprint = hashlib.sha256(
+            f"{conversation.id}:{action_type}:{external_id}".encode()
+        ).hexdigest()
+        if session.scalar(
+            select(db.ActionQueue.id).where(db.ActionQueue.send_fingerprint == fingerprint)
+        ):
+            continue
+        action = db.ActionQueue(
+            user_id=DEFAULT_USER_ID,
+            strategy_id=run.strategy_id,
+            agent_run_id=run.id,
+            authorization_source="AUTO",
+            authorization_basis="INBOUND_PLATFORM_CONSENT",
+            qualification_snapshot={
+                "status": conversation.qualification_status,
+                "evidence": conversation.qualification_evidence,
+                "version": conversation.qualification_version,
+            },
+            job_id=conversation.job_id,
+            conversation_id=conversation.id,
+            action_type=action_type,
+            status="APPROVED",
+            content=consent.prompt,
+            platform=conversation.platform,
+            target_company=(
+                job.company_name if job else conversation.observed_company_name or "未知公司"
+            ),
+            target_job_title=(job.title if job else conversation.observed_job_title or "未知岗位"),
+            target_recruiter=conversation.recruiter_name,
+            target_conversation_key=conversation.external_conversation_id,
+            idempotency_key=f"platform-consent:{fingerprint}",
+            send_fingerprint=fingerprint,
+            approved_at=current,
+        )
+        session.add(action)
+        session.flush()
+        session.add(
+            db.AuditEvent(
+                user_id=DEFAULT_USER_ID,
+                actor_type="SYSTEM",
+                event_type="PLATFORM_CONSENT_AUTO_APPROVED",
+                entity_type="action",
+                entity_id=action.id,
+                before_state=None,
+                after_state="APPROVED",
+                reason_codes=["QUALIFIED_INBOUND_PLATFORM_CONSENT"],
+                metadata_json={"consent_type": consent.consent_type.value},
+                correlation_id=f"platform-consent:{action.id}",
+            )
+        )
+
+
 def _terminal_state_from_messages(
     messages: list[BrowserMessage],
 ) -> tuple[str, str] | None:
@@ -328,9 +439,8 @@ def _terminal_state_from_messages(
         normalized = "".join(content.split())
         if not normalized or any(mark in normalized for mark in ("吗", "？", "?")):
             continue
-        if (
-            message.direction is MessageDirection.OUTBOUND
-            and any(marker in normalized for marker in CONVERSATION_REOPEN_MARKERS)
+        if message.direction is MessageDirection.OUTBOUND and any(
+            marker in normalized for marker in CONVERSATION_REOPEN_MARKERS
         ):
             return None
         if not any(marker in normalized for marker in TERMINAL_REJECTION_MARKERS):
@@ -349,30 +459,18 @@ def _next_seen_message_keys(
 ) -> tuple[list[str], datetime]:
     raw_rescan_at = previous_cursor.get("unstable_rescan_at")
     try:
-        previous_rescan_at = (
-            datetime.fromisoformat(str(raw_rescan_at))
-            if raw_rescan_at
-            else None
-        )
+        previous_rescan_at = datetime.fromisoformat(str(raw_rescan_at)) if raw_rescan_at else None
     except ValueError:
         previous_rescan_at = None
-    rescan_due = (
-        batch.exhausted
-        and (
-            previous_rescan_at is None
-            or current - previous_rescan_at
-            >= UNSTABLE_CONVERSATION_RESCAN_INTERVAL
-        )
+    rescan_due = batch.exhausted and (
+        previous_rescan_at is None
+        or current - previous_rescan_at >= UNSTABLE_CONVERSATION_RESCAN_INTERVAL
     )
     if not rescan_due:
         return batch.seen_message_keys, previous_rescan_at or current
     # BOSS 部分列表项没有消息 ID、预览或可靠未读数，不能永久标记已读。
     return (
-        [
-            key
-            for key in batch.seen_message_keys
-            if not key.endswith(":conversation")
-        ],
+        [key for key in batch.seen_message_keys if not key.endswith(":conversation")],
         current,
     )
 
@@ -427,9 +525,7 @@ def _resolve_job(
         )
         return session.get(db.Job, imported.job.id)
     detail = item.detail.conversation if item.detail else None
-    external_job_id = item.summary.external_job_id or (
-        detail.external_job_id if detail else None
-    )
+    external_job_id = item.summary.external_job_id or (detail.external_job_id if detail else None)
     if external_job_id:
         matches = session.scalars(
             select(db.Job).where(
@@ -454,9 +550,7 @@ def _resolve_job(
     return matches[0] if len(matches) == 1 else None
 
 
-def _current_score(
-    session: Session, run: db.AgentRun, job: db.Job
-) -> db.JobScore | None:
+def _current_score(session: Session, run: db.AgentRun, job: db.Job) -> db.JobScore | None:
     strategy = session.get(db.JobStrategy, run.strategy_id)
     if strategy is None:
         return None
@@ -560,8 +654,7 @@ def _record_state_sequence(
                 reason_codes=[],
                 metadata_json={
                     "state": state,
-                    "external_conversation_id":
-                    item.summary.external_conversation_id,
+                    "external_conversation_id": item.summary.external_conversation_id,
                 },
             )
         )

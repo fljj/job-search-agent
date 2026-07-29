@@ -87,6 +87,11 @@ class PlaywrightActionExecutor:
             return self._execute_telegram_greeting(cdp_url, command)
         if command.action_type == "GREETING":
             return self._execute_greeting_over_raw_cdp(cdp_url, command)
+        if command.action_type in {
+            "RESUME_CONSENT_ACCEPT",
+            "CONTACT_CONSENT_ACCEPT",
+        }:
+            return self._execute_platform_consent_over_raw_cdp(cdp_url, command)
         if command.action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
             return self._execute_reply_over_raw_cdp(cdp_url, command)
         try:
@@ -117,9 +122,7 @@ class PlaywrightActionExecutor:
                 str(item["webSocketDebuggerUrl"])
                 for item in targets
                 if item.get("type") == "page"
-                and str(item.get("url") or "").startswith(
-                    "https://web.telegram.org/a/"
-                )
+                and str(item.get("url") or "").startswith("https://web.telegram.org/a/")
                 and item.get("webSocketDebuggerUrl")
             ]
             if len(matches) != 1:
@@ -337,6 +340,154 @@ class PlaywrightActionExecutor:
                 error_code="RAW_CDP_PREFLIGHT_ERROR",
             )
 
+    def _execute_platform_consent_over_raw_cdp(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        allowed_prompts = {
+            "我想要一份您的附件简历，您是否同意",
+            "我想要和您交换联系方式，您是否同意",
+        }
+        if command.platform != "BOSS" or command.content not in allowed_prompts:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_FINAL,
+                error_code="PLATFORM_CONSENT_NOT_ALLOWED",
+            )
+        selectors = self.config.platforms[command.platform]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches: list[str] = []
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(str(websocket_url)) as page:
+                    check = extract_current_page(
+                        page,
+                        Platform.BOSS,
+                        selectors,
+                        self.config.version,
+                    )
+                    if not _reply_target_matches(check, command):
+                        if not page.exists(selectors.conversation_list_root):
+                            continue
+                        if not self._open_approved_conversation(page, selectors, command):
+                            continue
+                        for _ in range(30):
+                            check = extract_current_page(
+                                page,
+                                Platform.BOSS,
+                                selectors,
+                                self.config.version,
+                            )
+                            if _reply_target_matches(check, command):
+                                break
+                            time.sleep(0.1)
+                        else:
+                            continue
+                    matches.append(str(websocket_url))
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code=(
+                        "APPROVED_TARGET_PAGE_NOT_FOUND"
+                        if not matches
+                        else "APPROVED_TARGET_PAGE_AMBIGUOUS"
+                    ),
+                )
+            return self._accept_platform_consent(matches[0], command)
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="RAW_CDP_PREFLIGHT_ERROR",
+            )
+
+    def _accept_platform_consent(
+        self,
+        websocket_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        performed = False
+        try:
+            with RawCdpPageReader(websocket_url) as page:
+                state = self._platform_consent_state(page, command.content or "")
+                if state == "ACCEPTED":
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.SUCCEEDED,
+                        observed_content=command.content,
+                    )
+                if state != "PENDING":
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="PLATFORM_CONSENT_CARD_NOT_FOUND",
+                    )
+                point = page._evaluate(
+                    "(() => {"
+                    f"const prompt={json.dumps(command.content)};"
+                    "const popovers=[...document.querySelectorAll('.respond-popover')];"
+                    "const popover=popovers.find(item => "
+                    "(item.innerText||'').includes(prompt));"
+                    "const agree=popover && [...popover.querySelectorAll('.btn-agree')]"
+                    ".find(item => item.getClientRects().length>0 "
+                    "&& (item.textContent||'').trim()==='同意');"
+                    "if(!agree)return null;const r=agree.getBoundingClientRect();"
+                    "return {x:r.x+r.width/2,y:r.y+r.height/2};"
+                    "})()"
+                )
+                if not isinstance(point, dict):
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="PLATFORM_CONSENT_BUTTON_NOT_READY",
+                    )
+                performed = True
+                self._trusted_click(page, point)
+                for _ in range(30):
+                    if self._platform_consent_state(page, command.content or "") == "ACCEPTED":
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.SUCCEEDED,
+                            evidence_hash=hashlib.sha256(
+                                f"{page.url}:{command.content}".encode()
+                            ).hexdigest(),
+                            observed_content=command.content,
+                        )
+                    time.sleep(0.1)
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="PLATFORM_CONSENT_RESULT_NOT_OBSERVED",
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=(
+                    ExecutionOutcome.OUTCOME_UNKNOWN
+                    if performed
+                    else ExecutionOutcome.FAILED_RETRYABLE
+                ),
+                error_code="RAW_CDP_ACTION_ERROR",
+            )
+
+    @staticmethod
+    def _platform_consent_state(
+        page: RawCdpPageReader,
+        prompt: str,
+    ) -> str:
+        result = page._evaluate(
+            "(() => {"
+            f"const prompt={json.dumps(prompt)};"
+            "const cards=[...document.querySelectorAll("
+            "'.message-dialog-both.message-card-wrap')];"
+            "const card=cards.find(item => "
+            "(item.querySelector('.message-card-top-title')?.textContent||'').trim()"
+            "===prompt);"
+            "if(!card)return 'MISSING';"
+            "const agree=[...card.querySelectorAll('.card-btn')].find(item => "
+            "(item.textContent||'').trim()==='同意');"
+            "return agree?.classList.contains('disabled')?'ACCEPTED':'PENDING';"
+            "})()"
+        )
+        return str(result)
+
     def _execute_reply_over_raw_cdp(
         self,
         cdp_url: str,
@@ -354,22 +505,16 @@ class PlaywrightActionExecutor:
                 if target.get("type") != "page" or not websocket_url:
                     continue
                 with RawCdpPageReader(websocket_url) as page:
-                    check = extract_current_page(
-                        page, platform, selectors, self.config.version
-                    )
+                    check = extract_current_page(page, platform, selectors, self.config.version)
                     if _reply_target_matches(check, command):
                         matches.append(str(websocket_url))
                         continue
                     if not page.exists(selectors.conversation_list_root):
                         continue
-                    if not self._open_approved_conversation(
-                        page, selectors, command
-                    ):
+                    if not self._open_approved_conversation(page, selectors, command):
                         continue
                     for _ in range(30):
-                        check = extract_current_page(
-                            page, platform, selectors, self.config.version
-                        )
+                        check = extract_current_page(page, platform, selectors, self.config.version)
                         if _reply_target_matches(check, command):
                             matches.append(str(websocket_url))
                             break
@@ -403,43 +548,45 @@ class PlaywrightActionExecutor:
         recruiter_selector = selectors.conversation_list_item_recruiter
         job_selector = selectors.conversation_list_item_job_title
         company_selector = selectors.conversation_list_item_company
-        return bool(page._evaluate(
-            "(() => {"
-            f"const items = [...document.querySelectorAll({json.dumps(item_selector)})];"
-            f"const expectedId = {json.dumps(command.conversation_key)};"
-            f"const expectedRecruiter = {json.dumps(command.recruiter)};"
-            f"const expectedJob = {json.dumps(command.job_title)};"
-            f"const expectedCompany = {json.dumps(command.company)};"
-            f"const idAttribute = {json.dumps(id_attribute)};"
-            f"const idJsonKey = {json.dumps(id_json_key)};"
-            f"const recruiterSelector = {json.dumps(recruiter_selector)};"
-            f"const jobSelector = {json.dumps(job_selector)};"
-            f"const companySelector = {json.dumps(company_selector)};"
-            "const visible = items.filter(item => item.getClientRects().length > 0);"
-            "let matches = visible.filter(item => {"
-            " const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim() || '';"
-            " if (recruiter !== expectedRecruiter) return false;"
-            " if (expectedId?.startsWith('derived:')) return true;"
-            " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
-            " if (!raw) return false;"
-            " if (!idJsonKey) return raw === expectedId;"
-            " try { return String(JSON.parse(raw)[idJsonKey]) === expectedId; }"
-            " catch { return false; }"
-            "});"
-            "if (matches.length > 1) {"
-            " const narrowed = matches.filter(item => {"
-            "  const job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
-            "  const company = item.querySelector(companySelector)?.textContent?.trim() || '';"
-            "  const jobMatches = !expectedJob || job.includes(expectedJob) || expectedJob.includes(job);"
-            "  const companyMatches = !expectedCompany || company.includes(expectedCompany) || expectedCompany.includes(company);"
-            "  return jobMatches && companyMatches;"
-            " });"
-            " if (narrowed.length === 1) matches = narrowed;"
-            "}"
-            "if (matches.length !== 1) return false;"
-            "matches[0].click(); return true;"
-            "})()"
-        ))
+        return bool(
+            page._evaluate(
+                "(() => {"
+                f"const items = [...document.querySelectorAll({json.dumps(item_selector)})];"
+                f"const expectedId = {json.dumps(command.conversation_key)};"
+                f"const expectedRecruiter = {json.dumps(command.recruiter)};"
+                f"const expectedJob = {json.dumps(command.job_title)};"
+                f"const expectedCompany = {json.dumps(command.company)};"
+                f"const idAttribute = {json.dumps(id_attribute)};"
+                f"const idJsonKey = {json.dumps(id_json_key)};"
+                f"const recruiterSelector = {json.dumps(recruiter_selector)};"
+                f"const jobSelector = {json.dumps(job_selector)};"
+                f"const companySelector = {json.dumps(company_selector)};"
+                "const visible = items.filter(item => item.getClientRects().length > 0);"
+                "let matches = visible.filter(item => {"
+                " const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim() || '';"
+                " if (recruiter !== expectedRecruiter) return false;"
+                " if (expectedId?.startsWith('derived:')) return true;"
+                " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
+                " if (!raw) return false;"
+                " if (!idJsonKey) return raw === expectedId;"
+                " try { return String(JSON.parse(raw)[idJsonKey]) === expectedId; }"
+                " catch { return false; }"
+                "});"
+                "if (matches.length > 1) {"
+                " const narrowed = matches.filter(item => {"
+                "  const job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
+                "  const company = item.querySelector(companySelector)?.textContent?.trim() || '';"
+                "  const jobMatches = !expectedJob || job.includes(expectedJob) || expectedJob.includes(job);"
+                "  const companyMatches = !expectedCompany || company.includes(expectedCompany) || expectedCompany.includes(company);"
+                "  return jobMatches && companyMatches;"
+                " });"
+                " if (narrowed.length === 1) matches = narrowed;"
+                "}"
+                "if (matches.length !== 1) return false;"
+                "matches[0].click(); return true;"
+                "})()"
+            )
+        )
 
     def _send_reply_on_raw_page(
         self,
@@ -567,9 +714,7 @@ class PlaywrightActionExecutor:
                 if target.get("type") != "page" or not websocket_url:
                     continue
                 with RawCdpPageReader(websocket_url) as page:
-                    check = extract_current_page(
-                        page, platform, selectors, self.config.version
-                    )
+                    check = extract_current_page(page, platform, selectors, self.config.version)
                 if (
                     check.status is SessionStatus.SESSION_READY
                     and check.conversation
@@ -591,12 +736,14 @@ class PlaywrightActionExecutor:
                     ),
                 )
             with RawCdpPageReader(matches[0]) as page:
-                observed = bool(page._evaluate(
-                    "Array.from(document.querySelectorAll("
-                    f"{json.dumps(selectors.sent_message_items)}"
-                    f")).some(item => (item.textContent || '').includes("
-                    f"{json.dumps(command.content)}))"
-                ))
+                observed = bool(
+                    page._evaluate(
+                        "Array.from(document.querySelectorAll("
+                        f"{json.dumps(selectors.sent_message_items)}"
+                        f")).some(item => (item.textContent || '').includes("
+                        f"{json.dumps(command.content)}))"
+                    )
+                )
                 if observed:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.SUCCEEDED,
@@ -818,10 +965,7 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_FINAL,
                         error_code="JOB_PAGE_REQUIRED",
                     )
-                if (
-                    command.external_job_id
-                    and check.job.external_job_id != command.external_job_id
-                ):
+                if command.external_job_id and check.job.external_job_id != command.external_job_id:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.FAILED_FINAL,
                         error_code="JOB_TARGET_MISMATCH",
@@ -865,9 +1009,7 @@ class PlaywrightActionExecutor:
                         evidence_hash=evidence,
                         observed_content=observed,
                     )
-                page.locator(selectors.message_composer).wait_for(
-                    state="visible", timeout=3000
-                )
+                page.locator(selectors.message_composer).wait_for(state="visible", timeout=3000)
                 page.locator(selectors.message_composer).fill(command.content)
                 page.locator(selectors.message_send_button).click()
                 page.wait_for_timeout(50)
@@ -915,9 +1057,7 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_FINAL, error_code="ATTACHMENT_MISSING"
                     )
                 page.locator(selectors.resume_trigger).click()
-                item = page.locator(selectors.resume_items).filter(
-                    has_text=command.attachment_name
-                )
+                item = page.locator(selectors.resume_items).filter(has_text=command.attachment_name)
                 if item.count() != 1:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.FAILED_FINAL,
@@ -938,9 +1078,7 @@ class PlaywrightActionExecutor:
                 f"{page.url}:{command.model_dump_json()}".encode()
             ).hexdigest()
             if matched.count():
-                return ExecutionResult(
-                    outcome=ExecutionOutcome.SUCCEEDED, evidence_hash=evidence
-                )
+                return ExecutionResult(outcome=ExecutionOutcome.SUCCEEDED, evidence_hash=evidence)
             return ExecutionResult(
                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                 error_code="RESULT_NOT_OBSERVED",

@@ -10,6 +10,8 @@
 - Web：React、TypeScript、Ant Design、Vite
 - Worker：通过 Playwright 连接本机已登录的 Chrome CDP 会话
 - LLM：默认使用智谱 `glm-5.2`
+- BOSS 入站卡片：匹配岗位的“索要附件简历”和“交换联系方式”请求直接同意，不调用
+  LLM；平台的“已查看简历”通知不会生成回复
 - 日历：macOS 默认使用 Apple Calendar
 - 回复路由：到岗、薪资、地点和工作模式优先使用规则，候选人经历优先使用知识库，
   其余消息才调用 LLM；消息中心展示每条最新草稿的回复来源

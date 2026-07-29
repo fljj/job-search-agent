@@ -67,11 +67,13 @@ def create_conversation(session: Session, payload: ConversationPayload) -> dict[
     ensure_default_user(session)
     if payload.job_id is not None:
         get_job_entity(session, payload.job_id)
-    existing = session.scalar(select(db.Conversation).where(
-        db.Conversation.user_id == DEFAULT_USER_ID,
-        db.Conversation.platform == payload.platform,
-        db.Conversation.external_conversation_id == payload.external_conversation_id,
-    ))
+    existing = session.scalar(
+        select(db.Conversation).where(
+            db.Conversation.user_id == DEFAULT_USER_ID,
+            db.Conversation.platform == payload.platform,
+            db.Conversation.external_conversation_id == payload.external_conversation_id,
+        )
+    )
     if existing:
         return _conversation_response(existing)
     conversation = db.Conversation(user_id=DEFAULT_USER_ID, **payload.model_dump())
@@ -112,14 +114,40 @@ def reopen_conversation(
     return _conversation_response(conversation)
 
 
-def import_message(session: Session, conversation_id: object, payload: MessagePayload) -> MessageResponse:
+IGNORED_PLATFORM_EVENTS = {
+    "对方已查看了您的附件简历",
+    "对方已查看您的附件简历",
+}
+
+
+def _is_ignored_platform_event(content: str) -> bool:
+    return content.strip() in IGNORED_PLATFORM_EVENTS
+
+
+def import_message(
+    session: Session, conversation_id: object, payload: MessagePayload
+) -> MessageResponse:
     conversation = _get_conversation(session, conversation_id)
-    existing = session.scalar(select(db.Message).where(
-        db.Message.conversation_id == conversation.id,
-        db.Message.external_message_id == payload.external_message_id,
-    ))
+    existing = session.scalar(
+        select(db.Message).where(
+            db.Message.conversation_id == conversation.id,
+            db.Message.external_message_id == payload.external_message_id,
+        )
+    )
     if existing:
         return _message_response(existing)
+    if _is_ignored_platform_event(payload.content):
+        message = db.Message(
+            conversation_id=conversation.id,
+            direction="INBOUND",
+            intents=[],
+            status="PLATFORM_EVENT_IGNORED",
+            **payload.model_dump(),
+        )
+        session.add(message)
+        session.commit()
+        session.refresh(message)
+        return _message_response(message)
     previous = session.scalars(
         select(db.Message).where(
             db.Message.conversation_id == conversation.id,
@@ -133,8 +161,12 @@ def import_message(session: Session, conversation_id: object, payload: MessagePa
     for item in previous:
         item.status = "SUPERSEDED"
     intents = classify_intents(payload.content)
-    message = db.Message(conversation_id=conversation.id, direction="INBOUND",
-                         intents=[intent.value for intent in intents], **payload.model_dump())
+    message = db.Message(
+        conversation_id=conversation.id,
+        direction="INBOUND",
+        intents=[intent.value for intent in intents],
+        **payload.model_dump(),
+    )
     session.add(message)
     session.flush()
     refresh_qualification(session, conversation, message=message)
@@ -151,11 +183,7 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
     ).all()
     items: list[dict[str, object]] = []
     for conversation in conversations:
-        job = (
-            session.get(db.Job, conversation.job_id)
-            if conversation.job_id
-            else None
-        )
+        job = session.get(db.Job, conversation.job_id) if conversation.job_id else None
         score = (
             session.get(db.JobScore, conversation.latest_job_score_id)
             if conversation.latest_job_score_id
@@ -201,24 +229,16 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
                 "qualification_status": conversation.qualification_status,
                 "qualification_evidence": conversation.qualification_evidence,
                 "qualification_version": conversation.qualification_version,
-                "company_name": (
-                    job.company_name
-                    if job
-                    else conversation.observed_company_name
-                ),
+                "company_name": (job.company_name if job else conversation.observed_company_name),
                 "job_id": conversation.job_id,
-                "job_title": (
-                    job.title if job else conversation.observed_job_title
-                ),
+                "job_title": (job.title if job else conversation.observed_job_title),
                 "strategy_id": conversation.strategy_id,
                 "latest_score": score.total_score if score else None,
                 "latest_grade": score.grade if score else None,
                 "latest_draft_type": draft.draft_type if draft else None,
                 "latest_draft_content": draft.content if draft else None,
                 "latest_reply_source": draft.reply_source if draft else None,
-                "latest_draft_decision": (
-                    draft_decision.decision if draft_decision else None
-                ),
+                "latest_draft_decision": (draft_decision.decision if draft_decision else None),
                 "latest_draft_reason_codes": (
                     draft_decision.reason_codes if draft_decision else []
                 ),
@@ -251,9 +271,7 @@ def create_reply_draft(
             _knowledge_versions(session),
         )
         existing = session.scalar(
-            select(db.GeneratedDraft).where(
-                db.GeneratedDraft.input_fingerprint == fingerprint
-            )
+            select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
         )
         if existing:
             return _draft_response(session, existing)
@@ -279,9 +297,7 @@ def create_reply_draft(
             _knowledge_versions(session),
         )
         existing = session.scalar(
-            select(db.GeneratedDraft).where(
-                db.GeneratedDraft.input_fingerprint == fingerprint
-            )
+            select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
         )
         if existing:
             return _draft_response(session, existing)
@@ -306,9 +322,7 @@ def create_reply_draft(
             reply_source=ReplySource.RULE_TEMPLATE,
         )
     strategy = (
-        session.get(db.JobStrategy, conversation.strategy_id)
-        if conversation.strategy_id
-        else None
+        session.get(db.JobStrategy, conversation.strategy_id) if conversation.strategy_id else None
     )
     route = route_reply(
         message.content,
@@ -324,9 +338,7 @@ def create_reply_draft(
             _knowledge_versions(session),
         )
         existing = session.scalar(
-            select(db.GeneratedDraft).where(
-                db.GeneratedDraft.input_fingerprint == fingerprint
-            )
+            select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
         )
         if existing:
             return _draft_response(session, existing)
@@ -348,9 +360,7 @@ def create_reply_draft(
             conversation.qualification_version,
         )
         existing = session.scalar(
-            select(db.GeneratedDraft).where(
-                db.GeneratedDraft.input_fingerprint == fingerprint
-            )
+            select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
         )
         if existing:
             return _draft_response(session, existing)
@@ -391,7 +401,9 @@ def create_reply_draft(
         conversation.qualification_version,
         _knowledge_versions(session),
     )
-    existing = session.scalar(select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint))
+    existing = session.scalar(
+        select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
+    )
     if existing:
         return _draft_response(session, existing)
     reply_source = ReplySource.LLM
@@ -443,7 +455,9 @@ def create_greeting_draft(
         _knowledge_versions(session),
         profile.version,
     )
-    existing = session.scalar(select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint))
+    existing = session.scalar(
+        select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
+    )
     if existing:
         return _draft_response(session, existing)
     llm_provider = provider or build_llm_provider(get_settings())
@@ -452,8 +466,7 @@ def create_greeting_draft(
         parsed.required_skills + parsed.preferred_skills,
     )
     facts = profile_facts + [
-        fact for fact in _knowledge_facts(session)
-        if fact.category.upper() != "EDUCATION"
+        fact for fact in _knowledge_facts(session) if fact.category.upper() != "EDUCATION"
     ]
     usable = [
         fact
@@ -474,11 +487,7 @@ def create_greeting_draft(
                 company_name=job.company_name,
                 job_title=job.title,
                 matched_skills=[fact.fact for fact in profile_facts[1:5]],
-                facts=[
-                    TrustedFact(id=fact.id, content=fact.fact)
-                    for fact in usable
-                    if fact.id
-                ],
+                facts=[TrustedFact(id=fact.id, content=fact.fact) for fact in usable if fact.id],
             )
         ),
     ).data
@@ -489,15 +498,17 @@ def create_greeting_draft(
         get_conversation_policy(),
         now=datetime.now(UTC),
     )
-    if (
-        score.hard_rejected
-        or score.effective_job_status != "OPEN"
-        or not score.automation_eligible
-    ):
+    if score.hard_rejected or score.effective_job_status != "OPEN" or not score.automation_eligible:
         result.decision = Decision.DENY
         result.reason_codes = ["JOB_NOT_ELIGIBLE_OR_OPEN"]
     return _persist_draft(
-        session, result, fingerprint, "GREETING", None, None, score.id,
+        session,
+        result,
+        fingerprint,
+        "GREETING",
+        None,
+        None,
+        score.id,
         reply_source=ReplySource.LLM,
     )
 
@@ -568,11 +579,13 @@ def create_resume_draft(
     valid_message_ids = {item.id for item in messages}
     evidence_valid = has_valid_conversation_evidence(evaluation, valid_message_ids)
     resumes = session.scalars(
-        select(db.Resume).where(
+        select(db.Resume)
+        .where(
             db.Resume.user_id == DEFAULT_USER_ID,
             db.Resume.platform == conversation.platform,
             db.Resume.is_available.is_(True),
-        ).order_by(db.Resume.created_at.asc(), db.Resume.id.asc())
+        )
+        .order_by(db.Resume.created_at.asc(), db.Resume.id.asc())
     ).all()
     selected = select_default_resume(
         [
@@ -639,9 +652,7 @@ def create_resume_draft(
         resume_id=selected.id if selected else None,
         decision_metadata={
             "authorization_basis": authorization_basis,
-            "evidence_message_ids": [
-                str(item) for item in evaluation.evidence_message_ids
-            ],
+            "evidence_message_ids": [str(item) for item in evaluation.evidence_message_ids],
             "qualification": {
                 "status": qualification.value,
                 "evidence": qualification_evidence,
@@ -656,9 +667,7 @@ def edit_draft(session: Session, draft_id: object, content: str) -> DraftRespons
     original = session.get(db.GeneratedDraft, draft_id)
     if original is None or original.user_id != DEFAULT_USER_ID:
         raise ResourceNotFoundError("草稿不存在")
-    if session.scalar(
-        select(db.ActionQueue.id).where(db.ActionQueue.draft_id == original.id)
-    ):
+    if session.scalar(select(db.ActionQueue.id).where(db.ActionQueue.draft_id == original.id)):
         raise ValueError("草稿已经创建动作，不能直接修改")
     risks = validate_edited_content(content)
     if risks:
@@ -673,9 +682,7 @@ def edit_draft(session: Session, draft_id: object, content: str) -> DraftRespons
         raise RuntimeError("草稿缺少策略决策")
     fingerprint = _fingerprint("USER_EDIT", original.id, content)
     existing = session.scalar(
-        select(db.GeneratedDraft).where(
-            db.GeneratedDraft.input_fingerprint == fingerprint
-        )
+        select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
     )
     if existing:
         return _draft_response(session, existing)
@@ -712,13 +719,13 @@ def edit_draft(session: Session, draft_id: object, content: str) -> DraftRespons
     session.flush()
     if decision.decision == Decision.REQUIRE_CONFIRMATION.value:
         policy = get_conversation_policy()
-        session.add(db.ConfirmationTask(
-            user_id=DEFAULT_USER_ID,
-            decision_id=decision.id,
-            expires_at=datetime.now(UTC) + timedelta(
-                hours=policy.confirmation_ttl_hours
-            ),
-        ))
+        session.add(
+            db.ConfirmationTask(
+                user_id=DEFAULT_USER_ID,
+                decision_id=decision.id,
+                expires_at=datetime.now(UTC) + timedelta(hours=policy.confirmation_ttl_hours),
+            )
+        )
     prior_tasks = session.scalars(
         select(db.ConfirmationTask)
         .join(db.PolicyDecision, db.PolicyDecision.id == db.ConfirmationTask.decision_id)
@@ -729,63 +736,88 @@ def edit_draft(session: Session, draft_id: object, content: str) -> DraftRespons
     ).all()
     for task in prior_tasks:
         task.status = "SUPERSEDED"
-    session.add(db.AuditEvent(
-        user_id=DEFAULT_USER_ID,
-        actor_type="USER",
-        event_type="DRAFT_EDITED",
-        entity_type="draft",
-        entity_id=edited.id,
-        before_state="DRAFT",
-        after_state="DRAFT",
-        reason_codes=["USER_EDIT_REVALIDATED"],
-        metadata_json={"supersedes_draft_id": str(original.id)},
-        correlation_id=str(edited.id),
-    ))
+    session.add(
+        db.AuditEvent(
+            user_id=DEFAULT_USER_ID,
+            actor_type="USER",
+            event_type="DRAFT_EDITED",
+            entity_type="draft",
+            entity_id=edited.id,
+            before_state="DRAFT",
+            after_state="DRAFT",
+            reason_codes=["USER_EDIT_REVALIDATED"],
+            metadata_json={"supersedes_draft_id": str(original.id)},
+            correlation_id=str(edited.id),
+        )
+    )
     session.commit()
     session.refresh(edited)
     return _draft_response(session, edited)
 
 
 def list_confirmation_tasks(session: Session) -> list[dict[str, object]]:
-    rows = session.scalars(select(db.ConfirmationTask).where(
-        db.ConfirmationTask.user_id == DEFAULT_USER_ID
-    ).order_by(db.ConfirmationTask.created_at.desc())).all()
+    rows = session.scalars(
+        select(db.ConfirmationTask)
+        .where(db.ConfirmationTask.user_id == DEFAULT_USER_ID)
+        .order_by(db.ConfirmationTask.created_at.desc())
+    ).all()
     result: list[dict[str, object]] = []
     for task in rows:
         decision = session.get(db.PolicyDecision, task.decision_id)
         if decision is None:
             continue
         draft = session.get(db.GeneratedDraft, decision.draft_id)
-        result.append({"id": task.id, "status": task.status, "decision_id": decision.id,
-                       "action_type": decision.action_type, "reason_codes": decision.reason_codes,
-                       "draft_id": draft.id if draft else None,
-                       "content": draft.content if draft else None,
-                       "confidence": float(draft.confidence) if draft else None})
+        result.append(
+            {
+                "id": task.id,
+                "status": task.status,
+                "decision_id": decision.id,
+                "action_type": decision.action_type,
+                "reason_codes": decision.reason_codes,
+                "draft_id": draft.id if draft else None,
+                "content": draft.content if draft else None,
+                "confidence": float(draft.confidence) if draft else None,
+            }
+        )
     return result
 
 
 def _persist_draft(
-    session: Session, result: DraftResult, fingerprint: str, draft_type: str,
-    conversation_id: object | None, message_id: object | None, score_id: object | None,
+    session: Session,
+    result: DraftResult,
+    fingerprint: str,
+    draft_type: str,
+    conversation_id: object | None,
+    message_id: object | None,
+    score_id: object | None,
     resume_id: object | None = None,
     decision_metadata: dict[str, object] | None = None,
     reply_source: ReplySource = ReplySource.LLM,
 ) -> DraftResponse:
     draft = db.GeneratedDraft(
-        user_id=DEFAULT_USER_ID, conversation_id=conversation_id, message_id=message_id,
-        job_score_id=score_id, draft_type=draft_type, content=result.content,
+        user_id=DEFAULT_USER_ID,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        job_score_id=score_id,
+        draft_type=draft_type,
+        content=result.content,
         intents=[intent.value for intent in result.intents],
-        fact_ids=[str(item) for item in result.fact_ids], confidence=Decimal(str(result.confidence)),
-        risk_codes=result.risk_codes, input_fingerprint=fingerprint,
+        fact_ids=[str(item) for item in result.fact_ids],
+        confidence=Decimal(str(result.confidence)),
+        risk_codes=result.risk_codes,
+        input_fingerprint=fingerprint,
         generator_version=GENERATOR_VERSION,
         reply_source=reply_source.value,
     )
     session.add(draft)
     session.flush()
     decision = db.PolicyDecision(
-        user_id=DEFAULT_USER_ID, draft_id=draft.id, action_type=draft_type,
+        user_id=DEFAULT_USER_ID,
+        draft_id=draft.id,
+        action_type=draft_type,
         decision=result.decision.value if hasattr(result.decision, "value") else result.decision,
-        reason_codes=result.reason_codes, policy_version=POLICY_VERSION,
+        reason_codes=result.reason_codes,
+        policy_version=POLICY_VERSION,
         input_snapshot={
             "intents": [item.value for item in result.intents],
             "fact_ids": [str(item) for item in result.fact_ids],
@@ -799,42 +831,66 @@ def _persist_draft(
     session.flush()
     if decision.decision == "REQUIRE_CONFIRMATION":
         policy = get_conversation_policy()
-        session.add(db.ConfirmationTask(
-            user_id=DEFAULT_USER_ID,
-            decision_id=decision.id,
-            expires_at=datetime.now(UTC) + timedelta(hours=policy.confirmation_ttl_hours),
-        ))
+        session.add(
+            db.ConfirmationTask(
+                user_id=DEFAULT_USER_ID,
+                decision_id=decision.id,
+                expires_at=datetime.now(UTC) + timedelta(hours=policy.confirmation_ttl_hours),
+            )
+        )
     session.commit()
     session.refresh(draft)
     return _draft_response(session, draft)
 
 
 def _draft_response(session: Session, draft: db.GeneratedDraft) -> DraftResponse:
-    decision = session.scalar(select(db.PolicyDecision).where(
-        db.PolicyDecision.draft_id == draft.id
-    ).order_by(db.PolicyDecision.created_at.asc()).limit(1))
+    decision = session.scalar(
+        select(db.PolicyDecision)
+        .where(db.PolicyDecision.draft_id == draft.id)
+        .order_by(db.PolicyDecision.created_at.asc())
+        .limit(1)
+    )
     if decision is None:
         raise RuntimeError("草稿缺少策略决策")
-    task = session.scalar(select(db.ConfirmationTask).where(db.ConfirmationTask.decision_id == decision.id))
-    return DraftResponse(id=draft.id, draft_type=draft.draft_type, content=draft.content,
-                         reply_source=draft.reply_source,
-                         intents=draft.intents, fact_ids=draft.fact_ids,
-                         confidence=float(draft.confidence), risk_codes=draft.risk_codes,
-                         decision=decision.decision, reason_codes=decision.reason_codes,
-                         confirmation_task_id=task.id if task else None,
-                         resume_id=(
-                             decision.input_snapshot.get("resume_id")
-                             if decision.input_snapshot.get("resume_id")
-                             else None
-                         ))
+    task = session.scalar(
+        select(db.ConfirmationTask).where(db.ConfirmationTask.decision_id == decision.id)
+    )
+    return DraftResponse(
+        id=draft.id,
+        draft_type=draft.draft_type,
+        content=draft.content,
+        reply_source=draft.reply_source,
+        intents=draft.intents,
+        fact_ids=draft.fact_ids,
+        confidence=float(draft.confidence),
+        risk_codes=draft.risk_codes,
+        decision=decision.decision,
+        reason_codes=decision.reason_codes,
+        confirmation_task_id=task.id if task else None,
+        resume_id=(
+            decision.input_snapshot.get("resume_id")
+            if decision.input_snapshot.get("resume_id")
+            else None
+        ),
+    )
 
 
 def _knowledge_facts(session: Session) -> list[KnowledgeFact]:
-    return [KnowledgeFact(id=item.id, category=item.category, key=item.key, fact=item.fact,
-                          source=item.source, allowed_for_auto_reply=item.allowed_for_auto_reply,
-                          sensitivity=item.sensitivity, verified_at=item.verified_at,
-                          valid_until=item.valid_until, version=item.version)
-            for item in get_knowledge_entities(session)]
+    return [
+        KnowledgeFact(
+            id=item.id,
+            category=item.category,
+            key=item.key,
+            fact=item.fact,
+            source=item.source,
+            allowed_for_auto_reply=item.allowed_for_auto_reply,
+            sensitivity=item.sensitivity,
+            verified_at=item.verified_at,
+            valid_until=item.valid_until,
+            version=item.version,
+        )
+        for item in get_knowledge_entities(session)
+    ]
 
 
 def _knowledge_versions(session: Session) -> list[tuple[str, int]]:
@@ -846,12 +902,11 @@ def _reply_route_context(
     strategy: db.JobStrategy | None,
 ) -> ReplyRouteContext:
     profile = session.scalar(
-        select(db.CandidateProfile).where(
-            db.CandidateProfile.user_id == DEFAULT_USER_ID
-        )
+        select(db.CandidateProfile).where(db.CandidateProfile.user_id == DEFAULT_USER_ID)
     )
     facts = [
-        fact for fact in _knowledge_facts(session)
+        fact
+        for fact in _knowledge_facts(session)
         if fact.allowed_for_auto_reply
         and fact.sensitivity.value == "NORMAL"
         and fact.is_current(datetime.now(UTC))
@@ -895,11 +950,7 @@ def _reply_route_context(
             if rule.enabled and rule.work_mode == "ONSITE"
             for location in rule.locations
         ],
-        enabled_work_modes=[
-            rule.work_mode
-            for rule in strategy.work_mode_rules
-            if rule.enabled
-        ],
+        enabled_work_modes=[rule.work_mode for rule in strategy.work_mode_rules if rule.enabled],
         candidate_knowledge=candidate_knowledge,
     )
 
@@ -910,9 +961,7 @@ def _reply_context(
     score: db.JobScore,
     strategy: db.JobStrategy,
 ) -> ReplyContext:
-    enabled_modes = [
-        item.work_mode for item in strategy.work_mode_rules if item.enabled
-    ]
+    enabled_modes = [item.work_mode for item in strategy.work_mode_rules if item.enabled]
     onsite_locations = [
         location.location_name
         for item in strategy.work_mode_rules
@@ -1018,8 +1067,7 @@ def _profile_facts(
 def _safe_job_detail_clarification() -> DraftResult:
     return DraftResult(
         content=(
-            "感谢联系，这个方向与我目前考虑的大致一致。"
-            "方便补充一下岗位职责、技术重点和薪资范围吗？"
+            "感谢联系，这个方向与我目前考虑的大致一致。方便补充一下岗位职责、技术重点和薪资范围吗？"
         ),
         intents=[Intent.JOB_DETAIL],
         confidence=1,
@@ -1053,11 +1101,8 @@ def _build_scored_reply(
     profile = session.get(db.CandidateProfile, score.candidate_profile_id)
     if strategy is None or profile is None:
         raise ValueError("回复上下文缺少策略或候选人资料")
-    facts = _profile_facts(
-        profile, parsed.required_skills + parsed.preferred_skills
-    ) + [
-        fact for fact in _knowledge_facts(session)
-        if fact.category.upper() != "EDUCATION"
+    facts = _profile_facts(profile, parsed.required_skills + parsed.preferred_skills) + [
+        fact for fact in _knowledge_facts(session) if fact.category.upper() != "EDUCATION"
     ]
     recent = session.scalars(
         select(db.Message)
@@ -1078,9 +1123,7 @@ def _build_scored_reply(
             )
         ),
     ).data
-    classification.intents = normalize_intents(
-        message.content, classification.intents
-    )
+    classification.intents = normalize_intents(message.content, classification.intents)
     message.intents = [intent.value for intent in classification.intents]
     usable = [
         fact
@@ -1091,9 +1134,7 @@ def _build_scored_reply(
         and fact.is_current(datetime.now(UTC))
     ][:20]
     generated: GeneratedMessage | None = None
-    if usable and not {"SENSITIVE", "INTERVIEW_TIME"}.intersection(
-        message.intents
-    ):
+    if usable and not {"SENSITIVE", "INTERVIEW_TIME"}.intersection(message.intents):
         generated = _call_llm(
             session,
             provider,
@@ -1105,9 +1146,7 @@ def _build_scored_reply(
                     incoming_message=message.content,
                     recent_messages=[item.content for item in reversed(recent)],
                     facts=[
-                        TrustedFact(id=fact.id, content=fact.fact)
-                        for fact in usable
-                        if fact.id
+                        TrustedFact(id=fact.id, content=fact.fact) for fact in usable if fact.id
                     ],
                     context=_reply_context(job, parsed, score, strategy),
                 )
@@ -1130,9 +1169,7 @@ def _full_time_education_reply(
     if not any(term in message.content for term in inquiry_terms):
         return None
     profile = session.scalar(
-        select(db.CandidateProfile).where(
-            db.CandidateProfile.user_id == DEFAULT_USER_ID
-        )
+        select(db.CandidateProfile).where(db.CandidateProfile.user_id == DEFAULT_USER_ID)
     )
     if profile is None or profile.bachelor_full_time is not False:
         return None
@@ -1298,21 +1335,29 @@ def _get_conversation(session: Session, conversation_id: object) -> db.Conversat
 
 
 def _conversation_response(conversation: db.Conversation) -> dict[str, object]:
-    return {"id": conversation.id, "job_id": conversation.job_id,
-            "strategy_id": conversation.strategy_id,
-            "latest_job_score_id": conversation.latest_job_score_id,
-            "observed_company_name": conversation.observed_company_name,
-            "observed_job_title": conversation.observed_job_title,
-            "observed_external_job_id": conversation.observed_external_job_id,
-            "qualification_status": conversation.qualification_status,
-            "qualification_evidence": conversation.qualification_evidence,
-            "qualification_version": conversation.qualification_version,
-            "platform": conversation.platform,
-            "external_conversation_id": conversation.external_conversation_id,
-            "recruiter_name": conversation.recruiter_name, "state": conversation.state}
+    return {
+        "id": conversation.id,
+        "job_id": conversation.job_id,
+        "strategy_id": conversation.strategy_id,
+        "latest_job_score_id": conversation.latest_job_score_id,
+        "observed_company_name": conversation.observed_company_name,
+        "observed_job_title": conversation.observed_job_title,
+        "observed_external_job_id": conversation.observed_external_job_id,
+        "qualification_status": conversation.qualification_status,
+        "qualification_evidence": conversation.qualification_evidence,
+        "qualification_version": conversation.qualification_version,
+        "platform": conversation.platform,
+        "external_conversation_id": conversation.external_conversation_id,
+        "recruiter_name": conversation.recruiter_name,
+        "state": conversation.state,
+    }
 
 
 def _message_response(message: db.Message) -> MessageResponse:
-    return MessageResponse(id=message.id, conversation_id=message.conversation_id,
-                           external_message_id=message.external_message_id,
-                           content=message.content, intents=message.intents)
+    return MessageResponse(
+        id=message.id,
+        conversation_id=message.conversation_id,
+        external_message_id=message.external_message_id,
+        content=message.content,
+        intents=message.intents,
+    )

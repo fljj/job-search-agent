@@ -30,6 +30,18 @@ class MessageDirection(StrEnum):
     OUTBOUND = "OUTBOUND"
 
 
+class PlatformConsentType(StrEnum):
+    RESUME = "RESUME"
+    CONTACT = "CONTACT"
+
+
+class BrowserPlatformConsent(BaseModel):
+    external_consent_id: str
+    consent_type: PlatformConsentType
+    prompt: str
+    pending: bool
+
+
 class BrowserJobSummary(BaseModel):
     external_job_id: str
     title: str
@@ -77,6 +89,7 @@ class BrowserConversation(BaseModel):
     company_name: str | None = None
     external_job_id: str | None = None
     messages: list[BrowserMessage] = Field(default_factory=list)
+    platform_consents: list[BrowserPlatformConsent] = Field(default_factory=list)
 
 
 class ReadResult(BaseModel):
