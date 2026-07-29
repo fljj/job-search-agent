@@ -90,6 +90,41 @@ def test_new_message_can_correct_stale_job_direction() -> None:
     assert status is QualificationStatus.ROUGH_MATCH
 
 
+def test_java_technology_evidence_matches_nonstandard_job_title() -> None:
+    status, evidence = evaluate_qualification(
+        context(
+            job_title="AI应用开发工程师（JAVA）",
+            description="负责 AI 应用开发，使用 SpringBoot、Spring Cloud 和 JVM",
+        )
+    )
+
+    assert status is QualificationStatus.FULL_MATCH
+    assert evidence == ["FULL_JOB_CONTEXT_AVAILABLE"]
+
+
+def test_java_in_description_matches_generic_system_development_title() -> None:
+    status, _ = evaluate_qualification(
+        context(
+            job_title="银行系统开发",
+            description="负责银行系统的 Java 服务端与 SpringBoot 微服务开发",
+        )
+    )
+
+    assert status is QualificationStatus.FULL_MATCH
+
+
+def test_java_does_not_match_javascript_direction() -> None:
+    status, evidence = evaluate_qualification(
+        context(
+            job_title="JavaScript前端工程师",
+            description="负责 React 前端开发",
+        )
+    )
+
+    assert status is QualificationStatus.MISMATCH
+    assert evidence == ["JOB_DIRECTION_CONFLICT"]
+
+
 def test_hybrid_location_and_yuan_salary_are_checked() -> None:
     assert (
         evaluate_qualification(

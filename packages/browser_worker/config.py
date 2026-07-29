@@ -38,6 +38,7 @@ class PlatformSelectors(BaseModel):
     conversation_list_item_job_id_attribute: str
     conversation_list_item_last_message_id_attribute: str
     conversation_list_item_last_message: str | None = None
+    conversation_list_item_last_message_time: str | None = None
     conversation_list_requires_last_message_id: bool = False
     conversation_list_item_category_attribute: str
     conversation_root: str

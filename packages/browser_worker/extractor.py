@@ -174,11 +174,21 @@ def _extract_conversation_list(
             if selectors.conversation_list_item_last_message
             else None
         )
+        last_message_time_text = (
+            element.text(selectors.conversation_list_item_last_message_time)
+            if selectors.conversation_list_item_last_message_time
+            else None
+        )
         last_message_id = element.attribute(
             "", selectors.conversation_list_item_last_message_id_attribute
         )
-        if not last_message_id and last_message_text:
-            last_message_id = _hash(f"{external_id}:{last_message_text}")
+        if not last_message_id and (
+            last_message_text or last_message_time_text
+        ):
+            last_message_id = _hash(
+                f"{external_id}:{last_message_time_text or ''}:"
+                f"{last_message_text or ''}"
+            )
         if (
             selectors.conversation_list_requires_last_message_id
             and not last_message_id
@@ -202,6 +212,7 @@ def _extract_conversation_list(
             ),
             last_message_id=last_message_id,
             last_message_text=last_message_text,
+            last_message_time_text=last_message_time_text,
             category=(
                 element.attribute(
                     "", selectors.conversation_list_item_category_attribute

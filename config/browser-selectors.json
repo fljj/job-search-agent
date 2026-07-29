@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-26-v10",
+  "version": "2026-07-29-v11",
   "platforms": {
     "BOSS": {
       "allowed_hosts": ["www.zhipin.com", "m.zhipin.com"],
@@ -37,7 +37,8 @@
       "conversation_list_item_unread_selector": ".badge-count, .unread-count",
       "conversation_list_item_job_id_attribute": "data-job-id",
       "conversation_list_item_last_message_id_attribute": "data-last-message-id",
-      "conversation_list_item_last_message": "[data-testid='last-message'], .last-message",
+      "conversation_list_item_last_message": "[data-testid='last-message'], .last-msg-text",
+      "conversation_list_item_last_message_time": ".time",
       "conversation_list_requires_last_message_id": false,
       "conversation_list_item_category_attribute": "data-category",
       "conversation_root": "[data-testid='chat-panel'], .chat-conversation",

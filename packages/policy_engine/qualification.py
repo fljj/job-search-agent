@@ -1,3 +1,4 @@
+import re
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -87,15 +88,11 @@ def evaluate_qualification(
             return QualificationStatus.MISMATCH, ["SALARY_CONFLICT"]
     structured_direction_known = bool(
         context.job_title
-        and (
-            not context.accepted_directions
-            or any(
-                direction.casefold().replace(" ", "")
-                in context.job_title.casefold().replace(" ", "")
-                or context.job_title.casefold().replace(" ", "")
-                in direction.casefold().replace(" ", "")
-                for direction in context.accepted_directions
-            )
+        and _matches_accepted_direction(
+            context.job_title,
+            context.description,
+            context.accepted_directions,
+            context.related_direction_keywords,
         )
     )
     normalized_message = context.message_text.casefold().replace(" ", "")
@@ -128,3 +125,43 @@ def evaluate_qualification(
     if complete and structured_direction_known:
         return QualificationStatus.FULL_MATCH, ["FULL_JOB_CONTEXT_AVAILABLE"]
     return QualificationStatus.ROUGH_MATCH, ["RELATED_DIRECTION_WITHOUT_CONFLICT"]
+
+
+def _matches_accepted_direction(
+    job_title: str,
+    description: str | None,
+    accepted_directions: list[str],
+    related_direction_keywords: list[str],
+) -> bool:
+    if not accepted_directions:
+        return True
+    normalized_title = job_title.casefold().replace(" ", "")
+    if any(
+        direction.casefold().replace(" ", "") in normalized_title
+        or normalized_title in direction.casefold().replace(" ", "")
+        for direction in accepted_directions
+    ):
+        return True
+
+    # “AI应用开发工程师（JAVA）”与“Java后端”等写法没有完整子串关系，
+    # 但标题或 JD 中明确出现相同技术方向时，不能判定为方向冲突。
+    title_terms = set(re.findall(r"[a-z][a-z0-9+#.-]*", job_title.casefold()))
+    accepted_terms = {
+        term
+        for direction in accepted_directions
+        for term in re.findall(r"[a-z][a-z0-9+#.-]*", direction.casefold())
+    }
+    if title_terms & accepted_terms:
+        return True
+
+    normalized_title_with_spaces = job_title.casefold().replace(" ", "")
+    title_is_related = any(
+        keyword.casefold().replace(" ", "") in normalized_title_with_spaces
+        for keyword in related_direction_keywords
+    )
+    if not title_is_related or not description:
+        return False
+    description_terms = set(
+        re.findall(r"[a-z][a-z0-9+#.-]*", description.casefold())
+    )
+    return bool(description_terms & accepted_terms)

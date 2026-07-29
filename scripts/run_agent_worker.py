@@ -140,15 +140,26 @@ def _discover_messages(
     cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
     raw_position = cursor.get("scroll_position")
     raw_seen = cursor.get("seen_message_keys")
+    terminal_conversation_ids = list(
+        session.scalars(
+            select(db.Conversation.external_conversation_id).where(
+                db.Conversation.platform == run.platform,
+                db.Conversation.state.in_(
+                    ["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]
+                ),
+            )
+        ).all()
+    )
     try:
         batch = adapter.scan(
             cdp_url,
-        partition="ALL",
+            partition="ALL",
             scroll_position=raw_position if isinstance(raw_position, int) else 0,
             seen_message_keys=[
                 str(item)
                 for item in (raw_seen if isinstance(raw_seen, list) else [])
             ],
+            excluded_conversation_ids=terminal_conversation_ids,
             limit=get_settings().agent_tick_batch_size,
         )
     except (OSError, TimeoutError, ValueError):

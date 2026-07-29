@@ -59,6 +59,7 @@ class MessageDiscoveryAdapter:
         partition: str = "UNREAD",
         scroll_position: int = 0,
         seen_message_keys: list[str] | None = None,
+        excluded_conversation_ids: list[str] | None = None,
         limit: int = 20,
     ) -> MessageDiscoveryBatch:
         validate_local_cdp_url(cdp_url)
@@ -67,6 +68,7 @@ class MessageDiscoveryAdapter:
             for key in (seen_message_keys or [])
             if not key.endswith(":UNKNOWN")
         ]
+        excluded = set(excluded_conversation_ids or [])
         websocket_url = self._find_list_target(cdp_url)
         with RawCdpPageReader(websocket_url) as page:
             listing = extract_conversation_list(
@@ -80,6 +82,7 @@ class MessageDiscoveryAdapter:
                 for item in listing.conversations
                 if _matches_partition(item, partition)
                 and self._include_summary(item)
+                and item.external_conversation_id not in excluded
             ]
             candidates = select_discovery_candidates(
                 eligible,

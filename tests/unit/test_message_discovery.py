@@ -19,12 +19,14 @@ from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.models import entities as db
 from apps.api.app.services.message_discovery_service import (
     _next_seen_message_keys,
+    _terminal_state_from_messages,
     record_ready_platform_session,
 )
 from packages.browser_worker.models import (
     BrowserConversation,
     BrowserConversationSummary,
     BrowserMessage,
+    MessageDirection,
     PageType,
     Platform,
     ReadResult,
@@ -327,7 +329,7 @@ def test_unstable_conversations_are_rechecked_after_full_scan_cooldown() -> None
 
     seen, rescanned_at = _next_seen_message_keys(
         batch,
-        {"unstable_rescan_at": (now - timedelta(minutes=6)).isoformat()},
+        {"unstable_rescan_at": (now - timedelta(minutes=61)).isoformat()},
         now,
     )
 
@@ -355,6 +357,42 @@ def test_unstable_conversations_are_not_reopened_every_scan_cycle() -> None:
 
     assert seen == ["unstable:conversation"]
     assert rescanned_at == last_rescan
+
+
+def test_explicit_rejection_terminates_conversation_by_direction() -> None:
+    now = datetime.now(UTC)
+    outbound = BrowserMessage(
+        external_message_id="outbound-decline",
+        content="综合考虑后，这次先不继续沟通了，祝招聘顺利。",
+        received_at=now,
+        direction=MessageDirection.OUTBOUND,
+    )
+    inbound = BrowserMessage(
+        external_message_id="inbound-decline",
+        content="您的经历与岗位不太匹配，这次先不推进了。",
+        received_at=now,
+        direction=MessageDirection.INBOUND,
+    )
+
+    assert _terminal_state_from_messages([outbound]) == (
+        "DECLINED",
+        "CANDIDATE_EXPLICITLY_DECLINED",
+    )
+    assert _terminal_state_from_messages([inbound]) == (
+        "ENDED",
+        "RECRUITER_EXPLICITLY_DECLINED",
+    )
+
+
+def test_rejection_question_does_not_terminate_conversation() -> None:
+    message = BrowserMessage(
+        external_message_id="question",
+        content="您觉得这个工作地点不合适吗？",
+        received_at=datetime.now(UTC),
+        direction=MessageDirection.INBOUND,
+    )
+
+    assert _terminal_state_from_messages([message]) is None
 
 
 def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:

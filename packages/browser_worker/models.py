@@ -65,6 +65,7 @@ class BrowserConversationSummary(BaseModel):
     external_job_id: str | None = None
     last_message_id: str | None = None
     last_message_text: str | None = None
+    last_message_time_text: str | None = None
     category: str = "ALL"
     unread_count: int = 0
 

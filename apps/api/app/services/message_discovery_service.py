@@ -18,7 +18,7 @@ from apps.api.app.services.conversation_service import (
 from apps.api.app.services.job_service import import_job
 from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.user_service import DEFAULT_USER_ID
-from packages.browser_worker.models import MessageDirection
+from packages.browser_worker.models import BrowserMessage, MessageDirection
 
 TERMINAL_CONVERSATION_STATES = {
     "ENDED",
@@ -26,7 +26,24 @@ TERMINAL_CONVERSATION_STATES = {
     "PAUSED",
     "OUTCOME_UNKNOWN",
 }
-UNSTABLE_CONVERSATION_RESCAN_INTERVAL = timedelta(minutes=5)
+UNSTABLE_CONVERSATION_RESCAN_INTERVAL = timedelta(minutes=60)
+TERMINAL_REJECTION_MARKERS = (
+    "不太合适",
+    "不合适",
+    "不太匹配",
+    "不匹配",
+    "不符合我们的要求",
+    "不符合岗位要求",
+    "这次先不继续",
+    "先不继续沟通",
+    "不再继续沟通",
+    "暂时不推进",
+    "暂不推进",
+    "岗位已关闭",
+    "岗位已经关闭",
+    "岗位已招到",
+    "岗位已经招到",
+)
 
 
 def persist_discovery_batch(
@@ -120,6 +137,30 @@ def persist_discovery_batch(
             )
             if before is None:
                 counts["imported"] += 1
+        terminal_state = _terminal_state_from_messages(detail.messages)
+        if terminal_state is not None:
+            state, reason_code = terminal_state
+            before_state = conversation.state
+            conversation.state = state
+            conversation.processing_lease_owner = None
+            conversation.processing_lease_expires_at = None
+            session.add(
+                db.AuditEvent(
+                    user_id=DEFAULT_USER_ID,
+                    actor_type="SYSTEM",
+                    event_type="CONVERSATION_TERMINATED",
+                    entity_type="conversation",
+                    entity_id=conversation.id,
+                    before_state=before_state,
+                    after_state=state,
+                    reason_codes=[reason_code],
+                    metadata_json={"platform": conversation.platform},
+                    correlation_id=f"conversation-terminal:{conversation.id}",
+                )
+            )
+            counts["skipped"] += 1
+            _discovery_event(session, run, item, [reason_code])
+            continue
         latest_inbound = session.scalar(
             select(db.Message)
             .where(
@@ -172,6 +213,23 @@ def persist_discovery_batch(
     run.cursor = root_cursor
     session.commit()
     return counts
+
+
+def _terminal_state_from_messages(
+    messages: list[BrowserMessage],
+) -> tuple[str, str] | None:
+    for message in reversed(messages):
+        content = message.content
+        normalized = "".join(content.split())
+        if not normalized or any(mark in normalized for mark in ("吗", "？", "?")):
+            continue
+        if not any(marker in normalized for marker in TERMINAL_REJECTION_MARKERS):
+            continue
+        if message.direction is MessageDirection.OUTBOUND:
+            return "DECLINED", "CANDIDATE_EXPLICITLY_DECLINED"
+        if message.direction is MessageDirection.INBOUND:
+            return "ENDED", "RECRUITER_EXPLICITLY_DECLINED"
+    return None
 
 
 def _next_seen_message_keys(

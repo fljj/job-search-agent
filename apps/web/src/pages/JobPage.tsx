@@ -53,6 +53,28 @@ function linkedJobId() {
   return new URLSearchParams(query).get('job_id') ?? ''
 }
 
+async function fetchJobs(
+  focusedJobId: string,
+  selectedStrategyId: string,
+  workMode?: string,
+  grade?: string,
+) {
+  const query = new URLSearchParams()
+  if (focusedJobId) query.set('job_id', focusedJobId)
+  if (workMode) query.set('work_mode', workMode)
+  if (selectedStrategyId) query.set('strategy_id', selectedStrategyId)
+  if (grade) query.set('grade', grade)
+  const data = await api<{ items: Job[] }>(`/jobs?${query}`)
+  if (!focusedJobId || data.items.length > 0 || !selectedStrategyId) {
+    return data.items
+  }
+  // 入站消息关联的职位可能尚未评分，不能被当前策略的评分筛选遮蔽。
+  const linked = await api<{ items: Job[] }>(
+    `/jobs?job_id=${encodeURIComponent(focusedJobId)}`,
+  )
+  return linked.items
+}
+
 export function JobPage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [strategies, setStrategies] = useState<Strategy[]>([])
@@ -61,29 +83,18 @@ export function JobPage() {
   const [grade, setGrade] = useState<string>()
   const [score, setScore] = useState<ScoreResult>()
   const focusedJobId = linkedJobId()
-  const load = () => {
-    const query = new URLSearchParams()
-    if (focusedJobId) query.set('job_id', focusedJobId)
-    if (workMode) query.set('work_mode', workMode)
-    if (strategyId) query.set('strategy_id', strategyId)
-    if (grade) query.set('grade', grade)
-    return api<{ items: Job[] }>(`/jobs?${query}`).then((data) => setJobs(data.items))
-  }
+  const load = () => fetchJobs(
+    focusedJobId, strategyId, workMode, grade,
+  ).then(setJobs)
   useEffect(() => {
     void api<{ items: Strategy[] }>('/strategies').then(async (strategyData) => {
       setStrategies(strategyData.items)
       const enabled = strategyData.items.find((item) => item.enabled)
       if (enabled) {
         setStrategyId(enabled.id)
-        const jobData = await api<{ items: Job[] }>(
-          `/jobs?strategy_id=${encodeURIComponent(enabled.id)}${
-            focusedJobId ? `&job_id=${encodeURIComponent(focusedJobId)}` : ''
-          }`,
-        )
-        setJobs(jobData.items)
+        setJobs(await fetchJobs(focusedJobId, enabled.id))
       } else {
-        const jobData = await api<{ items: Job[] }>('/jobs')
-        setJobs(jobData.items)
+        setJobs(await fetchJobs(focusedJobId, ''))
       }
     })
   }, [focusedJobId])
@@ -91,6 +102,8 @@ export function JobPage() {
   return <Space direction="vertical" style={{ width: '100%' }}>
     <Alert type="info" showIcon message="职位由 Agent 自动发现、解析和评分"
       description="此处只展示监控结果；硬性排除、未评分和未达到80分的职位不会被主动沟通。" />
+    {focusedJobId && <Alert type="success" showIcon message="正在查看消息关联的职位"
+      description="即使该职位尚未评分，也会优先显示，不受职位列表评分筛选影响。" />}
     <Card title="职位流水线"><Space wrap style={{ marginBottom: 16 }}>
       <Select allowClear placeholder="求职策略" value={strategyId || undefined} onChange={(value) => setStrategyId(value ?? '')}
         style={{ minWidth: 220 }} options={strategies.map((item) => ({ value: item.id, label: item.name }))} />

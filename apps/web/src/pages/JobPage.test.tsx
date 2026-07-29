@@ -79,4 +79,32 @@ describe('JobPage', () => {
     fireEvent.click(await screen.findByText('查看对应消息'))
     expect(window.location.hash).toBe('#messages?job_id=job-1')
   })
+
+  it('消息关联职位未评分时不被策略筛选隐藏', async () => {
+    window.location.hash = 'jobs?job_id=job-unscored'
+    vi.mocked(api)
+      .mockResolvedValueOnce({
+        items: [{ id: 'strategy-1', name: '远程后端', enabled: true }],
+      })
+      .mockResolvedValueOnce({ items: [] })
+      .mockResolvedValueOnce({
+        items: [{
+          id: 'job-unscored',
+          title: 'AI应用开发工程师（JAVA）',
+          company_name: '山东泽凯控股',
+          work_mode: 'ONSITE',
+          source: 'BOSS',
+          communication: { status: 'CONVERSATION_ACTIVE', reason_codes: [] },
+        }],
+      })
+
+    render(<JobPage />)
+
+    await screen.findByText('AI应用开发工程师（JAVA）')
+    expect(screen.getByText('正在查看消息关联的职位')).toBeTruthy()
+    expect(api).toHaveBeenNthCalledWith(
+      3,
+      '/jobs?job_id=job-unscored',
+    )
+  })
 })

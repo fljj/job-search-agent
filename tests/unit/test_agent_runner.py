@@ -166,6 +166,7 @@ def test_message_discovery_reuses_platform_cursor(
     )
     adapter = MagicMock(spec=MessageDiscoveryAdapter)
     adapter.scan.return_value = batch
+    session.scalars.return_value.all.return_value = ["closed-chat"]
     persisted: list[MessageDiscoveryBatch] = []
 
     def persist(
@@ -199,6 +200,7 @@ def test_message_discovery_reuses_platform_cursor(
         partition="ALL",
         scroll_position=20,
         seen_message_keys=["chat-1:message-1"],
+        excluded_conversation_ids=["closed-chat"],
         limit=10,
     )
     assert persisted == [batch]
