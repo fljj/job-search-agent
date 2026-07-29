@@ -199,13 +199,8 @@ def process_job_discovery_batch(
                 break
             continue
         except LlmScoreValidationError:
-            retry_backoff_until = _schedule_retry(
-                record, "INVALID_SCORING_OUTPUT", current
-            )
+            _schedule_retry(record, "INVALID_SCORING_OUTPUT", current)
             counts["skipped"] += 1
-            if retry_backoff_until is not None:
-                counts["skipped"] += len(batch.items[index + 1:])
-                break
             continue
         record.action_id = (
             UUID(str(result["action_id"])) if result.get("action_id") else None
@@ -264,13 +259,6 @@ def job_scan_block_reasons(
         return ["EMERGENCY_STOP_ACTIVE"]
     if not rules.enabled or rules.paused or not rules.job_scan_enabled:
         return ["JOB_SCAN_DISABLED_OR_PAUSED"]
-    retry_record = next_retryable_job(session, run)
-    if (
-        retry_record is not None
-        and retry_record.next_retry_at is not None
-        and retry_record.next_retry_at > now
-    ):
-        return ["LLM_RETRY_BACKOFF_ACTIVE"]
     raw_cursor = (run.cursor or {}).get("job_discovery")
     if isinstance(raw_cursor, dict):
         raw_next = raw_cursor.get("next_scan_at")
@@ -287,14 +275,18 @@ def job_scan_block_reasons(
 def next_retryable_job(
     session: Session,
     run: db.AgentRun,
+    *,
+    now: datetime | None = None,
 ) -> db.JobDiscoveryRecord | None:
     """只选择队首的一条重试记录，保证 LLM 重试单飞。"""
+    current = now or datetime.now(UTC)
     return session.scalar(
         select(db.JobDiscoveryRecord)
         .where(
             db.JobDiscoveryRecord.agent_run_id == run.id,
             db.JobDiscoveryRecord.status == "RETRYABLE",
             db.JobDiscoveryRecord.next_retry_at.is_not(None),
+            db.JobDiscoveryRecord.next_retry_at <= current,
         )
         .order_by(
             db.JobDiscoveryRecord.next_retry_at.asc().nullsfirst(),

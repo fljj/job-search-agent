@@ -18,6 +18,7 @@ from apps.api.app.services.job_discovery_service import (
     _is_prewrite_retryable,
     _job_safety_reasons,
     _schedule_retry,
+    job_scan_block_reasons,
     mark_retry_target_not_visible,
 )
 from packages.browser_worker.models import (
@@ -28,6 +29,7 @@ from packages.browser_worker.models import (
     ReadResult,
     SessionStatus,
 )
+from packages.policy_engine.automation import AutomationRules
 
 
 def summary(index: int) -> BrowserJobSummary:
@@ -321,6 +323,23 @@ def test_retry_uses_exponential_backoff_and_stops_after_limit(
         "LLM_RATE_LIMITED",
         "RETRY_ATTEMPTS_EXHAUSTED",
     ]
+
+
+def test_single_job_retry_does_not_block_other_job_scans() -> None:
+    rules = AutomationRules(
+        enabled=True,
+        job_scan_enabled=True,
+        work_start_hour=0,
+        work_end_hour=24,
+    )
+    run = SimpleNamespace(cursor={})
+
+    assert job_scan_block_reasons(  # type: ignore[arg-type]
+        SimpleNamespace(),  # type: ignore[arg-type]
+        run,  # type: ignore[arg-type]
+        rules,
+        datetime.now(UTC),
+    ) == []
 
 
 def test_only_prewrite_failure_allows_greeting_retry() -> None:
