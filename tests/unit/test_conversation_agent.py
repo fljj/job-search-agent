@@ -53,6 +53,24 @@ def test_arrival_date_is_not_misclassified_as_interview_time() -> None:
     ) == [Intent.ARRIVAL_DATE]
 
 
+def test_generic_conversation_cannot_be_upgraded_to_phone_or_interview() -> None:
+    assert normalize_intents(
+        "你好，看过了你的简历，希望和你交流一下",
+        [Intent.PHONE_CALL, Intent.INTERVIEW_INVITATION],
+    ) == [Intent.UNCLEAR]
+
+
+def test_explicit_phone_or_interview_evidence_keeps_privileged_intent() -> None:
+    assert normalize_intents(
+        "方便电话沟通一下吗？",
+        [Intent.PHONE_CALL],
+    ) == [Intent.PHONE_CALL]
+    assert normalize_intents(
+        "想邀请你参加面试",
+        [Intent.INTERVIEW_INVITATION],
+    ) == [Intent.INTERVIEW_INVITATION]
+
+
 def test_verified_normal_fact_allows_automatic_reply() -> None:
     result = generate_reply("请介绍 Java 技术栈", [fact()], ConversationPolicyConfig())
     assert result.decision is Decision.ALLOW_AUTO
