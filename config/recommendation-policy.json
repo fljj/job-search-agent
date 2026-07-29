@@ -8,7 +8,7 @@
     "保险销售", "保险代理", "保险经纪", "保险顾问", "保险客户经理",
     "保险理财顾问", "保险增员", "拉人头", "招聘代理"
   ],
-  "official_accounts": ["脉脉官方服务", "脉脉官方账号"],
+  "official_accounts": ["脉脉官方服务", "脉脉官方账号", "求职小助手"],
   "recommendation_markers": ["系统推荐", "可以要一份你的简历吗"],
   "accept_success_markers": ["已发送简历", "你们现在可以对话了"],
   "reject_success_markers": ["已拒绝"]

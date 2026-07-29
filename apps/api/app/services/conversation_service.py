@@ -4,11 +4,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.conversation_config import get_conversation_policy
+from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.conversation import (
     ConversationPayload,
@@ -189,7 +190,13 @@ def list_conversations(
     platform: str | None = None,
 ) -> tuple[list[dict[str, object]], int]:
     query = select(db.Conversation).where(
-        db.Conversation.user_id == DEFAULT_USER_ID
+        db.Conversation.user_id == DEFAULT_USER_ID,
+        or_(
+            db.Conversation.platform != "MAIMAI",
+            db.Conversation.recruiter_name.not_in(
+                get_recommendation_rules().official_accounts
+            ),
+        ),
     )
     if job_id is not None:
         query = query.where(db.Conversation.job_id == job_id)
