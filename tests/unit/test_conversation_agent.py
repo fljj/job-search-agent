@@ -6,11 +6,13 @@ import pytest
 from apps.api.app.services.conversation_service import (
     _full_time_education_reply,
     _is_ignored_platform_event,
+    _safe_job_detail_clarification,
 )
 from packages.conversation_agent.generator import generate_greeting, generate_reply
 from packages.conversation_agent.intents import classify_intents, normalize_intents
 from packages.conversation_agent.models import ConversationPolicyConfig, Decision, Intent
 from packages.knowledge_base.models import KnowledgeFact
+from packages.llm.models import ConversationMemory
 
 
 def fact(**changes: object) -> KnowledgeFact:
@@ -148,3 +150,17 @@ def test_full_time_education_is_not_proactively_disclosed() -> None:
 def test_resume_viewed_platform_event_does_not_need_a_reply() -> None:
     assert _is_ignored_platform_event(" 对方已查看了您的附件简历 ")
     assert not _is_ignored_platform_event("可以发一份附件简历吗？")
+
+
+def test_safe_clarification_does_not_repeat_discussed_topics() -> None:
+    result = _safe_job_detail_clarification(
+        ConversationMemory(
+            candidate_asked_topics=["JOB_DETAIL", "SALARY"],
+            confirmed_topics=["LOCATION"],
+        )
+    )
+
+    assert "岗位职责" not in result.content
+    assert "薪资" not in result.content
+    assert "工作地点" not in result.content
+    assert "工作模式" in result.content

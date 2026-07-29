@@ -33,6 +33,10 @@ from packages.conversation_agent.llm_engine import (
     build_mismatch_decline,
     has_valid_conversation_evidence,
 )
+from packages.conversation_agent.memory import (
+    build_conversation_memory,
+    remove_repeated_questions,
+)
 from packages.conversation_agent.models import Decision, DraftResult, Intent, ReplySource
 from packages.conversation_agent.router import ReplyRouteContext, route_reply
 from packages.conversation_agent.rules.salary import SalaryExpectation
@@ -40,7 +44,9 @@ from packages.knowledge_base.models import KnowledgeFact
 from packages.llm.models import (
     ConversationEvaluation,
     ConversationEvaluationRequest,
+    ConversationMemory,
     ConversationMessage,
+    ConversationTurn,
     GeneratedMessage,
     LlmCallMetadata,
     LlmResult,
@@ -353,11 +359,14 @@ def create_reply_draft(
             reply_source=route.source,
         )
     if qualification.value == "UNKNOWN":
+        _, _, memory = _recent_conversation_context(session, conversation)
+        clarification = _safe_job_detail_clarification(memory)
         fingerprint = _fingerprint(
             "REPLY",
             message.id,
             "SAFE_JOB_CLARIFICATION",
             conversation.qualification_version,
+            clarification.content,
         )
         existing = session.scalar(
             select(db.GeneratedDraft).where(db.GeneratedDraft.input_fingerprint == fingerprint)
@@ -366,14 +375,7 @@ def create_reply_draft(
             return _draft_response(session, existing)
         return _persist_draft(
             session,
-            DraftResult(
-                content="感谢联系。方便介绍一下岗位方向、工作地点、工作模式和大致薪资范围吗？",
-                intents=[Intent.JOB_DETAIL],
-                confidence=1,
-                risk_codes=["JOB_CONTEXT_INCOMPLETE"],
-                decision=Decision.ALLOW_AUTO,
-                reason_codes=["SAFE_JOB_CLARIFICATION"],
-            ),
+            clarification,
             fingerprint,
             "REPLY",
             conversation.id,
@@ -1064,11 +1066,31 @@ def _profile_facts(
     return facts
 
 
-def _safe_job_detail_clarification() -> DraftResult:
+def _safe_job_detail_clarification(
+    memory: ConversationMemory | None = None,
+) -> DraftResult:
+    covered = (
+        set(memory.candidate_asked_topics) | set(memory.confirmed_topics)
+        if memory is not None
+        else set()
+    )
+    missing_questions = [
+        question
+        for topic, question in (
+            ("JOB_DETAIL", "岗位职责和技术重点"),
+            ("LOCATION", "工作地点"),
+            ("REMOTE_POLICY", "工作模式"),
+            ("SALARY", "大致薪资范围"),
+        )
+        if topic not in covered
+    ]
+    content = (
+        f"感谢联系。方便介绍一下{'、'.join(missing_questions)}吗？"
+        if missing_questions
+        else "感谢您的补充，我已经了解此前沟通的信息，后续可以继续沟通。"
+    )
     return DraftResult(
-        content=(
-            "感谢联系，这个方向与我目前考虑的大致一致。方便补充一下岗位职责、技术重点和薪资范围吗？"
-        ),
+        content=content,
         intents=[Intent.JOB_DETAIL],
         confidence=1,
         risk_codes=["LLM_OR_FORMAL_SCORE_UNAVAILABLE"],
@@ -1104,12 +1126,7 @@ def _build_scored_reply(
     facts = _profile_facts(profile, parsed.required_skills + parsed.preferred_skills) + [
         fact for fact in _knowledge_facts(session) if fact.category.upper() != "EDUCATION"
     ]
-    recent = session.scalars(
-        select(db.Message)
-        .where(db.Message.conversation_id == conversation.id)
-        .order_by(db.Message.received_at.desc())
-        .limit(20)
-    ).all()
+    recent, turns, memory = _recent_conversation_context(session, conversation)
     classification = _call_llm(
         session,
         provider,
@@ -1145,6 +1162,8 @@ def _build_scored_reply(
                 LlmReplyRequest(
                     incoming_message=message.content,
                     recent_messages=[item.content for item in reversed(recent)],
+                    recent_turns=turns,
+                    conversation_memory=memory,
                     facts=[
                         TrustedFact(id=fact.id, content=fact.fact) for fact in usable if fact.id
                     ],
@@ -1152,6 +1171,20 @@ def _build_scored_reply(
                 )
             ),
         ).data
+        cleaned, repeated_topics = remove_repeated_questions(
+            generated.content,
+            memory,
+        )
+        if repeated_topics:
+            generated = generated.model_copy(
+                update={
+                    "content": cleaned,
+                    "risk_codes": [
+                        *generated.risk_codes,
+                        "REPEATED_QUESTION_REMOVED",
+                    ],
+                }
+            )
     return build_llm_reply(
         classification,
         generated,
@@ -1159,6 +1192,49 @@ def _build_scored_reply(
         get_conversation_policy(),
         now=datetime.now(UTC),
     )
+
+
+def _recent_conversation_context(
+    session: Session,
+    conversation: db.Conversation,
+) -> tuple[list[db.Message], list[ConversationTurn], ConversationMemory]:
+    history = list(
+        session.scalars(
+            select(db.Message)
+            .where(db.Message.conversation_id == conversation.id)
+            .order_by(db.Message.received_at.desc())
+            .limit(200)
+        ).all()
+    )
+    recent = history[:20]
+    turns = [
+        ConversationTurn(direction=item.direction, content=item.content)
+        for item in reversed(recent)
+        if item.direction in {"INBOUND", "OUTBOUND"}
+    ]
+    memory_turns = [
+        ConversationTurn(direction=item.direction, content=item.content)
+        for item in reversed(history)
+        if item.direction in {"INBOUND", "OUTBOUND"}
+    ]
+    completed_actions = session.scalars(
+        select(db.ActionQueue.action_type).where(
+            db.ActionQueue.conversation_id == conversation.id,
+            db.ActionQueue.status == "SUCCEEDED",
+            db.ActionQueue.action_type.in_(
+                [
+                    "RESUME",
+                    "RESUME_CONSENT_ACCEPT",
+                    "CONTACT_CONSENT_ACCEPT",
+                ]
+            ),
+        )
+    ).all()
+    memory = build_conversation_memory(
+        memory_turns,
+        completed_actions=[str(action) for action in completed_actions],
+    )
+    return recent, turns, memory
 
 
 def _full_time_education_reply(

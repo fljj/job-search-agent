@@ -52,6 +52,20 @@ class MessageClassification(BaseModel):
     confidence: Decimal = Field(ge=0, le=1)
 
 
+class ConversationTurn(BaseModel):
+    direction: str = Field(pattern="^(INBOUND|OUTBOUND)$")
+    content: str = Field(min_length=1, max_length=10000)
+
+
+class ConversationMemory(BaseModel):
+    discussed_topics: list[str] = Field(default_factory=list)
+    candidate_asked_topics: list[str] = Field(default_factory=list)
+    confirmed_topics: list[str] = Field(default_factory=list)
+    confirmed_details: dict[str, str] = Field(default_factory=dict)
+    open_questions: list[str] = Field(default_factory=list)
+    completed_actions: list[str] = Field(default_factory=list)
+
+
 class TrustedFact(BaseModel):
     id: UUID
     content: str = Field(min_length=1, max_length=2000)
@@ -83,6 +97,8 @@ class ReplyContext(BaseModel):
 class ReplyRequest(BaseModel):
     incoming_message: str = Field(min_length=1, max_length=10000)
     recent_messages: list[str] = Field(default_factory=list, max_length=20)
+    recent_turns: list[ConversationTurn] = Field(default_factory=list, max_length=20)
+    conversation_memory: ConversationMemory = Field(default_factory=ConversationMemory)
     facts: list[TrustedFact] = Field(default_factory=list, max_length=20)
     context: ReplyContext
 

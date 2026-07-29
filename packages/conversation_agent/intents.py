@@ -1,6 +1,7 @@
 from packages.conversation_agent.models import Intent
 
 INTENT_KEYWORDS: dict[Intent, tuple[str, ...]] = {
+    Intent.JOB_DETAIL: ("岗位职责", "职位详情", "工作内容", "技术重点"),
     Intent.TECH_STACK: ("技术栈", "java", "spring", "redis", "kafka", "mysql", "kubernetes"),
     Intent.WORK_EXPERIENCE: ("工作经验", "几年", "年限"),
     Intent.PROJECT_EXPERIENCE: ("项目", "做过"),
