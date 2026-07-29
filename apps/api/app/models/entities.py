@@ -601,19 +601,11 @@ class AutomationSetting(TimestampMixin, Base):
     maimai_recommendation_resume_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
-    hourly_limit: Mapped[int] = mapped_column(Integer, default=10)
-    daily_limit: Mapped[int] = mapped_column(Integer, default=50)
     emergency_stop: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
     job_scan_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
-    )
-    hourly_scan_limit: Mapped[int] = mapped_column(
-        Integer, default=100, server_default="100"
-    )
-    daily_scan_limit: Mapped[int] = mapped_column(
-        Integer, default=500, server_default="500"
     )
     company_cooldown_hours: Mapped[int] = mapped_column(
         Integer, default=24, server_default="24"

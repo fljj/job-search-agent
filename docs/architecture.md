@@ -389,7 +389,7 @@ BOSS 真实职位页在 Playwright 通过 CDP 附加时可能触发平台重定�
 
 正式运行不设置额外级别。依赖方向为
 `automation_service/job worker → policy_engine → browser adapter`。浏览器适配器不能
-提升自动化权限或动作限额，只执行通过策略引擎授权的命令；职位扫描由正式自动化配置、
+提升自动化权限，只执行通过策略引擎授权的命令；职位扫描由正式自动化配置、
 紧急停止和 LLM 熔断状态控制。
 
 ## 12. 第五阶段安全自动化流程
@@ -398,7 +398,6 @@ BOSS 真实职位页在 Playwright 通过 CDP 附加时可能触发平台重定�
 LLM 评分、草稿或简历候选
 → 合并全局、平台、策略配置（只允许逐级收紧）
 → 主动动作检查 80 分；入站动作检查成熟度、明确请求、事实、附件和重复记录
-→ 检查平台小时/每日限额
 → DENY：记录策略决策，不执行
 → REQUIRE_CONFIRMATION：仅时间或日历动作进入确认
 → ALLOW_AUTO：创建 authorization_source=AUTO 的唯一动作

@@ -1,8 +1,8 @@
 import hashlib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models import entities as db
@@ -143,7 +143,6 @@ def dispatch(
         resume = _resume(session, payload.resume_id, conversation.platform)
     else:
         resume = None
-    counts = _rate_counts(session, conversation.platform)
     context = AutomationContext(
         action_type=payload.action_type,
         score=score.total_score if score else 0,
@@ -172,7 +171,6 @@ def dispatch(
             db.ResumeSendRecord.resume_id == resume.id,
         ))),
         qualification_status=conversation.qualification_status,
-        hourly_count=counts[0], daily_count=counts[1],
     )
     decision, reasons = evaluate_automation(context, rules)
     policy = db.PolicyDecision(
@@ -252,7 +250,6 @@ def dispatch_proactive_greeting(
     )
     if original is None:
         raise ValueError("招呼草稿缺少原始策略决策")
-    counts = _rate_counts(session, platform)
     context = AutomationContext(
         action_type="GREETING",
         score=score.total_score,
@@ -266,8 +263,6 @@ def dispatch_proactive_greeting(
         confidence=float(draft.confidence),
         original_decision=original.decision,
         has_verified_facts=bool(draft.fact_ids),
-        hourly_count=counts[0],
-        daily_count=counts[1],
     )
     decision, reasons = evaluate_automation(context, rules)
     missing = _proactive_safety_gaps(job, recruiter_name)
@@ -404,14 +399,8 @@ def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> Auto
         rules.auto_greet_min_score = max(rules.auto_greet_min_score, row.auto_greet_min_score)
         rules.auto_reply_min_confidence = max(rules.auto_reply_min_confidence, float(row.auto_reply_min_confidence))
         rules.auto_resume_min_score = max(rules.auto_resume_min_score, row.auto_resume_min_score)
-        rules.hourly_limit = min(rules.hourly_limit, row.hourly_limit)
-        rules.daily_limit = min(rules.daily_limit, row.daily_limit)
         rules.emergency_stop = rules.emergency_stop or row.emergency_stop
         rules.job_scan_enabled = rules.job_scan_enabled and row.job_scan_enabled
-        rules.hourly_scan_limit = min(
-            rules.hourly_scan_limit, row.hourly_scan_limit
-        )
-        rules.daily_scan_limit = min(rules.daily_scan_limit, row.daily_scan_limit)
         rules.company_cooldown_hours = max(
             rules.company_cooldown_hours, row.company_cooldown_hours
         )
@@ -433,11 +422,8 @@ def _rules(row: db.AutomationSetting) -> AutomationRules:
         auto_resume_enabled=row.auto_resume_enabled, auto_resume_min_score=row.auto_resume_min_score,
         maimai_recommendation_enabled=row.maimai_recommendation_enabled,
         maimai_recommendation_resume_enabled=row.maimai_recommendation_resume_enabled,
-        hourly_limit=row.hourly_limit, daily_limit=row.daily_limit,
         emergency_stop=row.emergency_stop,
         job_scan_enabled=row.job_scan_enabled,
-        hourly_scan_limit=row.hourly_scan_limit,
-        daily_scan_limit=row.daily_scan_limit,
         company_cooldown_hours=row.company_cooldown_hours,
         recruiter_cooldown_hours=row.recruiter_cooldown_hours,
         work_start_hour=row.work_start_hour,
@@ -468,18 +454,6 @@ def _resume(session: Session, resume_id: UUID | None, platform: str) -> db.Resum
     if resume is None or resume.user_id != DEFAULT_USER_ID or not resume.is_available or resume.platform != platform:
         raise ValueError("简历附件不存在、不可用或平台不匹配")
     return resume
-
-
-def _rate_counts(session: Session, platform: str) -> tuple[int, int]:
-    now = datetime.now(UTC)
-    def count(since: datetime) -> int:
-        return session.scalar(select(func.count()).select_from(db.ActionQueue).where(
-            db.ActionQueue.user_id == DEFAULT_USER_ID,
-            db.ActionQueue.platform == platform,
-            db.ActionQueue.authorization_source == "AUTO",
-            db.ActionQueue.created_at >= since,
-        )) or 0
-    return count(now - timedelta(hours=1)), count(now - timedelta(days=1))
 
 
 def _create_auto_action(session: Session, conversation: db.Conversation, job: db.Job | None,

@@ -225,14 +225,14 @@ Worker 进程和平台 Run 是两回事：
 1. 创建或保存全局自动化配置，设置“启用”为开。
 2. 按需要开启自动回复、按请求发送简历和主动扫描职位。
 3. 主动招呼最低分不得低于 80。
-4. 设置工作时间、小时/每日限额以及公司和招聘人冷却时间。
+4. 设置工作时间以及公司和招聘人去重冷却时间。
 5. 保持“紧急停止”为关闭。
 
-建议先使用较低限额观察日志，再逐步增加。电话和面试的具体时间无论日历是否空闲，都
+电话和面试的具体时间无论日历是否空闲，都
 不会由 Worker 自动确认。
 
 新环境也可以通过 API 一次创建全局配置。下面的示例开启职位扫描、普通回复、主动招呼、
-按明确请求发送简历和脉脉推荐；正式写操作仍需通过平台控制、安全检查和限额：
+按明确请求发送简历和脉脉推荐；正式写操作仍需通过平台控制和安全检查：
 
 ```bash
 curl -X PUT http://127.0.0.1:8000/api/v1/automation/settings \
@@ -251,12 +251,8 @@ curl -X PUT http://127.0.0.1:8000/api/v1/automation/settings \
     "auto_resume_min_score": 60,
     "maimai_recommendation_enabled": true,
     "maimai_recommendation_resume_enabled": true,
-    "hourly_limit": 10,
-    "daily_limit": 50,
     "emergency_stop": false,
     "job_scan_enabled": true,
-    "hourly_scan_limit": 100,
-    "daily_scan_limit": 500,
     "company_cooldown_hours": 24,
     "recruiter_cooldown_hours": 24,
     "work_start_hour": 8,
@@ -264,13 +260,12 @@ curl -X PUT http://127.0.0.1:8000/api/v1/automation/settings \
   }'
 ```
 
-已有配置优先在前端修改。调用 `PUT` 会按提交内容更新对应范围，不要在不了解当前限额
-时直接覆盖生产配置。
+已有配置优先在前端修改。调用 `PUT` 会按提交内容更新对应范围。
 
 ### 6.2 平台自动化控制
 
 BOSS 和脉脉 Run 启用后直接按“系统设置”中的正式自动化配置运行，不需要初始化或升级
-运行级别。全局、平台和策略开关、动作限额、紧急停止、平台异常暂停、LLM 熔断、幂等
+运行级别。全局、平台和策略开关、紧急停止、平台异常暂停、LLM 熔断、幂等
 去重和电话/面试时间人工确认仍然生效。
 
 脉脉的普通消息与系统推荐使用同一个 MAIMAI Run。系统推荐是否启用、是否允许同意后

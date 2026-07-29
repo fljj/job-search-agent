@@ -340,10 +340,7 @@ def _run_boss_job_discovery(
             target_job_ids={retry_job_id} if retry_job_id else None,
             irrelevant_title_keywords=(get_job_parser_config().irrelevant_title_keywords),
             relevant_title_keywords=relevant_title_keywords,
-            limit=min(
-                1 if retry_job_id else get_settings().boss_job_batch_size,
-                rules.hourly_scan_limit,
-            ),
+            limit=1 if retry_job_id else get_settings().boss_job_batch_size,
             interval_seconds=get_settings().boss_job_scan_interval_seconds,
         )
     except (OSError, TimeoutError, ValueError):

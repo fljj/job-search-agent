@@ -353,7 +353,7 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 文案时必须逐字一致。两种模式均不得追加发送千问生成文本。
 
 第十阶段的配置请求增加 `job_scan_enabled`、`emergency_stop`、
-`hourly_scan_limit`、`daily_scan_limit`、`company_cooldown_hours`、
+`company_cooldown_hours`、
 `recruiter_cooldown_hours`、`work_start_hour` 和 `work_end_hour`。职位发现由 Worker
 内部编排，不提供绕过策略引擎的公开“扫描并发送”接口。BOSS 运行只允许真实 CDP
 执行器，`MOCK` 运行只允许假执行器。
@@ -369,7 +369,7 @@ BOSS 主动招呼由服务端固定使用 `PLATFORM_DEFAULT` 发送模式，客�
 - `POST /api/v1/automation/operations/audit/run`：对近期成功动作执行只读平台抽查。
 
 正式运行不提供级别初始化、升级或回退 API。BOSS 和脉脉 Run 直接使用
-`/automation/settings` 的全局、平台和策略配置；暂停/恢复 Run、紧急停止、动作限额、
+`/automation/settings` 的全局、平台和策略配置；暂停/恢复 Run、紧急停止、
 LLM 熔断、幂等、回读对账及电话/面试时间确认规则继续独立生效。
 
 第十四阶段脉脉推荐 API：

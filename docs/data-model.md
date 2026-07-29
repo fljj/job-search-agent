@@ -268,8 +268,8 @@ users
 
 ### 8.1 第五阶段数据表和字段
 
-- `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态、动作阈值及
-  小时/每日限额；`low_score_decline_enabled` 仅为历史字段，当前策略引擎不会创建
+- `automation_settings`：按 `GLOBAL/PLATFORM/STRATEGY` 保存开关、暂停状态及动作阈值；
+  `low_score_decline_enabled` 仅为历史字段，当前策略引擎不会创建
   `LOW_SCORE_DECLINE` 动作；`(user_id, scope_type, scope_key)` 唯一。
 - `agent_runs`：保存平台、绑定策略、运行状态、心跳、短租约、游标、处理/动作/失败计数、连续失败数、暂停原因和乐观版本；同一用户和平台通过部分唯一索引最多保留一个 `RUNNING/PAUSED` 运行。
 - `agent_runs.executor_type`：记录实际执行器类型 `UNASSIGNED/REAL_CDP/FAKE`，用于启动自检和审计；正式 BOSS 运行不得记录 `FAKE`。
@@ -287,8 +287,8 @@ users
 - `conversations.processing_lease_owner/processing_lease_expires_at`：消息发现的会话级
   短租约，防止多个执行者同时导入和决策同一对话。
 - `agent_run_events`：追加保存运行启动、租约轮询、草稿、动作、失败、熔断和恢复事件，不覆盖历史记录。
-- `automation_settings` 第十阶段增加职位扫描开关、全局紧急停止、小时/每日扫描上限、
-  公司/招聘人冷却小时数及工作开始/结束小时；多层配置采用最保守的有效值。
+- `automation_settings` 保存职位扫描开关、全局紧急停止、公司/招聘人冷却小时数及工作
+  开始/结束小时；不保存小时或每日处理配额，多层配置采用最保守的有效值。
 - `action_queue.authorization_source`：区分 `MANUAL/AUTO`。
 - `action_queue.policy_decision_id`：自动动作关联“模型建议 + 确定性约束”的最终策略决策。
 - `action_queue.strategy_id`：保存自动动作采用的策略范围。

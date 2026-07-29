@@ -3,7 +3,7 @@ from difflib import SequenceMatcher
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from adapters.browser.job_discovery import DiscoveredJob, JobDiscoveryBatch
@@ -281,20 +281,6 @@ def job_scan_block_reasons(
     local_hour = now.astimezone(ZoneInfo("Asia/Shanghai")).hour
     if not rules.work_start_hour <= local_hour < rules.work_end_hour:
         return ["OUTSIDE_WORKING_HOURS"]
-    hour_count = session.scalar(
-        select(func.count()).select_from(db.JobDiscoveryRecord).where(
-            db.JobDiscoveryRecord.agent_run_id == run.id,
-            db.JobDiscoveryRecord.created_at >= now - timedelta(hours=1),
-        )
-    ) or 0
-    day_count = session.scalar(
-        select(func.count()).select_from(db.JobDiscoveryRecord).where(
-            db.JobDiscoveryRecord.agent_run_id == run.id,
-            db.JobDiscoveryRecord.created_at >= now - timedelta(days=1),
-        )
-    ) or 0
-    if hour_count >= rules.hourly_scan_limit or day_count >= rules.daily_scan_limit:
-        return ["JOB_SCAN_RATE_LIMIT_REACHED"]
     return []
 
 

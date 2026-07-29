@@ -92,11 +92,19 @@ def test_mismatch_decline_requires_mismatch_evidence() -> None:
     )[0] is AutomationDecision.DENY
 
 
-def test_switch_pause_and_rate_limits_stop_automation() -> None:
+def test_switch_and_pause_stop_automation() -> None:
     assert evaluate_automation(context(), rules(enabled=False))[0] is AutomationDecision.DENY
     assert evaluate_automation(context(), rules(paused=True))[0] is AutomationDecision.DENY
-    assert evaluate_automation(context(hourly_count=10), rules(hourly_limit=10))[0] is AutomationDecision.DENY
-    assert evaluate_automation(context(daily_count=50), rules(daily_limit=50))[0] is AutomationDecision.DENY
+
+
+def test_automation_rules_have_no_hourly_or_daily_quotas() -> None:
+    removed_fields = {
+        "hourly_limit",
+        "daily_limit",
+        "hourly_scan_limit",
+        "daily_scan_limit",
+    }
+    assert removed_fields.isdisjoint(AutomationRules.model_fields)
 
 
 def test_emergency_stop_overrides_all_automatic_permissions() -> None:

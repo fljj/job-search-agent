@@ -21,12 +21,8 @@ class AutomationRules(BaseModel):
     auto_resume_min_score: int = Field(default=60, ge=60, le=100)
     maimai_recommendation_enabled: bool = False
     maimai_recommendation_resume_enabled: bool = False
-    hourly_limit: int = Field(default=10, ge=1, le=100)
-    daily_limit: int = Field(default=50, ge=1, le=1000)
     emergency_stop: bool = False
     job_scan_enabled: bool = False
-    hourly_scan_limit: int = Field(default=100, ge=1, le=1000)
-    daily_scan_limit: int = Field(default=500, ge=1, le=10000)
     company_cooldown_hours: int = Field(default=24, ge=0, le=720)
     recruiter_cooldown_hours: int = Field(default=24, ge=0, le=720)
     work_start_hour: int = Field(default=8, ge=0, le=23)
@@ -53,8 +49,6 @@ class AutomationContext(BaseModel):
     resume_available: bool = False
     resume_already_sent: bool = False
     qualification_status: str = "UNKNOWN"
-    hourly_count: int = 0
-    daily_count: int = 0
 
 
 def evaluate_automation(
@@ -65,8 +59,6 @@ def evaluate_automation(
         return AutomationDecision.DENY, ["EMERGENCY_STOP_ACTIVE"]
     if not rules.enabled or rules.paused:
         return AutomationDecision.DENY, ["AUTOMATION_DISABLED_OR_PAUSED"]
-    if context.hourly_count >= rules.hourly_limit or context.daily_count >= rules.daily_limit:
-        return AutomationDecision.DENY, ["RATE_LIMIT_REACHED"]
     if context.action_type == "GREETING":
         if not context.eligible or not context.job_open:
             return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
