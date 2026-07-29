@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.orm import Session
@@ -15,13 +17,16 @@ from adapters.browser.message_discovery import (
     _verify_target,
     select_discovery_candidates,
 )
+from adapters.llm.fake import FakeLlmProvider
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.models import entities as db
 from apps.api.app.services.message_discovery_service import (
     _next_seen_message_keys,
     _terminal_state_from_messages,
+    process_next_inbound_job_score,
     record_ready_platform_session,
 )
+from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.models import (
     BrowserConversation,
     BrowserConversationSummary,
@@ -411,6 +416,47 @@ def test_explicit_candidate_correction_supersedes_older_decline() -> None:
     )
 
     assert _terminal_state_from_messages([decline, correction]) is None
+
+
+def test_inbound_job_scoring_saves_score_without_creating_greeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    run = SimpleNamespace(
+        id=uuid4(),
+        user_id=DEFAULT_USER_ID,
+        strategy_id=uuid4(),
+        platform="BOSS",
+        cursor={},
+    )
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        job_id=uuid4(),
+        latest_job_score_id=None,
+    )
+    strategy = SimpleNamespace(
+        id=run.strategy_id,
+        candidate_profile_id=uuid4(),
+    )
+    score = SimpleNamespace(id=uuid4(), hard_rejected=False)
+    session.scalar.return_value = conversation
+    session.get.return_value = strategy
+    create_score = MagicMock(return_value=score)
+    monkeypatch.setattr(
+        "apps.api.app.services.message_discovery_service.create_score",
+        create_score,
+    )
+
+    result = process_next_inbound_job_score(
+        session,
+        run,  # type: ignore[arg-type]
+        FakeLlmProvider(),
+    )
+
+    assert result == "SCORED"
+    assert conversation.latest_job_score_id == score.id
+    create_score.assert_called_once()
+    session.commit.assert_called_once()
 
 
 def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:

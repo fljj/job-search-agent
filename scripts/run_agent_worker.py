@@ -51,6 +51,7 @@ from apps.api.app.services.llm_circuit_service import (
 )
 from apps.api.app.services.message_discovery_service import (
     persist_discovery_batch,
+    process_next_inbound_job_score,
     record_ready_platform_session,
 )
 from apps.api.app.services.operations_service import (
@@ -167,6 +168,11 @@ def _discover_messages(
         return False
     record_ready_platform_session(session, run, cdp_url)
     counts = persist_discovery_batch(session, run, worker_id, batch)
+    inbound_score_status = process_next_inbound_job_score(
+        session,
+        run,
+        build_llm_provider(get_settings()),
+    )
     gray_event(
         logger,
         "MESSAGE_SCAN_COMPLETED",
@@ -176,6 +182,7 @@ def _discover_messages(
         scanned_count=len(batch.items),
         imported_count=counts["imported"],
         paused_count=counts["paused"],
+        inbound_score_status=inbound_score_status,
         exhausted=batch.exhausted,
         cursor=batch.scroll_position,
     )

@@ -8,17 +8,24 @@ from adapters.browser.message_discovery import (
     DiscoveredConversation,
     MessageDiscoveryBatch,
 )
+from adapters.llm.errors import LlmProviderError
+from apps.api.app.core.config import get_settings
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.conversation import ConversationPayload, MessagePayload
 from apps.api.app.schemas.job import JobImportPayload
+from apps.api.app.schemas.score import ScoreRequest
 from apps.api.app.services.conversation_service import (
     create_conversation,
     import_message,
 )
 from apps.api.app.services.job_service import import_job
+from apps.api.app.services.llm_circuit_service import open_llm_circuit
 from apps.api.app.services.qualification_service import refresh_qualification
+from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.models import BrowserMessage, MessageDirection
+from packages.llm.ports import LlmProvider
+from packages.scoring.llm_engine import LlmScoreValidationError
 
 TERMINAL_CONVERSATION_STATES = {
     "ENDED",
@@ -51,6 +58,97 @@ CONVERSATION_REOPEN_MARKERS = (
     "可以继续沟通",
     "希望继续沟通",
 )
+
+
+def process_next_inbound_job_score(
+    session: Session,
+    run: db.AgentRun,
+    provider: LlmProvider,
+    *,
+    now: datetime | None = None,
+) -> str:
+    """每轮最多分析一个入站职位，硬性排除结果也保存为正式评分记录。"""
+    current = now or datetime.now(UTC)
+    root_cursor = dict(run.cursor or {})
+    scoring_cursor = root_cursor.get("inbound_job_scoring")
+    scoring_cursor = scoring_cursor if isinstance(scoring_cursor, dict) else {}
+    raw_retry_at = scoring_cursor.get("next_retry_at")
+    try:
+        retry_at = datetime.fromisoformat(str(raw_retry_at)) if raw_retry_at else None
+    except ValueError:
+        retry_at = None
+    conversation = session.scalar(
+        select(db.Conversation)
+        .where(
+            db.Conversation.user_id == DEFAULT_USER_ID,
+            db.Conversation.platform == run.platform,
+            db.Conversation.strategy_id == run.strategy_id,
+            db.Conversation.job_id.is_not(None),
+            db.Conversation.latest_job_score_id.is_(None),
+            db.Conversation.state == "ACTIVE",
+        )
+        .order_by(db.Conversation.updated_at.desc(), db.Conversation.id.desc())
+        .limit(1)
+    )
+    if conversation is None or conversation.job_id is None:
+        return "NONE"
+    if (
+        retry_at is not None
+        and current < retry_at
+        and scoring_cursor.get("conversation_id") == str(conversation.id)
+    ):
+        return "DEFERRED"
+    strategy = session.get(db.JobStrategy, run.strategy_id)
+    if strategy is None:
+        return "NONE"
+    try:
+        score = create_score(
+            session,
+            conversation.job_id,
+            ScoreRequest(
+                strategy_id=strategy.id,
+                candidate_profile_id=strategy.candidate_profile_id,
+            ),
+            provider=provider,
+        )
+    except LlmProviderError as exc:
+        open_llm_circuit(session, get_settings(), exc.code, now=current)
+        _inbound_scoring_event(
+            session, run, conversation, "INBOUND_JOB_SCORE_LLM_BLOCKED", [exc.code]
+        )
+        session.commit()
+        return "LLM_BLOCKED"
+    except LlmScoreValidationError:
+        retry_at = current + timedelta(
+            seconds=get_settings().boss_llm_retry_base_seconds
+        )
+        root_cursor["inbound_job_scoring"] = {
+            "next_retry_at": retry_at.isoformat(),
+            "conversation_id": str(conversation.id),
+        }
+        run.cursor = root_cursor
+        _inbound_scoring_event(
+            session,
+            run,
+            conversation,
+            "INBOUND_JOB_SCORE_DEFERRED",
+            ["INVALID_SCORING_OUTPUT"],
+        )
+        session.commit()
+        return "DEFERRED"
+
+    conversation.latest_job_score_id = score.id
+    root_cursor.pop("inbound_job_scoring", None)
+    run.cursor = root_cursor
+    _inbound_scoring_event(
+        session,
+        run,
+        conversation,
+        "INBOUND_JOB_SCORED",
+        ["HARD_FILTERED" if score.hard_rejected else "SCORED"],
+    )
+    session.commit()
+    return "HARD_FILTERED" if score.hard_rejected else "SCORED"
 
 
 def persist_discovery_batch(
@@ -421,6 +519,27 @@ def _discovery_event(
                 "external_conversation_id": item.summary.external_conversation_id,
                 "recruiter_name": item.summary.recruiter_name,
                 "job_title": item.summary.job_title,
+            },
+        )
+    )
+
+
+def _inbound_scoring_event(
+    session: Session,
+    run: db.AgentRun,
+    conversation: db.Conversation,
+    event_type: str,
+    reasons: list[str],
+) -> None:
+    session.add(
+        db.AgentRunEvent(
+            agent_run_id=run.id,
+            event_type=event_type,
+            entity_type="conversation",
+            reason_codes=reasons,
+            metadata_json={
+                "conversation_id": str(conversation.id),
+                "job_id": str(conversation.job_id),
             },
         )
     )
