@@ -288,6 +288,7 @@ def reconcile_action(
         action.failure_code = None
         action.observed_content = result.observed_content
         action.finished_at = datetime.now(UTC)
+        _ensure_telegram_conversation(session, action)
         reasons = ["PLATFORM_READBACK_CONFIRMED_SENT"]
     elif (
         result.outcome is ExecutionOutcome.FAILED_RETRYABLE
@@ -443,6 +444,8 @@ def _finish(
                 external_reference=result.external_reference,
             )
         )
+    if target is ActionStatus.SUCCEEDED:
+        _ensure_telegram_conversation(session, action)
     _audit(
         session,
         "ACTION_EXECUTION_FINISHED",
@@ -454,6 +457,72 @@ def _finish(
     )
     session.commit()
     session.refresh(action)
+
+
+def _ensure_telegram_conversation(
+    session: Session,
+    action: db.ActionQueue,
+) -> db.Conversation | None:
+    """Telegram 首次招呼发送成功后，建立可审计的实际沟通会话。"""
+    if (
+        action.platform != "TELEGRAM"
+        or action.action_type != "GREETING"
+        or action.job_id is None
+    ):
+        return None
+    recruiter = action.target_recruiter.strip()
+    if not recruiter:
+        return None
+    external_id = action.target_conversation_key or (
+        f"telegram:{recruiter.removeprefix('@').lower()}"
+    )
+    conversation = session.scalar(
+        select(db.Conversation).where(
+            db.Conversation.user_id == action.user_id,
+            db.Conversation.platform == "TELEGRAM",
+            db.Conversation.external_conversation_id == external_id,
+        )
+    )
+    created = conversation is None
+    if conversation is None:
+        conversation = db.Conversation(
+            user_id=action.user_id,
+            job_id=action.job_id,
+            strategy_id=action.strategy_id,
+            platform="TELEGRAM",
+            external_conversation_id=external_id,
+            recruiter_name=recruiter,
+            observed_company_name=action.target_company,
+            observed_job_title=action.target_job_title,
+            state="ACTIVE",
+        )
+        session.add(conversation)
+        session.flush()
+    draft = session.get(db.GeneratedDraft, action.draft_id) if action.draft_id else None
+    if draft is not None:
+        draft.conversation_id = conversation.id
+        if draft.job_score_id:
+            conversation.latest_job_score_id = draft.job_score_id
+    action.conversation_id = conversation.id
+    if created:
+        session.add(
+            db.AuditEvent(
+                user_id=action.user_id,
+                actor_type="SYSTEM",
+                event_type="TELEGRAM_CONVERSATION_STARTED",
+                entity_type="conversation",
+                entity_id=conversation.id,
+                before_state=None,
+                after_state="ACTIVE",
+                reason_codes=["GREETING_SENT"],
+                metadata_json={
+                    "platform": "TELEGRAM",
+                    "action_id": str(action.id),
+                },
+                correlation_id=str(action.id),
+            )
+        )
+    return conversation
 
 
 def _task_bundle(

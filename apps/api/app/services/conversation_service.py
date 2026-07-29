@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
@@ -180,11 +180,31 @@ def import_message(
     return _message_response(message)
 
 
-def list_conversations(session: Session) -> list[dict[str, object]]:
+def list_conversations(
+    session: Session,
+    page: int,
+    page_size: int,
+    *,
+    job_id: object | None = None,
+    platform: str | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    query = select(db.Conversation).where(
+        db.Conversation.user_id == DEFAULT_USER_ID
+    )
+    if job_id is not None:
+        query = query.where(db.Conversation.job_id == job_id)
+    if platform:
+        query = query.where(db.Conversation.platform == platform)
+    total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     conversations = session.scalars(
-        select(db.Conversation)
-        .where(db.Conversation.user_id == DEFAULT_USER_ID)
-        .order_by(db.Conversation.created_at.desc(), db.Conversation.id.desc())
+        query
+        .order_by(
+            db.Conversation.updated_at.desc(),
+            db.Conversation.created_at.desc(),
+            db.Conversation.id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
     items: list[dict[str, object]] = []
     for conversation in conversations:
@@ -253,7 +273,7 @@ def list_conversations(session: Session) -> list[dict[str, object]]:
                 ),
             }
         )
-    return items
+    return items, total
 
 
 def create_reply_draft(

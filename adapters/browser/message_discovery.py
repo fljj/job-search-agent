@@ -369,6 +369,11 @@ class MaimaiMessageDiscoveryAdapter(MessageDiscoveryAdapter):
     def _include_summary(self, summary: BrowserConversationSummary) -> bool:
         if summary.recruiter_name in self.recommendation_rules.official_accounts:
             return False
+        if any(
+            account in (summary.job_title or "")
+            for account in self.recommendation_rules.official_accounts
+        ):
+            return False
         if summary.category in {"OFFICIAL", "RECOMMENDATION", "SYSTEM_RECOMMENDATION"}:
             return False
         preview = summary.last_message_text or ""

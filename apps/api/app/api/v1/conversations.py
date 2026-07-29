@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.v1.helpers import response
@@ -32,8 +32,23 @@ router = APIRouter(tags=["conversations"])
 
 
 @router.get("/conversations")
-def list_all(session: Session = Depends(get_session)) -> dict[str, object]:
-    return response({"items": list_conversations(session)})
+def list_all(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    job_id: UUID | None = None,
+    platform: str | None = None,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    items, total = list_conversations(
+        session,
+        page,
+        page_size,
+        job_id=job_id,
+        platform=platform,
+    )
+    return response(
+        {"items": items, "page": page, "page_size": page_size, "total": total}
+    )
 
 
 @router.post("/conversations")

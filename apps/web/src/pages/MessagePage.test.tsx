@@ -13,6 +13,7 @@ describe('MessagePage', () => {
 
   it('不匹配会话明确显示不会发送简历且不展示附件名', async () => {
     vi.mocked(api).mockResolvedValue({
+      total: 1,
       items: [{
         id: 'conversation-1',
         platform: 'BOSS',
@@ -42,6 +43,7 @@ describe('MessagePage', () => {
 
   it('可以从消息跳转到对应职位', async () => {
     vi.mocked(api).mockResolvedValue({
+      total: 1,
       items: [{
         id: 'conversation-1',
         platform: 'BOSS',
@@ -59,5 +61,42 @@ describe('MessagePage', () => {
 
     fireEvent.click(await screen.findByText('查看职位'))
     expect(window.location.hash).toBe('#jobs?job_id=job-1')
+  })
+
+  it('使用服务端总数分页并支持按平台筛选', async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({
+        total: 41,
+        items: [{
+          id: 'conversation-1',
+          platform: 'BOSS',
+          recruiter_name: '招聘人',
+          state: 'ACTIVE',
+          qualification_status: 'UNKNOWN',
+          qualification_evidence: [],
+        }],
+      })
+      .mockResolvedValueOnce({
+        total: 1,
+        items: [{
+          id: 'conversation-21',
+          platform: 'MAIMAI',
+          recruiter_name: '脉脉招聘人',
+          state: 'ACTIVE',
+          qualification_status: 'UNKNOWN',
+          qualification_evidence: [],
+        }],
+      })
+
+    render(<MessagePage />)
+
+    await screen.findByText('共 41 条会话')
+    fireEvent.mouseDown(screen.getByText('全部平台'))
+    fireEvent.click(await screen.findByText('脉脉'))
+
+    await screen.findByText('脉脉招聘人')
+    expect(api).toHaveBeenLastCalledWith(
+      '/conversations?page=1&page_size=20&platform=MAIMAI',
+    )
   })
 })

@@ -291,8 +291,9 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
   配置对应 API Key 的选项；保存后后续调用与健康探针立即生效。
 - `GET /api/v1/automation/runs`：按时间倒序返回 Agent 状态、心跳、计数、租约和暂停原因。
 - `GET /api/v1/automation/actions`：仅返回 `authorization_source=AUTO` 的普通自动动作及发送结果/失败证据。
-- `GET /api/v1/conversations`：返回对话绑定策略、可选最新评分、页面观察到的公司/
-  职位、资格成熟度、最新草稿和简历动作证据。
+- `GET /api/v1/conversations`：使用 `page/page_size` 服务端分页，可按 `platform/job_id`
+  筛选；返回对话绑定策略、可选最新评分、页面观察到的公司/职位、资格成熟度、
+  最新草稿和简历动作证据。脉脉系统推荐不进入该列表，普通招聘私信进入该列表。
 
 以上接口均为只读展示接口。启动、暂停和恢复仍分别使用既有的
 `POST /automation/runs`、`POST /automation/runs/{id}/pause` 和

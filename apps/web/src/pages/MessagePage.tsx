@@ -1,4 +1,4 @@
-import { Button, Card, Space, Table, Tag } from 'antd'
+import { Button, Card, Select, Space, Table, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
@@ -13,6 +13,9 @@ interface ConversationSummary {
   latest_draft_decision?: string; latest_draft_reason_codes?: string[]
   resume_action_status?: string; resume_attachment_name?: string
 }
+interface ConversationListResult { items: ConversationSummary[]; total: number }
+
+const DEFAULT_PAGE_SIZE = 20
 
 const qualificationLabels: Record<string, string> = {
   UNKNOWN: '信息不足',
@@ -92,20 +95,81 @@ function decisionContent(item: ConversationSummary) {
 
 export function MessagePage() {
   const [items, setItems] = useState<ConversationSummary[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [platform, setPlatform] = useState<string>()
+  const [loading, setLoading] = useState(true)
   const linkedJobId = new URLSearchParams(
     window.location.hash.split('?')[1] ?? '',
   ).get('job_id')
+  const load = async (
+    targetPage = page,
+    targetPageSize = pageSize,
+    targetPlatform = platform,
+  ) => {
+    const query = new URLSearchParams({
+      page: String(targetPage),
+      page_size: String(targetPageSize),
+    })
+    if (linkedJobId) query.set('job_id', linkedJobId)
+    if (targetPlatform) query.set('platform', targetPlatform)
+    setLoading(true)
+    try {
+      const data = await api<ConversationListResult>(`/conversations?${query}`)
+      setItems(data.items)
+      setTotal(data.total)
+    } finally {
+      setLoading(false)
+    }
+  }
   useEffect(() => {
-    void api<{ items: ConversationSummary[] }>('/conversations').then((data) => setItems(data.items))
-  }, [])
-  const visibleItems = linkedJobId
-    ? items.filter((item) => item.job_id === linkedJobId)
-    : items
+    const query = new URLSearchParams({
+      page: '1',
+      page_size: String(DEFAULT_PAGE_SIZE),
+    })
+    if (linkedJobId) query.set('job_id', linkedJobId)
+    void api<ConversationListResult>(`/conversations?${query}`).then((data) => {
+      setItems(data.items)
+      setTotal(data.total)
+      setPage(1)
+      setLoading(false)
+    })
+  }, [linkedJobId])
   return <Card title="招聘沟通监控" extra={<Space>
     {linkedJobId && <Button onClick={() => { window.location.hash = 'messages' }}>显示全部消息</Button>}
     <Tag color="blue">普通沟通由 Agent 自动处理</Tag>
   </Space>}>
-    <Table rowKey="id" dataSource={visibleItems} columns={[
+    <Space style={{ marginBottom: 16 }}>
+      <Select allowClear placeholder="全部平台" value={platform}
+        style={{ minWidth: 160 }}
+        options={[
+          { value: 'BOSS', label: 'BOSS直聘' },
+          { value: 'MAIMAI', label: '脉脉' },
+          { value: 'TELEGRAM', label: 'Telegram' },
+        ]}
+        onChange={(value) => {
+          setPlatform(value)
+          setPage(1)
+          void load(1, pageSize, value)
+        }} />
+    </Space>
+    <Table rowKey="id" dataSource={items} loading={loading}
+      pagination={{
+        current: page,
+        pageSize,
+        total,
+        showSizeChanger: true,
+        showTotal: (count) => `共 ${count} 条会话`,
+      }}
+      onChange={(pagination) => {
+        const nextPage = pagination.current ?? 1
+        const nextPageSize = pagination.pageSize ?? pageSize
+        setPage(nextPage)
+        setPageSize(nextPageSize)
+        void load(nextPage, nextPageSize)
+      }}
+      columns={[
       { title: '平台', dataIndex: 'platform' },
       { title: '公司/职位', render: (_: unknown, item: ConversationSummary) =>
         <Space direction="vertical" size={0}><strong>{item.company_name ?? '-'}</strong>

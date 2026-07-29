@@ -324,10 +324,15 @@ def _extract_conversation(
                 page, platform, version, SessionStatus.SESSION_PAGE_CHANGED, "INVALID_MESSAGE_TIME"
             )
         direction_value = element.attribute("", selectors.message_direction_attribute)
+        style_value = element.attribute("", "style")
         class_names = (element.attribute("", "class") or "").split()
         direction = (
             MessageDirection.OUTBOUND
-            if (direction_value == "outbound" or selectors.message_outbound_class in class_names)
+            if (
+                direction_value == "outbound"
+                or "row-reverse" in (style_value or "")
+                or selectors.message_outbound_class in class_names
+            )
             else MessageDirection.INBOUND
         )
         messages.append(
