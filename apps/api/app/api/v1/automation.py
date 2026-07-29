@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.v1.helpers import response
-from apps.api.app.core.config import get_settings
+from apps.api.app.core.config import reload_settings
 from apps.api.app.core.database import get_session
 from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.schemas.automation import (
@@ -107,7 +107,7 @@ def runs(session: Session = Depends(get_session)) -> dict[str, object]:
 def retry_llm_circuit(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    settings = get_settings()
+    settings = reload_settings()
     return response(
         probe_llm_circuit(
             session,

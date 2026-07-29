@@ -96,7 +96,9 @@ export function OverviewPage() {
         <span>原因：{llmCircuit.failure_code ?? '正在探测'}；已探测 {llmCircuit.probe_attempt_count} 次
           {llmCircuit.next_probe_at
             ? `；下次自动重试：${new Date(llmCircuit.next_probe_at).toLocaleString('zh-CN')}` : ''}</span>
-        <Button danger loading={retryingLlm} onClick={() => void retryLlm()}>立即重试 LLM</Button>
+        <Button danger loading={retryingLlm} onClick={() => void retryLlm()}>
+          重新加载配置并重试 LLM
+        </Button>
       </Space>} />}
     {(!operations?.database_ready || !operations?.llm_configured || safetyErrors > 0) &&
       <Alert type="error" showIcon message="Agent 当前存在阻断项"

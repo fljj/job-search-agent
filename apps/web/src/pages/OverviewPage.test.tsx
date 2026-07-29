@@ -115,7 +115,9 @@ describe('OverviewPage 重新连接', () => {
     const successSpy = vi.spyOn(message, 'success').mockImplementation(() => undefined as never)
 
     render(<OverviewPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '立即重试 LLM' }))
+    fireEvent.click(await screen.findByRole('button', {
+      name: '重新加载配置并重试 LLM',
+    }))
 
     await waitFor(() => expect(api).toHaveBeenCalledWith(
       '/automation/llm-circuit/retry',

@@ -1,6 +1,7 @@
+import pytest
 from pydantic import SecretStr
 
-from apps.api.app.core.config import Settings
+from apps.api.app.core.config import Settings, get_settings, reload_settings
 
 
 def test_llm_is_unconfigured_without_api_key() -> None:
@@ -25,3 +26,21 @@ def test_zhipu_never_reuses_qwen_api_key() -> None:
     )
 
     assert settings.llm_configured is False
+
+
+def test_reload_settings_reads_updated_llm_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ZHIPU_API_KEY", "first-test-key")
+    first = reload_settings()
+    assert first.selected_llm_api_key is not None
+    assert first.selected_llm_api_key.get_secret_value() == "first-test-key"
+
+    monkeypatch.setenv("ZHIPU_API_KEY", "second-test-key")
+    cached = get_settings()
+    assert cached.selected_llm_api_key is not None
+    assert cached.selected_llm_api_key.get_secret_value() == "first-test-key"
+
+    refreshed = reload_settings()
+    assert refreshed.selected_llm_api_key is not None
+    assert refreshed.selected_llm_api_key.get_secret_value() == "second-test-key"

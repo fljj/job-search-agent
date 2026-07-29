@@ -75,3 +75,9 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def reload_settings() -> Settings:
+    """重新读取运行配置，供受控的 LLM 配置热重载使用。"""
+    get_settings.cache_clear()
+    return get_settings()

@@ -30,7 +30,7 @@ from adapters.browser.message_discovery import (
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from adapters.browser.telegram_jobs import TelegramJobDiscoveryAdapter
 from apps.api.app.core.browser_config import get_browser_selectors
-from apps.api.app.core.config import get_settings
+from apps.api.app.core.config import get_settings, reload_settings
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.core.job_parser_config import get_job_parser_config
 from apps.api.app.core.llm import build_llm_provider
@@ -655,6 +655,7 @@ def main() -> None:
                     with SessionLocal() as circuit_session:
                         circuit_open = llm_circuit_is_open(circuit_session)
                         if circuit_open:
+                            settings = reload_settings()
                             circuit = probe_llm_circuit(
                                 circuit_session,
                                 settings,
