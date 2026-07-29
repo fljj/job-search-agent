@@ -17,6 +17,7 @@ describe('JobPage', () => {
         items: [{ id: 'strategy-1', name: '远程后端', enabled: true }],
       })
       .mockResolvedValueOnce({
+        total: 1,
         items: [{
           id: 'job-1',
           title: 'Java后端',
@@ -52,6 +53,7 @@ describe('JobPage', () => {
         items: [{ id: 'strategy-1', name: '远程后端', enabled: true }],
       })
       .mockResolvedValueOnce({
+        total: 1,
         items: [{
           id: 'job-1',
           title: 'Java后端',
@@ -86,8 +88,9 @@ describe('JobPage', () => {
       .mockResolvedValueOnce({
         items: [{ id: 'strategy-1', name: '远程后端', enabled: true }],
       })
-      .mockResolvedValueOnce({ items: [] })
+      .mockResolvedValueOnce({ items: [], total: 0 })
       .mockResolvedValueOnce({
+        total: 1,
         items: [{
           id: 'job-unscored',
           title: 'AI应用开发工程师（JAVA）',
@@ -105,6 +108,43 @@ describe('JobPage', () => {
     expect(api).toHaveBeenNthCalledWith(
       3,
       '/jobs?job_id=job-unscored',
+    )
+  })
+
+  it('使用服务端总数并在翻页时请求下一页', async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({
+        items: [{ id: 'strategy-1', name: '远程后端', enabled: true }],
+      })
+      .mockResolvedValueOnce({
+        total: 147,
+        items: [{
+          id: 'job-1',
+          title: '第一页职位',
+          company_name: '示例公司',
+          work_mode: 'REMOTE',
+          source: 'BOSS',
+        }],
+      })
+      .mockResolvedValueOnce({
+        total: 147,
+        items: [{
+          id: 'job-21',
+          title: '第二页职位',
+          company_name: '另一家公司',
+          work_mode: 'REMOTE',
+          source: 'BOSS',
+        }],
+      })
+
+    render(<JobPage />)
+
+    await screen.findByText('共 147 个职位')
+    fireEvent.click(screen.getByTitle('2'))
+
+    await screen.findByText('第二页职位')
+    expect(api).toHaveBeenLastCalledWith(
+      '/jobs?page=2&page_size=20&strategy_id=strategy-1',
     )
   })
 })

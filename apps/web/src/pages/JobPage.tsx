@@ -17,6 +17,8 @@ interface ScoreResult {
   llm_contact_reason?: string; automation_eligible: boolean; action_blockers: string[]
   details: ScoreDetail[]; match_reasons: string[]; risk_notes: string[]
 }
+interface JobListResult { items: Job[]; total: number }
+const DEFAULT_PAGE_SIZE = 20
 
 const dimensionLabels: Record<string, string> = {
   title: '岗位方向',
@@ -56,46 +58,69 @@ function linkedJobId() {
 async function fetchJobs(
   focusedJobId: string,
   selectedStrategyId: string,
+  page: number,
+  pageSize: number,
   workMode?: string,
   grade?: string,
 ) {
   const query = new URLSearchParams()
+  query.set('page', String(page))
+  query.set('page_size', String(pageSize))
   if (focusedJobId) query.set('job_id', focusedJobId)
   if (workMode) query.set('work_mode', workMode)
   if (selectedStrategyId) query.set('strategy_id', selectedStrategyId)
   if (grade) query.set('grade', grade)
-  const data = await api<{ items: Job[] }>(`/jobs?${query}`)
+  const data = await api<JobListResult>(`/jobs?${query}`)
   if (!focusedJobId || data.items.length > 0 || !selectedStrategyId) {
-    return data.items
+    return data
   }
   // 入站消息关联的职位可能尚未评分，不能被当前策略的评分筛选遮蔽。
-  const linked = await api<{ items: Job[] }>(
+  return api<JobListResult>(
     `/jobs?job_id=${encodeURIComponent(focusedJobId)}`,
   )
-  return linked.items
 }
 
 export function JobPage() {
   const [jobs, setJobs] = useState<Job[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [loading, setLoading] = useState(false)
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [strategyId, setStrategyId] = useState('')
   const [workMode, setWorkMode] = useState<string>()
   const [grade, setGrade] = useState<string>()
   const [score, setScore] = useState<ScoreResult>()
   const focusedJobId = linkedJobId()
-  const load = () => fetchJobs(
-    focusedJobId, strategyId, workMode, grade,
-  ).then(setJobs)
+  const load = async (targetPage = page, targetPageSize = pageSize) => {
+    setLoading(true)
+    try {
+      const data = await fetchJobs(
+        focusedJobId, strategyId, targetPage, targetPageSize, workMode, grade,
+      )
+      setJobs(data.items)
+      setTotal(data.total)
+    } finally {
+      setLoading(false)
+    }
+  }
   useEffect(() => {
     void api<{ items: Strategy[] }>('/strategies').then(async (strategyData) => {
       setStrategies(strategyData.items)
       const enabled = strategyData.items.find((item) => item.enabled)
+      setLoading(true)
       if (enabled) {
         setStrategyId(enabled.id)
-        setJobs(await fetchJobs(focusedJobId, enabled.id))
+        const data = await fetchJobs(focusedJobId, enabled.id, 1, DEFAULT_PAGE_SIZE)
+        setJobs(data.items)
+        setTotal(data.total)
       } else {
-        setJobs(await fetchJobs(focusedJobId, ''))
+        const data = await fetchJobs(focusedJobId, '', 1, DEFAULT_PAGE_SIZE)
+        setJobs(data.items)
+        setTotal(data.total)
       }
+      setPage(1)
+      setLoading(false)
     })
   }, [focusedJobId])
   const openScore = async (scoreId: string) => setScore(await api<ScoreResult>(`/scores/${scoreId}`))
@@ -111,8 +136,26 @@ export function JobPage() {
         ['REMOTE', 'ONSITE', 'HYBRID', 'UNKNOWN'].map((value) => ({ value, label: value }))} />
       <Select allowClear placeholder="等级" value={grade} onChange={setGrade} options={
         ['A', 'B', 'C'].map((value) => ({ value, label: value }))} />
-      <Button onClick={() => void load()}>筛选</Button>
-    </Space><Table rowKey="id" dataSource={jobs} columns={[
+      <Button onClick={() => {
+        setPage(1)
+        void load(1, pageSize)
+      }}>筛选</Button>
+    </Space><Table rowKey="id" dataSource={jobs} loading={loading}
+      pagination={{
+        current: page,
+        pageSize,
+        total,
+        showSizeChanger: true,
+        showTotal: (count) => `共 ${count} 个职位`,
+      }}
+      onChange={(pagination) => {
+        const nextPage = pagination.current ?? 1
+        const nextPageSize = pagination.pageSize ?? pageSize
+        setPage(nextPage)
+        setPageSize(nextPageSize)
+        void load(nextPage, nextPageSize)
+      }}
+      columns={[
       { title: '职位', dataIndex: 'title' }, { title: '公司', dataIndex: 'company_name' },
       { title: '模式', dataIndex: 'work_mode', render: (mode: string) => <Tag>{mode}</Tag> },
       { title: '地点', dataIndex: 'location' },
