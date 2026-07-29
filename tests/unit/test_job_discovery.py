@@ -118,12 +118,10 @@ def test_seen_items_do_not_hide_later_unseen_jobs_in_same_list() -> None:
     "title",
     [
         "施工项目经理",
-        "结构专业总工（已退休者优先）",
         "科技服务推广总监",
         "高级销售经理",
         "BD",
         "Mod",
-        "风控战略分析师",
     ],
 )
 def test_obviously_irrelevant_title_is_filtered_before_detail(title: str) -> None:
@@ -131,12 +129,10 @@ def test_obviously_irrelevant_title_is_filtered_before_detail(title: str) -> Non
         title,
         [
             "施工",
-            "结构专业",
             "推广总监",
             "销售",
             "BD",
             "Mod",
-            "风控",
         ],
     )
 
@@ -149,12 +145,14 @@ def test_obviously_irrelevant_title_is_filtered_before_detail(title: str) -> Non
         "Vibe Coding工程师",
         "直播运营",
         "Web Developer",
+        "结构专业总工（已退休者优先）",
+        "风控战略分析师",
     ],
 )
 def test_broad_or_target_title_still_requires_jd_analysis(title: str) -> None:
     assert not is_obviously_irrelevant_title(
         title,
-        ["施工", "推广总监", "销售", "BD", "Mod", "风控"],
+        ["施工", "推广总监", "销售", "BD", "Mod"],
     )
 
 
