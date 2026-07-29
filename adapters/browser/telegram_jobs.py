@@ -78,14 +78,13 @@ class TelegramJobDiscoveryAdapter:
                     if not message_id or post_id in seen:
                         continue
                     seen.add(post_id)
-                    parsed = parse_telegram_job_post(
+                    parsed = parse_telegram_job_posts(
                         channel.channel_id,
                         channel.name,
                         message_id,
                         str(raw.get("content") or ""),
                     )
-                    if parsed is not None:
-                        posts.append(parsed)
+                    posts.extend(parsed)
         return TelegramJobBatch(
             scanned_at=datetime.now(UTC),
             posts=posts,
@@ -126,7 +125,10 @@ class TelegramJobDiscoveryAdapter:
             "})()"
         )
         if not isinstance(point, dict):
-            raise ValueError(f"Telegram 会话列表中未找到频道：{channel_name}")
+            page._evaluate(
+                f"location.hash = {json.dumps(channel_id)}"
+            )
+            return
         coordinates = {
             "x": float(point["x"]),
             "y": float(point["y"]),
@@ -168,35 +170,125 @@ def parse_telegram_job_post(
     message_id: str,
     content: str,
 ) -> TelegramJobPost | None:
+    posts = parse_telegram_job_posts(
+        channel_id, channel_name, message_id, content
+    )
+    return posts[0] if posts else None
+
+
+def parse_telegram_job_posts(
+    channel_id: str,
+    channel_name: str,
+    message_id: str,
+    content: str,
+) -> list[TelegramJobPost]:
     if "#招聘" not in content:
-        return None
+        return []
     contact = _contact(content)
     title = _field(content, r"待招岗位[：:]\s*#?([^\n#]+)")
     company = _field(content, r"🏡\s*([^#\n]+)")
-    if not contact or not title or not company:
-        return None
+    if not contact:
+        return []
+    if not title or not company:
+        return _parse_numbered_job_post(
+            channel_id,
+            channel_name,
+            message_id,
+            content,
+            contact,
+        )
     salary = _field(content, r"薪酬福利[：:]\s*([^\n]+)")
     cooperation = _field(content, r"合作方式[：:]\s*([^\n]+)") or ""
     work_mode = "REMOTE" if "远程" in cooperation else "UNKNOWN"
     location = "远程" if work_mode == "REMOTE" else None
-    return TelegramJobPost(
-        channel_id=channel_id,
-        channel_name=channel_name,
-        message_id=message_id,
-        contact_username=contact,
-        job=BrowserJob(
-            external_job_id=f"{channel_id}:{message_id}",
-            title=title,
-            company_name=company,
-            industry="Web3",
-            location=location,
-            work_mode=work_mode,
-            salary_text=salary,
-            recruiter_name=contact,
-            description=content,
-            source_status="OPEN",
-        ),
+    return [
+        TelegramJobPost(
+            channel_id=channel_id,
+            channel_name=channel_name,
+            message_id=message_id,
+            contact_username=contact,
+            job=BrowserJob(
+                external_job_id=f"{channel_id}:{message_id}",
+                title=title,
+                company_name=company,
+                industry="Web3",
+                location=location,
+                work_mode=work_mode,
+                salary_text=salary,
+                recruiter_name=contact,
+                description=content,
+                source_status="OPEN",
+            ),
+        )
+    ]
+
+
+def _parse_numbered_job_post(
+    channel_id: str,
+    channel_name: str,
+    message_id: str,
+    content: str,
+    contact: str,
+) -> list[TelegramJobPost]:
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    company = _aggregate_company(lines)
+    numbered = [
+        (int(match.group(1)), match.group(2).strip())
+        for line in lines
+        if (match := re.match(r"^(\d+)[.、]\s*(.+)$", line))
+    ]
+    if not company or len(numbered) < 2:
+        return []
+    remote = any("远程" in line for line in lines)
+    global_context = "\n".join(
+        line
+        for line in lines
+        if "远程" in line or line.startswith(("http://", "https://"))
     )
+    posts: list[TelegramJobPost] = []
+    for ordinal, (_, job_line) in enumerate(numbered, start=1):
+        title = re.split(r"\s*(?:\(|（|[-–—]\s)", job_line, maxsplit=1)[0]
+        title = title.strip(" #❗️")
+        if not title:
+            continue
+        posts.append(
+            TelegramJobPost(
+                channel_id=channel_id,
+                channel_name=channel_name,
+                message_id=message_id,
+                contact_username=contact,
+                job=BrowserJob(
+                    external_job_id=f"{channel_id}:{message_id}:{ordinal}",
+                    title=title,
+                    company_name=company,
+                    industry="Web3",
+                    location="远程" if remote else None,
+                    work_mode="REMOTE" if remote else "UNKNOWN",
+                    salary_text=None,
+                    recruiter_name=contact,
+                    description=(
+                        f"{company}\n岗位：{job_line}\n{global_context}\n"
+                        f"Telegram: {contact}"
+                    ),
+                    source_status="OPEN",
+                ),
+            )
+        )
+    return posts
+
+
+def _aggregate_company(lines: list[str]) -> str | None:
+    try:
+        start = next(index for index, line in enumerate(lines) if "#招聘" in line)
+    except StopIteration:
+        return None
+    for line in lines[start + 1 :]:
+        if line.startswith(("#", "http://", "https://")):
+            continue
+        if re.match(r"^\d+[.、]", line):
+            return None
+        return re.split(r"\s+[-–—]\s+", line, maxsplit=1)[0].strip()
+    return None
 
 
 def _field(content: str, pattern: str) -> str | None:

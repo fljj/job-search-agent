@@ -357,8 +357,6 @@ def _proactive_safety_gaps(job: db.Job, recruiter_name: str) -> list[str]:
         reasons.append("ANONYMOUS_COMPANY")
     if job.work_mode == "UNKNOWN":
         reasons.append("WORK_MODE_UNKNOWN")
-    if not job.salary_text:
-        reasons.append("SALARY_UNKNOWN")
     if not recruiter_name:
         reasons.append("RECRUITER_UNKNOWN")
     if not job.external_job_id:

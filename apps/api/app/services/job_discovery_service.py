@@ -339,8 +339,6 @@ def _job_safety_reasons(job: object) -> list[str]:
         reasons.append("ANONYMOUS_COMPANY")
     if job.work_mode == "UNKNOWN":
         reasons.append("WORK_MODE_UNKNOWN")
-    if not job.salary_text:
-        reasons.append("SALARY_UNKNOWN")
     if not job.recruiter_name:
         reasons.append("RECRUITER_UNKNOWN")
     return reasons

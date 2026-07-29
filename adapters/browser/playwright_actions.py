@@ -133,7 +133,9 @@ class PlaywrightActionExecutor:
                 )
             username = command.recruiter.removeprefix("@")
             with RawCdpPageReader(matches[0]) as page:
-                if not self._open_telegram_contact(page, username):
+                contact_opened = self._open_telegram_contact(page, username)
+                existing_draft = self._telegram_composer_content(page)
+                if not contact_opened and existing_draft != command.content:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="TELEGRAM_CONTACT_NOT_READY",
@@ -157,29 +159,42 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="TELEGRAM_COMPOSER_FILL_FAILED",
                     )
-                self._trusted_click(page, composer)
-                page._command("Input.insertText", {"text": command.content})
-                if not page._evaluate(
-                    "(() => { const element = document.querySelector("
-                    "'[contenteditable=true][role=textbox][aria-label=Message]');"
-                    f"return (element?.textContent || '').trim() === {json.dumps(command.content)};"
-                    "})()"
-                ):
+                composer_content = self._telegram_composer_content(page)
+                if composer_content and composer_content != command.content:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
-                        error_code="TELEGRAM_COMPOSER_FILL_FAILED",
+                        error_code="TELEGRAM_COMPOSER_NOT_EMPTY",
                     )
-                performed = True
-                send_button = self._telegram_element_point(
-                    page,
-                    "button.send.main-button, button.Button.send, "
-                    "button[aria-label='Send Message']",
-                )
+                if not composer_content:
+                    self._trusted_click(page, composer)
+                    page._command("Input.insertText", {"text": command.content})
+                    if not page._evaluate(
+                        "(() => { const element = document.querySelector("
+                        "'[contenteditable=true][role=textbox][aria-label=Message]');"
+                        f"return (element?.textContent || '').trim() === {json.dumps(command.content)};"
+                        "})()"
+                    ):
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                            error_code="TELEGRAM_COMPOSER_FILL_FAILED",
+                        )
+                    performed = True
+                send_button = None
+                for _ in range(50):
+                    send_button = self._telegram_element_point(
+                        page,
+                        "button.send.main-button, button.Button.send, "
+                        "button[aria-label='Send Message']",
+                    )
+                    if send_button is not None:
+                        break
+                    time.sleep(0.1)
                 if send_button is None:
                     return ExecutionResult(
-                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="TELEGRAM_SEND_BUTTON_NOT_READY",
                     )
+                performed = True
                 self._trusted_click(page, send_button)
                 for _ in range(50):
                     observed = page._evaluate(
@@ -231,8 +246,9 @@ class PlaywrightActionExecutor:
         for _ in range(50):
             point = page._evaluate(
                 "(() => { const handle = [...document.querySelectorAll('.handle')].find("
-                f"item => (item.textContent || '').trim().toLowerCase() === {json.dumps(expected)}"
-                "); const element = handle?.closest('[role=button]');"
+                "item => (item.textContent || '').trim().toLowerCase()"
+                f".replace(/^@/, '') === {json.dumps(expected)}"
+                "); const element = handle?.closest('[role=button], .ListItem-button');"
                 "if (!element) return null; const rect = element.getBoundingClientRect();"
                 "return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}; })()"
             )
@@ -264,6 +280,16 @@ class PlaywrightActionExecutor:
             "return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}; })()"
         )
         return point if isinstance(point, dict) else None
+
+    @staticmethod
+    def _telegram_composer_content(page: RawCdpPageReader) -> str:
+        content = page._evaluate(
+            "(() => { const element = document.querySelector("
+            "'[contenteditable=true][role=textbox][aria-label=Message]');"
+            "return (element?.textContent || '').trim();"
+            "})()"
+        )
+        return content if isinstance(content, str) else ""
 
     @staticmethod
     def _trusted_click(
@@ -795,6 +821,8 @@ class PlaywrightActionExecutor:
     def observe(self, cdp_url: str, command: ApprovedCommand) -> ExecutionResult:
         """只读对账文本动作；确认唯一目标页后判断精确内容是否已经出现。"""
         validate_local_cdp_url(cdp_url)
+        if command.action_type == "GREETING" and command.platform == "TELEGRAM":
+            return self._observe_telegram_greeting(cdp_url, command)
         if command.action_type in {
             "PLATFORM_RECOMMENDATION_ACCEPT",
             "PLATFORM_RECOMMENDATION_REJECT",
@@ -862,6 +890,67 @@ class PlaywrightActionExecutor:
                             f"{page.url}:{command.model_dump_json()}".encode()
                         ).hexdigest(),
                         observed_content=command.content,
+                    )
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="RESULT_CONFIRMED_NOT_SENT",
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_READ_ERROR",
+            )
+
+    def _observe_telegram_greeting(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        if not command.content or not command.recruiter.startswith("@"):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="TELEGRAM_TARGET_INVALID",
+            )
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches = [
+                str(item["webSocketDebuggerUrl"])
+                for item in targets
+                if item.get("type") == "page"
+                and str(item.get("url") or "").startswith(
+                    "https://web.telegram.org/a/"
+                )
+                and item.get("webSocketDebuggerUrl")
+            ]
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="TELEGRAM_PAGE_NOT_UNIQUE",
+                )
+            username = command.recruiter.removeprefix("@")
+            with RawCdpPageReader(matches[0]) as page:
+                contact_opened = self._open_telegram_contact(page, username)
+                existing_draft = self._telegram_composer_content(page)
+                observed = bool(
+                    page._evaluate(
+                        "[...document.querySelectorAll('.Message.own')].some("
+                        "item => (item.innerText || '').includes("
+                        f"{json.dumps(command.content)}))"
+                    )
+                )
+                if observed:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.SUCCEEDED,
+                        evidence_hash=hashlib.sha256(
+                            f"{page.url}:{command.model_dump_json()}".encode()
+                        ).hexdigest(),
+                        observed_content=command.content,
+                    )
+                if not contact_opened and existing_draft != command.content:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        error_code="TELEGRAM_CONTACT_NOT_READY",
                     )
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_RETRYABLE,

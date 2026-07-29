@@ -277,7 +277,6 @@ def test_closes_only_detail_targets_created_for_batch(
         ({"external_job_id": None}, "EXTERNAL_JOB_ID_MISSING"),
         ({"company_name": "匿名公司"}, "ANONYMOUS_COMPANY"),
         ({"work_mode": "UNKNOWN"}, "WORK_MODE_UNKNOWN"),
-        ({"salary_text": None}, "SALARY_UNKNOWN"),
         ({"recruiter_name": None}, "RECRUITER_UNKNOWN"),
     ],
 )
@@ -289,6 +288,14 @@ def test_proactive_contact_requires_complete_safe_job(
     for field, value in changes.items():
         setattr(job, field, value)
     assert reason in _job_safety_reasons(job)
+
+
+def test_proactive_contact_allows_salary_to_be_confirmed_later() -> None:
+    job = detail(summary(1)).job
+    assert job is not None
+    job.salary_text = None
+
+    assert "SALARY_UNKNOWN" not in _job_safety_reasons(job)
 
 
 def test_retry_uses_exponential_backoff_and_stops_after_limit(
