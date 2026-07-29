@@ -26,6 +26,7 @@ TERMINAL_CONVERSATION_STATES = {
     "PAUSED",
     "OUTCOME_UNKNOWN",
 }
+UNSTABLE_CONVERSATION_RESCAN_INTERVAL = timedelta(minutes=5)
 
 
 def persist_discovery_batch(
@@ -141,6 +142,17 @@ def persist_discovery_batch(
         _discovery_event(session, run, item, reasons)
         _record_state_sequence(session, run, item, ["RETURNING_TO_LIST"])
     root_cursor = dict(run.cursor or {})
+    previous_message_cursor = root_cursor.get("message_discovery")
+    previous_message_cursor = (
+        previous_message_cursor
+        if isinstance(previous_message_cursor, dict)
+        else {}
+    )
+    seen_message_keys, unstable_rescan_at = _next_seen_message_keys(
+        batch,
+        previous_message_cursor,
+        current,
+    )
     root_cursor["message_discovery"] = {
         "discovery_state": "LIST_READY",
         "partition": batch.partition,
@@ -153,12 +165,48 @@ def persist_discovery_batch(
             batch.items[-1].summary.last_message_id if batch.items else None
         ),
         "last_scan_at": batch.scanned_at.isoformat(),
-        "seen_message_keys": batch.seen_message_keys,
+        "seen_message_keys": seen_message_keys,
+        "unstable_rescan_at": unstable_rescan_at.isoformat(),
         "exhausted": batch.exhausted,
     }
     run.cursor = root_cursor
     session.commit()
     return counts
+
+
+def _next_seen_message_keys(
+    batch: MessageDiscoveryBatch,
+    previous_cursor: dict[str, object],
+    current: datetime,
+) -> tuple[list[str], datetime]:
+    raw_rescan_at = previous_cursor.get("unstable_rescan_at")
+    try:
+        previous_rescan_at = (
+            datetime.fromisoformat(str(raw_rescan_at))
+            if raw_rescan_at
+            else None
+        )
+    except ValueError:
+        previous_rescan_at = None
+    rescan_due = (
+        batch.exhausted
+        and (
+            previous_rescan_at is None
+            or current - previous_rescan_at
+            >= UNSTABLE_CONVERSATION_RESCAN_INTERVAL
+        )
+    )
+    if not rescan_due:
+        return batch.seen_message_keys, previous_rescan_at or current
+    # BOSS 部分列表项没有消息 ID、预览或可靠未读数，不能永久标记已读。
+    return (
+        [
+            key
+            for key in batch.seen_message_keys
+            if not key.endswith(":conversation")
+        ],
+        current,
+    )
 
 
 def record_ready_platform_session(

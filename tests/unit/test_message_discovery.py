@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from adapters.browser.message_discovery import (
     DiscoveredConversation,
     MessageDiscoveryAdapter,
+    MessageDiscoveryBatch,
     _matches_partition,
     _message_key,
     _normalize_duplicate_conversation_ids,
@@ -17,6 +18,7 @@ from adapters.browser.message_discovery import (
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.models import entities as db
 from apps.api.app.services.message_discovery_service import (
+    _next_seen_message_keys,
     record_ready_platform_session,
 )
 from packages.browser_worker.models import (
@@ -307,6 +309,52 @@ def test_unstable_seen_conversation_is_reopened_only_when_unread() -> None:
     assert select_discovery_candidates(
         [item], seen, scroll_position=0, limit=10
     ) == [item]
+
+
+def test_unstable_conversations_are_rechecked_after_full_scan_cooldown() -> None:
+    now = datetime.now(UTC)
+    batch = MessageDiscoveryBatch(
+        platform=Platform.BOSS,
+        partition="ALL",
+        scroll_position=20,
+        scanned_at=now,
+        seen_message_keys=[
+            "unstable:conversation",
+            "stable:message-1",
+        ],
+        exhausted=True,
+    )
+
+    seen, rescanned_at = _next_seen_message_keys(
+        batch,
+        {"unstable_rescan_at": (now - timedelta(minutes=6)).isoformat()},
+        now,
+    )
+
+    assert seen == ["stable:message-1"]
+    assert rescanned_at == now
+
+
+def test_unstable_conversations_are_not_reopened_every_scan_cycle() -> None:
+    now = datetime.now(UTC)
+    batch = MessageDiscoveryBatch(
+        platform=Platform.BOSS,
+        partition="ALL",
+        scroll_position=20,
+        scanned_at=now,
+        seen_message_keys=["unstable:conversation"],
+        exhausted=True,
+    )
+    last_rescan = now - timedelta(minutes=1)
+
+    seen, rescanned_at = _next_seen_message_keys(
+        batch,
+        {"unstable_rescan_at": last_rescan.isoformat()},
+        now,
+    )
+
+    assert seen == ["unstable:conversation"]
+    assert rescanned_at == last_rescan
 
 
 def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:
