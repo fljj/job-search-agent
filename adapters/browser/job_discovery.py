@@ -59,6 +59,7 @@ class BossJobDiscoveryAdapter:
         seen_job_ids: list[str] | None = None,
         target_job_ids: set[str] | None = None,
         irrelevant_title_keywords: list[str] | None = None,
+        relevant_title_keywords: list[str] | None = None,
         limit: int = 20,
         interval_seconds: int = 30,
     ) -> JobDiscoveryBatch:
@@ -105,7 +106,9 @@ class BossJobDiscoveryAdapter:
             items = []
             for summary in candidates:
                 if is_obviously_irrelevant_title(
-                    summary.title, irrelevant_title_keywords or []
+                    summary.title,
+                    irrelevant_title_keywords or [],
+                    relevant_title_keywords or [],
                 ):
                     items.append(
                         DiscoveredJob(
@@ -312,9 +315,17 @@ def select_job_candidates(
 
 
 def is_obviously_irrelevant_title(
-    title: str, irrelevant_keywords: list[str]
+    title: str,
+    irrelevant_keywords: list[str],
+    relevant_keywords: list[str] | None = None,
 ) -> bool:
     normalized_title = "".join(title.casefold().split())
+    if any(
+        normalized_keyword in normalized_title
+        for keyword in (relevant_keywords or [])
+        if (normalized_keyword := "".join(keyword.casefold().split()))
+    ):
+        return False
     return any(
         (
             normalized_title == normalized_keyword

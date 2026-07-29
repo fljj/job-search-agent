@@ -118,6 +118,7 @@ def test_seen_items_do_not_hide_later_unseen_jobs_in_same_list() -> None:
     "title",
     [
         "施工项目经理",
+        "结构专业总工（已退休者优先）",
         "科技服务推广总监",
         "高级销售经理",
         "BD",
@@ -128,7 +129,15 @@ def test_seen_items_do_not_hide_later_unseen_jobs_in_same_list() -> None:
 def test_obviously_irrelevant_title_is_filtered_before_detail(title: str) -> None:
     assert is_obviously_irrelevant_title(
         title,
-        ["施工", "推广总监", "销售", "BD", "Mod", "风控"],
+        [
+            "施工",
+            "结构专业",
+            "推广总监",
+            "销售",
+            "BD",
+            "Mod",
+            "风控",
+        ],
     )
 
 
@@ -146,6 +155,37 @@ def test_broad_or_target_title_still_requires_jd_analysis(title: str) -> None:
     assert not is_obviously_irrelevant_title(
         title,
         ["施工", "推广总监", "销售", "BD", "Mod", "风控"],
+    )
+
+
+def test_strategy_direction_overrides_ambiguous_irrelevant_business_word() -> None:
+    assert not is_obviously_irrelevant_title(
+        "银行风控系统 Java 开发工程师",
+        ["风控", "分析师", "销售"],
+        ["Java开发"],
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "风控系统建设负责人",
+        "量化分析师（Python开发方向）",
+    ],
+)
+def test_ambiguous_business_titles_are_not_in_default_irrelevant_config(
+    title: str,
+) -> None:
+    assert not is_obviously_irrelevant_title(
+        title,
+        [
+            "施工",
+            "结构专业",
+            "推广总监",
+            "销售",
+            "BD",
+            "Mod",
+        ],
     )
 
 

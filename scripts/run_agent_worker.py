@@ -295,6 +295,16 @@ def _run_boss_job_discovery(
         persisted_seen_jobs,
         [retry_job_id] if retry_job_id else [],
     )
+    strategy = session.get(db.JobStrategy, run.strategy_id)
+    relevant_title_keywords = (
+        [
+            rule.pattern
+            for rule in strategy.title_rules
+            if rule.rule_type == "INCLUDE"
+        ]
+        if strategy is not None
+        else []
+    )
     search_keys = get_settings().boss_job_searches
     adapter = BossJobDiscoveryAdapter(get_browser_selectors())
     try:
@@ -319,6 +329,7 @@ def _run_boss_job_discovery(
             seen_job_ids=seen_job_ids,
             target_job_ids={retry_job_id} if retry_job_id else None,
             irrelevant_title_keywords=(get_job_parser_config().irrelevant_title_keywords),
+            relevant_title_keywords=relevant_title_keywords,
             limit=min(
                 1 if retry_job_id else get_settings().boss_job_batch_size,
                 rules.hourly_scan_limit,
