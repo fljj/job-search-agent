@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from datetime import UTC, datetime
 from urllib.parse import quote, urljoin, urlparse
@@ -60,6 +61,7 @@ class BossJobDiscoveryAdapter:
         target_job_ids: set[str] | None = None,
         irrelevant_title_keywords: list[str] | None = None,
         relevant_title_keywords: list[str] | None = None,
+        direction_title_keywords: list[str] | None = None,
         limit: int = 20,
         interval_seconds: int = 30,
     ) -> JobDiscoveryBatch:
@@ -105,7 +107,20 @@ class BossJobDiscoveryAdapter:
             )
             items = []
             for summary in candidates:
-                if is_obviously_irrelevant_title(
+                if (
+                    direction_title_keywords is not None
+                    and not is_potentially_relevant_title(
+                        summary.title,
+                        direction_title_keywords,
+                    )
+                ):
+                    items.append(
+                        DiscoveredJob(
+                            summary=summary,
+                            reason_codes=["TITLE_DIRECTION_NOT_RELEVANT"],
+                        )
+                    )
+                elif is_obviously_irrelevant_title(
                     summary.title,
                     irrelevant_title_keywords or [],
                     relevant_title_keywords or [],
@@ -333,6 +348,27 @@ def is_obviously_irrelevant_title(
             else normalized_keyword in normalized_title
         )
         for keyword in irrelevant_keywords
+        if (normalized_keyword := "".join(keyword.casefold().split()))
+    )
+
+
+def is_potentially_relevant_title(
+    title: str,
+    direction_keywords: list[str],
+) -> bool:
+    normalized_title = "".join(title.casefold().split())
+    return any(
+        (
+            re.search(
+                rf"(?<![a-z0-9]){re.escape(keyword.casefold().strip())}"
+                r"(?![a-z0-9])",
+                title.casefold(),
+            )
+            is not None
+            if normalized_keyword.isascii() and len(normalized_keyword) <= 3
+            else normalized_keyword in normalized_title
+        )
+        for keyword in direction_keywords
         if (normalized_keyword := "".join(keyword.casefold().split()))
     )
 

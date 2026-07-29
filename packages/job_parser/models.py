@@ -70,6 +70,7 @@ class RuleParserConfig(BaseModel):
     full_time_bachelor_keywords: list[str] = Field(default_factory=list)
     part_time_keywords: list[str] = Field(default_factory=list)
     onsite_required_keywords: list[str] = Field(default_factory=list)
+    relevant_title_keywords: list[str] = Field(default_factory=list)
     irrelevant_title_keywords: list[str] = Field(default_factory=list)
 
 

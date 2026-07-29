@@ -9,6 +9,7 @@ from adapters.browser.job_discovery import (
     JobDiscoveryBatch,
     is_job_list_exhausted,
     is_obviously_irrelevant_title,
+    is_potentially_relevant_title,
     next_job_search,
     select_job_candidates,
     verify_job_target,
@@ -122,6 +123,9 @@ def test_seen_items_do_not_hide_later_unseen_jobs_in_same_list() -> None:
         "施工项目经理",
         "科技服务推广总监",
         "高级销售经理",
+        "客户支持专员",
+        "客服（Telegram & Discord）",
+        "房建技术总工",
         "BD",
         "Mod",
     ],
@@ -133,6 +137,9 @@ def test_obviously_irrelevant_title_is_filtered_before_detail(title: str) -> Non
             "施工",
             "推广总监",
             "销售",
+            "客户支持",
+            "客服",
+            "房建",
             "BD",
             "Mod",
         ],
@@ -163,6 +170,59 @@ def test_strategy_direction_overrides_ambiguous_irrelevant_business_word() -> No
         "银行风控系统 Java 开发工程师",
         ["风控", "分析师", "销售"],
         ["Java开发"],
+    )
+
+
+def test_target_direction_overrides_customer_service_keyword() -> None:
+    assert not is_obviously_irrelevant_title(
+        "Java开发（客服系统）",
+        ["客服"],
+        ["Java开发"],
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "银行系统研发",
+        "AI应用开发工程师（JAVA）",
+        "项目研发经理（JAVA方向）",
+        "风控系统建设负责人",
+        "量化分析师（Python开发方向）",
+        "直播运营",
+        "Java开发（客服系统）",
+    ],
+)
+def test_target_direction_passes_positive_title_gate(title: str) -> None:
+    assert is_potentially_relevant_title(
+        title,
+        [
+            "Java",
+            "开发",
+            "研发",
+            "系统建设",
+            "AI",
+            "直播运营",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "项目绿化养护区域经理",
+        "客户支持专员",
+        "房建技术总工",
+        "客服（Telegram & Discord）",
+        "Retail Manager",
+    ],
+)
+def test_unrelated_direction_is_filtered_by_positive_title_gate(
+    title: str,
+) -> None:
+    assert not is_potentially_relevant_title(
+        title,
+        ["Java", "开发", "研发", "系统建设", "AI", "直播运营"],
     )
 
 
