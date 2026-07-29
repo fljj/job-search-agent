@@ -44,6 +44,13 @@ TERMINAL_REJECTION_MARKERS = (
     "岗位已招到",
     "岗位已经招到",
 )
+CONVERSATION_REOPEN_MARKERS = (
+    "岗位符合我的方向",
+    "这个岗位符合我的方向",
+    "与我的方向匹配",
+    "可以继续沟通",
+    "希望继续沟通",
+)
 
 
 def persist_discovery_batch(
@@ -223,6 +230,11 @@ def _terminal_state_from_messages(
         normalized = "".join(content.split())
         if not normalized or any(mark in normalized for mark in ("吗", "？", "?")):
             continue
+        if (
+            message.direction is MessageDirection.OUTBOUND
+            and any(marker in normalized for marker in CONVERSATION_REOPEN_MARKERS)
+        ):
+            return None
         if not any(marker in normalized for marker in TERMINAL_REJECTION_MARKERS):
             continue
         if message.direction is MessageDirection.OUTBOUND:

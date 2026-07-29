@@ -81,6 +81,37 @@ def create_conversation(session: Session, payload: ConversationPayload) -> dict[
     return _conversation_response(conversation)
 
 
+def reopen_conversation(
+    session: Session,
+    conversation_id: object,
+) -> dict[str, object]:
+    """按用户明确指示重新开启已结束会话，不创建或发送回复。"""
+    conversation = _get_conversation(session, conversation_id)
+    if conversation.state == "ACTIVE":
+        return _conversation_response(conversation)
+    before_state = conversation.state
+    conversation.state = "ACTIVE"
+    conversation.processing_lease_owner = None
+    conversation.processing_lease_expires_at = None
+    session.add(
+        db.AuditEvent(
+            user_id=DEFAULT_USER_ID,
+            actor_type="USER",
+            event_type="CONVERSATION_REOPENED",
+            entity_type="conversation",
+            entity_id=conversation.id,
+            before_state=before_state,
+            after_state="ACTIVE",
+            reason_codes=["USER_CONFIRMED_REOPEN"],
+            metadata_json={"platform": conversation.platform},
+            correlation_id=f"conversation-reopen:{conversation.id}",
+        )
+    )
+    session.commit()
+    session.refresh(conversation)
+    return _conversation_response(conversation)
+
+
 def import_message(session: Session, conversation_id: object, payload: MessagePayload) -> MessageResponse:
     conversation = _get_conversation(session, conversation_id)
     existing = session.scalar(select(db.Message).where(

@@ -21,6 +21,7 @@ from apps.api.app.services.conversation_service import (
     edit_draft,
     import_message,
     list_conversations,
+    reopen_conversation,
 )
 from apps.api.app.services.qualification_service import (
     evaluate_conversation_qualification,
@@ -44,6 +45,14 @@ def create(payload: ConversationPayload, session: Session = Depends(get_session)
 def add_message(conversation_id: UUID, payload: MessagePayload,
                 session: Session = Depends(get_session)) -> dict[str, object]:
     return response(import_message(session, conversation_id, payload))
+
+
+@router.post("/conversations/{conversation_id}/reopen")
+def reopen(
+    conversation_id: UUID,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(reopen_conversation(session, conversation_id))
 
 
 @router.get("/conversations/{conversation_id}/qualification")

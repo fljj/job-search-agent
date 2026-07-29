@@ -395,6 +395,24 @@ def test_rejection_question_does_not_terminate_conversation() -> None:
     assert _terminal_state_from_messages([message]) is None
 
 
+def test_explicit_candidate_correction_supersedes_older_decline() -> None:
+    now = datetime.now(UTC)
+    decline = BrowserMessage(
+        external_message_id="outbound-decline",
+        content="综合考虑后，这次先不继续沟通了，祝招聘顺利。",
+        received_at=now - timedelta(minutes=1),
+        direction=MessageDirection.OUTBOUND,
+    )
+    correction = BrowserMessage(
+        external_message_id="outbound-correction",
+        content="抱歉，上面的信息是求职 Agent 发的，这个岗位符合我的方向。",
+        received_at=now,
+        direction=MessageDirection.OUTBOUND,
+    )
+
+    assert _terminal_state_from_messages([decline, correction]) is None
+
+
 def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:
     item = summary(1)
     item.category = "NEW_GREETING"
