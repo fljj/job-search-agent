@@ -151,6 +151,19 @@ def _discover_messages(
             )
         ).all()
     )
+    known_linked_job_ids = {
+        str(conversation_id): str(external_job_id)
+        for conversation_id, external_job_id in session.execute(
+            select(
+                db.Conversation.external_conversation_id,
+                db.Conversation.observed_external_job_id,
+            ).where(
+                db.Conversation.platform == run.platform,
+                db.Conversation.job_id.is_not(None),
+                db.Conversation.observed_external_job_id.is_not(None),
+            )
+        ).all()
+    }
     try:
         batch = adapter.scan(
             cdp_url,
@@ -160,6 +173,7 @@ def _discover_messages(
                 str(item) for item in (raw_seen if isinstance(raw_seen, list) else [])
             ],
             excluded_conversation_ids=terminal_conversation_ids,
+            known_linked_job_ids=known_linked_job_ids,
             limit=get_settings().agent_tick_batch_size,
         )
     except (OSError, TimeoutError, ValueError):

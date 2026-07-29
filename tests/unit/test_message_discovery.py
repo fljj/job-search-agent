@@ -97,6 +97,14 @@ def test_location_consent_uses_strategy_onsite_locations() -> None:
         run,
         "青岛市市南区",
     )
+    strategy.work_mode_rules[0].locations = [
+        SimpleNamespace(location_name="青岛市"),
+    ]
+    assert _location_consent_allowed(
+        session,
+        run,
+        "青岛市市南区",
+    )
 
 
 def test_target_verification_checks_stable_identity_not_recruiter_name_only() -> None:
@@ -155,6 +163,11 @@ def test_linked_job_is_read_even_when_conversation_has_job_id(
     )
     linked_reader = MagicMock(return_value=linked_job)
     monkeypatch.setattr(adapter, "_read_linked_job", linked_reader)
+    monkeypatch.setattr(
+        adapter,
+        "_linked_job_href",
+        lambda _page: "https://www.zhipin.com/job_detail/job-1.html",
+    )
 
     discovered = adapter._open_and_read(
         page,
@@ -168,6 +181,51 @@ def test_linked_job_is_read_even_when_conversation_has_job_id(
         "http://127.0.0.1:9222",
         cache=None,
     )
+
+
+def test_bound_unchanged_job_reuses_local_jd_without_opening_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = MessageDiscoveryAdapter(
+        Platform.BOSS,
+        get_browser_selectors(),
+    )
+    selected = summary(1)
+    result = detail(selected)
+    assert result.conversation is not None
+    result.conversation.messages = [
+        BrowserMessage(
+            external_message_id="message-1",
+            content="有新消息",
+            received_at=datetime.now(UTC),
+        )
+    ]
+    page = MagicMock()
+    page._evaluate.return_value = True
+    monkeypatch.setattr(
+        "adapters.browser.message_discovery.extract_current_page",
+        lambda *_args, **_kwargs: result,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_linked_job_href",
+        lambda _page: "https://www.zhipin.com/job_detail/job-1.html",
+    )
+    linked_reader = MagicMock()
+    monkeypatch.setattr(adapter, "_read_linked_job", linked_reader)
+
+    discovered = adapter._open_and_read(
+        page,
+        selected,
+        "http://127.0.0.1:9222",
+        known_linked_job_id="job-1",
+    )
+
+    assert discovered.job_detail is None
+    assert discovered.detail is not None
+    assert discovered.detail.conversation is not None
+    assert discovered.detail.conversation.external_job_id == "job-1"
+    linked_reader.assert_not_called()
 
 
 def test_boss_linked_job_url_falls_back_to_verified_component_job_id() -> None:

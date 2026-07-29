@@ -60,6 +60,7 @@ class MessageDiscoveryAdapter:
         scroll_position: int = 0,
         seen_message_keys: list[str] | None = None,
         excluded_conversation_ids: list[str] | None = None,
+        known_linked_job_ids: dict[str, str] | None = None,
         limit: int = 20,
     ) -> MessageDiscoveryBatch:
         validate_local_cdp_url(cdp_url)
@@ -97,6 +98,11 @@ class MessageDiscoveryAdapter:
                     item,
                     cdp_url,
                     linked_job_cache=linked_job_cache,
+                    known_linked_job_id=(
+                        (known_linked_job_ids or {}).get(
+                            item.external_conversation_id
+                        )
+                    ),
                 )
                 for item in candidates
             ]
@@ -159,6 +165,7 @@ class MessageDiscoveryAdapter:
         cdp_url: str,
         *,
         linked_job_cache: dict[str, ReadResult | None] | None = None,
+        known_linked_job_id: str | None = None,
     ) -> DiscoveredConversation:
         clicked = page._evaluate(
             "(() => { const selector = "
@@ -207,15 +214,19 @@ class MessageDiscoveryAdapter:
                     detail.conversation.external_conversation_id = (
                         summary.external_conversation_id
                     )
-                job_detail = (
-                    self._read_linked_job(
+                linked_href = self._linked_job_href(page) if not reasons else None
+                visible_job_id = _job_id_from_href(linked_href)
+                reuse_linked_job = bool(
+                    known_linked_job_id
+                    and visible_job_id == known_linked_job_id
+                )
+                job_detail = None
+                if not reasons and not reuse_linked_job:
+                    job_detail = self._read_linked_job(
                         page,
                         cdp_url,
                         cache=linked_job_cache,
                     )
-                    if not reasons
-                    else None
-                )
                 if (
                     job_detail
                     and job_detail.job
@@ -224,6 +235,8 @@ class MessageDiscoveryAdapter:
                     detail.conversation.external_job_id = (
                         job_detail.job.external_job_id
                     )
+                elif reuse_linked_job:
+                    detail.conversation.external_job_id = known_linked_job_id
                 return DiscoveredConversation(
                     summary=summary,
                     detail=detail if not reasons else None,
@@ -393,6 +406,13 @@ def _verify_target(
     ):
         return ["CONVERSATION_JOB_ID_MISMATCH"]
     return []
+
+
+def _job_id_from_href(href: str | None) -> str | None:
+    if not href:
+        return None
+    match = re.search(r"/job_detail/([^/.]+)\.html", href)
+    return match.group(1) if match else None
 
 
 def _normalize_duplicate_conversation_ids(

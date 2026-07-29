@@ -353,10 +353,7 @@ class PlaywrightActionExecutor:
         location_consent = command.action_type == "LOCATION_CONSENT_ACCEPT"
         if (
             command.platform != "BOSS"
-            or (
-                location_consent
-                and (not command.content or "济南" not in command.content)
-            )
+            or (location_consent and not command.content)
             or (
                 not location_consent
                 and command.content not in allowed_prompts

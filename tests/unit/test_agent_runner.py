@@ -201,6 +201,7 @@ def test_message_discovery_reuses_platform_cursor(
         scroll_position=20,
         seen_message_keys=["chat-1:message-1"],
         excluded_conversation_ids=["closed-chat"],
+        known_linked_job_ids={},
         limit=10,
     )
     assert persisted == [batch]
