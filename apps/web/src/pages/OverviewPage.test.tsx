@@ -54,6 +54,10 @@ describe('OverviewPage 重新连接', () => {
     expect(canReconnectRun(pausedRun)).toBe(true)
     expect(canReconnectRun({
       status: 'PAUSED',
+      pause_reason_codes: ['TELEGRAM_DISCOVERY_UNAVAILABLE'],
+    })).toBe(true)
+    expect(canReconnectRun({
+      status: 'PAUSED',
       pause_reason_codes: ['USER_PAUSED'],
     })).toBe(false)
   })

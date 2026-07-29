@@ -80,3 +80,23 @@ def test_part_time_and_explicit_onsite_are_detected_separately() -> None:
     assert flexible_parsed.onsite_required_explicitly is False
     assert onsite_parsed.part_time_detected is True
     assert onsite_parsed.onsite_required_explicitly is True
+
+
+def test_calendar_year_is_not_parsed_as_experience() -> None:
+    job = JobInput(
+        title="高级后端工程师",
+        company_name="示例公司",
+        description="项目于2021年启动，要求5年以上后端开发经验。",
+    )
+
+    assert parser().parse(job).years_required == 5
+
+
+def test_calendar_year_without_experience_requirement_is_ignored() -> None:
+    job = JobInput(
+        title="高级后端工程师",
+        company_name="示例公司",
+        description="项目于2021年启动，负责核心系统研发。",
+    )
+
+    assert parser().parse(job).years_required is None

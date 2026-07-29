@@ -403,7 +403,15 @@ def _run_telegram_job_discovery(
             cdp_url,
             seen_post_ids=[item for item in seen_post_ids if item not in retryable_ids],
         )
-    except (OSError, TimeoutError, ValueError):
+    except (OSError, TimeoutError, ValueError) as exc:
+        runtime_event(
+            logger,
+            "TELEGRAM_DISCOVERY_FAILED",
+            worker_id=worker_id,
+            run_id=run.id,
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
         pause_run(session, run.id, ["TELEGRAM_DISCOVERY_UNAVAILABLE"])
         return
     record_ready_platform_session(session, run, cdp_url)

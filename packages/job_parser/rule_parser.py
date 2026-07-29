@@ -18,7 +18,10 @@ class RuleJobParser:
         skills = self._extract_skills(text)
         preferred_section = self._preferred_skills(text, skills)
         required = [skill for skill in skills if skill not in preferred_section]
-        years_match = re.search(r"(\d+(?:\.\d+)?)\s*年(?:以上)?", text)
+        years_match = re.search(
+            r"(?<!\d)(\d{1,2}(?:\.\d+)?)\s*年(?:以上)?",
+            text,
+        )
         warnings: list[str] = []
         salary = parse_salary(job.salary_text)
         if job.salary_text and salary is None:
