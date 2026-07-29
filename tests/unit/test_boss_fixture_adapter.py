@@ -75,6 +75,7 @@ def test_reads_job_list_with_cursor_then_job_detail() -> None:
         assert result.page_type is PageType.JOB
         assert result.job
         assert result.job.external_job_id == "boss-job-1"
+        assert result.job.company_name == "示例科技"
         assert result.job.recruiter_name == "张招聘"
 
 

@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-29-v12",
+  "version": "2026-07-29-v13",
   "platforms": {
     "BOSS": {
       "allowed_hosts": ["www.zhipin.com", "m.zhipin.com"],
@@ -15,7 +15,7 @@
       "job_root": "[data-testid='job-detail'], .job-detail",
       "job_id": "[data-job-id]",
       "job_title": "[data-testid='job-title'], .job-primary h1, h1",
-      "company": "[data-testid='company-name'], .info-primary .brand-name, .job-detail .company-name",
+      "company": "[data-testid='company-name'], .sider-company .company-info, .info-primary .brand-name, .job-detail .company-name",
       "industry": "[data-testid='company-industry'], .company-info a",
       "location": "[data-testid='job-location'], .info-primary .text-city, .job-detail .location-address",
       "work_mode": "[data-testid='work-mode'], .job-address",
