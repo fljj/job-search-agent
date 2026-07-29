@@ -20,6 +20,7 @@ from apps.api.app.services.job_service import (
 from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.strategy_service import to_domain as strategy_to_domain
 from apps.api.app.services.user_service import DEFAULT_USER_ID
+from packages.job_parser.models import WorkMode
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
 from packages.scoring.engine import score_job as score_job_deterministically
@@ -244,10 +245,18 @@ def _scoring_context(
     candidate: CandidateProfile,
     strategy: db.JobStrategy,
 ) -> ScoringContext:
+    parsed_job = to_parsed_domain(parsed_record)
+    domain_job = to_job_domain(job)
+    if (
+        parsed_job.part_time_detected
+        and domain_job.work_mode.value == "ONSITE"
+        and not parsed_job.onsite_required_explicitly
+    ):
+        domain_job = domain_job.model_copy(update={"work_mode": WorkMode.UNKNOWN})
     return with_evidence_catalog(
         ScoringContext(
-            job=to_job_domain(job),
-            parsed_job=to_parsed_domain(parsed_record),
+            job=domain_job,
+            parsed_job=parsed_job,
             candidate=candidate,
             strategy=strategy_to_domain(strategy),
         )

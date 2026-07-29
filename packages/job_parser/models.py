@@ -68,6 +68,8 @@ class RuleParserConfig(BaseModel):
     headhunter_keywords: list[str] = Field(default_factory=list)
     internship_keywords: list[str] = Field(default_factory=list)
     full_time_bachelor_keywords: list[str] = Field(default_factory=list)
+    part_time_keywords: list[str] = Field(default_factory=list)
+    onsite_required_keywords: list[str] = Field(default_factory=list)
     irrelevant_title_keywords: list[str] = Field(default_factory=list)
 
 
@@ -84,6 +86,8 @@ class ParsedJob(BaseModel):
     headhunter_detected: bool = False
     internship_detected: bool = False
     full_time_bachelor_required: bool = False
+    part_time_detected: bool = False
+    onsite_required_explicitly: bool = False
     confidence: Decimal = Field(default=Decimal("1"), ge=0, le=1)
     warnings: list[str] = Field(default_factory=list)
     parser_type: str = "RULE"

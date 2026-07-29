@@ -29,7 +29,16 @@ def evaluate_hard_filters(context: ScoringContext) -> list[RejectionReason]:
     if job.work_mode != WorkMode.UNKNOWN and (mode_rule is None or not mode_rule.enabled):
         reasons.append(_reason("WORK_MODE_DISABLED", "策略未启用该工作模式",
                                {"work_mode": job.work_mode.value}))
-    elif mode_rule and mode_rule.location_restricted and job.work_mode in {WorkMode.ONSITE, WorkMode.HYBRID}:
+    elif (
+        mode_rule
+        and mode_rule.location_restricted
+        and job.work_mode in {WorkMode.ONSITE, WorkMode.HYBRID}
+        and not (
+            parsed.part_time_detected
+            and strategy.accept_part_time
+            and not parsed.onsite_required_explicitly
+        )
+    ):
         location = normalize_location(job.location)
         allowed = {normalize_location(item) for item in mode_rule.allowed_locations}
         if location not in allowed:
@@ -68,6 +77,8 @@ def evaluate_hard_filters(context: ScoringContext) -> list[RejectionReason]:
                                {"company_name": job.company_name}))
     if parsed.outsourcing_detected and not strategy.accept_outsourcing:
         reasons.append(_reason("OUTSOURCING_NOT_ACCEPTED", "策略不接受纯人力外包岗位"))
+    if parsed.part_time_detected and not strategy.accept_part_time:
+        reasons.append(_reason("PART_TIME_NOT_ACCEPTED", "策略不接受兼职岗位"))
     if parsed.headhunter_detected and not strategy.accept_headhunter:
         reasons.append(_reason("HEADHUNTER_NOT_ACCEPTED", "策略不接受猎头职位"))
     if parsed.internship_detected or parsed.seniority_level == SeniorityLevel.INTERN:

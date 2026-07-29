@@ -161,6 +161,10 @@ def parse_job(
                 "full_time_bachelor_required": (
                     deterministic_flags.full_time_bachelor_required
                 ),
+                "part_time_detected": deterministic_flags.part_time_detected,
+                "onsite_required_explicitly": (
+                    deterministic_flags.onsite_required_explicitly
+                ),
             }
         )
         record_llm_invocation(
@@ -183,7 +187,9 @@ def parse_job(
         flags={"outsourcing_detected": parsed.outsourcing_detected,
                "headhunter_detected": parsed.headhunter_detected,
                "internship_detected": parsed.internship_detected,
-               "full_time_bachelor_required": parsed.full_time_bachelor_required},
+               "full_time_bachelor_required": parsed.full_time_bachelor_required,
+               "part_time_detected": parsed.part_time_detected,
+               "onsite_required_explicitly": parsed.onsite_required_explicitly},
         confidence=parsed.confidence, warnings=parsed.warnings,
     )
     session.add(record)
@@ -239,6 +245,10 @@ def to_parsed_domain(record: db.ParsedJobDetail) -> ParsedJob:
         internship_detected=flags.get("internship_detected", False),
         full_time_bachelor_required=flags.get(
             "full_time_bachelor_required", False
+        ),
+        part_time_detected=flags.get("part_time_detected", False),
+        onsite_required_explicitly=flags.get(
+            "onsite_required_explicitly", False
         ),
         confidence=record.confidence,
         warnings=record.warnings, parser_type=record.parser_type, parser_version=record.parser_version,

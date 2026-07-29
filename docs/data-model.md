@@ -67,7 +67,7 @@ users
 
 ### 3.5 `job_strategies`
 
-字段：`id`、`user_id`、`candidate_profile_id`、`name`、`enabled`、`priority`、`accepted_seniority_levels JSONB`、`max_posted_days`、`accept_outsourcing`、`accept_headhunter`、`headhunter_score_cap`、`version`、`created_at`、`updated_at`。
+字段：`id`、`user_id`、`candidate_profile_id`、`name`、`enabled`、`priority`、`accepted_seniority_levels JSONB`、`max_posted_days`、`accept_outsourcing`、`accept_part_time`、`accept_headhunter`、`headhunter_score_cap`、`version`、`created_at`、`updated_at`。
 
 唯一约束：`(user_id, name)`。
 

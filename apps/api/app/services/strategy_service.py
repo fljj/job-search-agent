@@ -87,6 +87,7 @@ def _apply(strategy: db.JobStrategy, payload: StrategyPayload) -> None:
     strategy.accepted_seniority_levels = [item.value for item in payload.accepted_seniority_levels]
     strategy.max_posted_days = payload.max_posted_days
     strategy.accept_outsourcing = payload.accept_outsourcing
+    strategy.accept_part_time = payload.accept_part_time
     strategy.accept_headhunter = payload.accept_headhunter
     strategy.headhunter_score_cap = payload.headhunter_score_cap
     strategy.core_required_skills = payload.core_required_skills
@@ -131,6 +132,7 @@ def _response(strategy: db.JobStrategy) -> StrategyResponse:
         accepted_seniority_levels=strategy.accepted_seniority_levels,
         max_posted_days=strategy.max_posted_days,
         accept_outsourcing=strategy.accept_outsourcing,
+        accept_part_time=strategy.accept_part_time,
         accept_headhunter=strategy.accept_headhunter,
         headhunter_score_cap=strategy.headhunter_score_cap,
         core_required_skills=strategy.core_required_skills,

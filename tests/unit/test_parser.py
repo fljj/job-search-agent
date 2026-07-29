@@ -9,6 +9,8 @@ def parser() -> RuleJobParser:
             headhunter_keywords=["猎头", "代招"],
             internship_keywords=["实习"],
             full_time_bachelor_keywords=["全日制本科", "统招本科"],
+            part_time_keywords=["兼职", "副业"],
+            onsite_required_keywords=["要求现场办公", "驻场办公"],
         )
     )
 
@@ -60,3 +62,21 @@ def test_only_explicit_full_time_bachelor_requirement_is_detected() -> None:
 
     assert parser().parse(explicit).full_time_bachelor_required is True
     assert parser().parse(ordinary).full_time_bachelor_required is False
+
+
+def test_part_time_and_explicit_onsite_are_detected_separately() -> None:
+    flexible = JobInput(
+        title="Java开发工程师（兼职）",
+        company_name="示例公司",
+        description="工作时间可沟通，可以利用晚上或周末开发。",
+    )
+    onsite = flexible.model_copy(
+        update={"description": "兼职合作，但要求现场办公。"}
+    )
+
+    flexible_parsed = parser().parse(flexible)
+    onsite_parsed = parser().parse(onsite)
+    assert flexible_parsed.part_time_detected is True
+    assert flexible_parsed.onsite_required_explicitly is False
+    assert onsite_parsed.part_time_detected is True
+    assert onsite_parsed.onsite_required_explicitly is True

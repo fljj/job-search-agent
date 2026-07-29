@@ -130,6 +130,7 @@ class Strategy(BaseModel):
     industry_rules: list[IndustryRule]
     company_blacklist: list[str] = Field(default_factory=list)
     accept_outsourcing: bool = False
+    accept_part_time: bool = False
     accept_headhunter: bool = True
     headhunter_score_cap: int | None = Field(default=None, ge=0, le=79)
     max_posted_days: int = Field(default=30, ge=1)

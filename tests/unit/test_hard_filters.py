@@ -67,6 +67,60 @@ def test_unknown_salary_does_not_hard_reject(context: ScoringContext) -> None:
     assert "SALARY_BELOW_MINIMUM" not in codes(context.model_copy(update={"parsed_job": parsed}))
 
 
+def test_part_time_is_rejected_when_strategy_does_not_accept_it(
+    context: ScoringContext,
+) -> None:
+    parsed = context.parsed_job.model_copy(update={"part_time_detected": True})
+
+    assert "PART_TIME_NOT_ACCEPTED" in codes(
+        context.model_copy(update={"parsed_job": parsed})
+    )
+
+
+def test_accepted_part_time_without_explicit_onsite_is_not_rejected_by_location(
+    context: ScoringContext,
+) -> None:
+    job = context.job.model_copy(
+        update={"work_mode": WorkMode.ONSITE, "location": "杭州"}
+    )
+    parsed = context.parsed_job.model_copy(
+        update={
+            "part_time_detected": True,
+            "onsite_required_explicitly": False,
+        }
+    )
+    strategy = context.strategy.model_copy(update={"accept_part_time": True})
+
+    result = codes(
+        context.model_copy(
+            update={"job": job, "parsed_job": parsed, "strategy": strategy}
+        )
+    )
+    assert "PART_TIME_NOT_ACCEPTED" not in result
+    assert "ONSITE_LOCATION_NOT_ALLOWED" not in result
+
+
+def test_accepted_part_time_with_explicit_onsite_still_obeys_location_policy(
+    context: ScoringContext,
+) -> None:
+    job = context.job.model_copy(
+        update={"work_mode": WorkMode.ONSITE, "location": "杭州"}
+    )
+    parsed = context.parsed_job.model_copy(
+        update={
+            "part_time_detected": True,
+            "onsite_required_explicitly": True,
+        }
+    )
+    strategy = context.strategy.model_copy(update={"accept_part_time": True})
+
+    assert "ONSITE_LOCATION_NOT_ALLOWED" in codes(
+        context.model_copy(
+            update={"job": job, "parsed_job": parsed, "strategy": strategy}
+        )
+    )
+
+
 def test_explicit_full_time_bachelor_requirement_rejects_non_full_time_candidate(
     context: ScoringContext,
 ) -> None:

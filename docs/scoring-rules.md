@@ -96,6 +96,7 @@ BOSS、脉脉等平台中由招聘方先发起的消息，可能只有岗位名�
 | `INDUSTRY_EXCLUDED` | 命中排除行业 |
 | `COMPANY_BLACKLISTED` | 公司规范化名称命中策略黑名单 |
 | `OUTSOURCING_NOT_ACCEPTED` | 明确为纯人力外包且策略禁止外包 |
+| `PART_TIME_NOT_ACCEPTED` | 明确为兼职且策略不接受兼职 |
 | `HEADHUNTER_NOT_ACCEPTED` | 可可靠识别为猎头且策略禁止猎头 |
 | `INTERNSHIP_POSITION` | 明确为实习岗位 |
 | `JUNIOR_POSITION` | 明确为策略不接受的初级岗位 |
@@ -105,6 +106,9 @@ BOSS、脉脉等平台中由招聘方先发起的消息，可能只有岗位名�
 
 - Remote 不因公司所在地触发地点排除。
 - 工作模式未知不触发地点硬排除，只产生风险提示。
+- `accept_part_time=true` 时，兼职岗位不因公司所在地或平台推断的 Onsite 模式直接排除。
+  只有 JD 明确要求现场、线下、驻场或坐班时，才继续执行 Onsite/Hybrid 地点硬性规则；
+  未明确办公方式时按未知模式评分并在沟通中确认，不得擅自推断为远程。
 - 薪资面议、薪资缺失、币种无法换算或税前税后不明确时，不触发薪资硬排除。
 - `SALARY_BELOW_MINIMUM` 只有在规范化后的职位薪资上限低于最低值时触发；区间下限低、上限仍满足时只降低薪资分并提示区间风险。
 - 核心技能排除必须基于策略明确标记的硬门槛技能，不得把所有 `required_skills` 自动视为硬门槛。

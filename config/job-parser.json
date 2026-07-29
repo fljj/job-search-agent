@@ -16,6 +16,21 @@
     "统招本科",
     "全日制大学本科"
   ],
+  "part_time_keywords": [
+    "兼职",
+    "副业",
+    "自由职业",
+    "freelancer"
+  ],
+  "onsite_required_keywords": [
+    "要求现场办公",
+    "必须现场办公",
+    "需现场办公",
+    "线下办公",
+    "驻场办公",
+    "需要坐班",
+    "需到公司办公"
+  ],
   "irrelevant_title_keywords": [
     "施工",
     "工程造价",

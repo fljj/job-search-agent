@@ -55,7 +55,9 @@
 - `work_mode_rules` 及允许地点；
 - `salary_rules` 及计分区间；
 - `industry_rules`、`company_blacklist`；
-- `accept_outsourcing`、`accept_headhunter`、`headhunter_score_cap`、`max_posted_days`。
+- `accept_outsourcing`、`accept_part_time`、`accept_headhunter`、`headhunter_score_cap`、`max_posted_days`。
+
+`accept_part_time` 控制是否接受兼职岗位。接受兼职时，JD 明确要求现场办公的岗位仍按现场地点规则判断；JD 未明确办公方式时不因平台地点推断而硬性排除，评分和沟通中标记为需要确认办公方式。
 
 `headhunter_score_cap` 可为空；配置时范围为 0–79。它只在可靠识别为猎头岗位时限制最终分数，不等同于 `accept_headhunter=false` 的硬性排除。
 

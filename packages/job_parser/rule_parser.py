@@ -46,6 +46,12 @@ class RuleJobParser:
             full_time_bachelor_required=any(
                 word in text for word in self.config.full_time_bachelor_keywords
             ),
+            part_time_detected=any(
+                word in text for word in self.config.part_time_keywords
+            ),
+            onsite_required_explicitly=any(
+                word in text for word in self.config.onsite_required_keywords
+            ),
             confidence=Decimal("0.85"),
             warnings=warnings,
             parser_type="RULE",

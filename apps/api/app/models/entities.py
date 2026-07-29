@@ -89,6 +89,9 @@ class JobStrategy(TimestampMixin, Base):
     accepted_seniority_levels: Mapped[list[str]] = mapped_column(JSONB, default=list)
     max_posted_days: Mapped[int] = mapped_column(Integer, default=30)
     accept_outsourcing: Mapped[bool] = mapped_column(Boolean, default=False)
+    accept_part_time: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     accept_headhunter: Mapped[bool] = mapped_column(Boolean, default=True)
     headhunter_score_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     core_required_skills: Mapped[list[str]] = mapped_column(JSONB, default=list)

@@ -143,7 +143,8 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
             ],
         }],
         "industry_rules": [{"industry": "互联网", "rule_type": "PREFERRED", "score": 10}],
-        "company_blacklist": [], "accept_outsourcing": False, "accept_headhunter": True,
+        "company_blacklist": [], "accept_outsourcing": False, "accept_part_time": True,
+        "accept_headhunter": True,
         "max_posted_days": 30, "core_required_skills": ["Java"], "version": 1,
     })
     assert strategy_response.status_code == 200

@@ -79,6 +79,13 @@ def with_evidence_catalog(context: ScoringContext) -> ScoringContext:
         context.parsed_job.full_time_bachelor_required,
         ["experience"],
     )
+    add("parsed_job.part_time_detected", context.parsed_job.part_time_detected, ["location"])
+    add(
+        "parsed_job.onsite_required_explicitly",
+        context.parsed_job.onsite_required_explicitly,
+        ["location"],
+    )
+    add("strategy.accept_part_time", context.strategy.accept_part_time, ["location"])
     add(
         "candidate.has_core_system_experience",
         context.candidate.has_core_system_experience,
