@@ -45,6 +45,10 @@ from apps.api.app.services.job_discovery_service import (
     next_retryable_job,
     process_job_discovery_batch,
 )
+from apps.api.app.services.llm_circuit_service import (
+    llm_circuit_is_open,
+    probe_llm_circuit,
+)
 from apps.api.app.services.message_discovery_service import (
     persist_discovery_batch,
     record_ready_platform_session,
@@ -473,6 +477,9 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
             select(db.AgentRun.id).where(db.AgentRun.status == "RUNNING")
         ).all()
     for run_id in run_ids:
+        with SessionLocal() as circuit_session:
+            if llm_circuit_is_open(circuit_session):
+                break
         gray_event(logger, "CYCLE_STARTED", worker_id=worker_id, run_id=run_id)
         try:
             with SessionLocal() as session:
@@ -645,8 +652,23 @@ def main() -> None:
         try:
             while not STOP_EVENT.is_set():
                 try:
-                    run_once(worker_id, cdp_url)
-                    maintenance_once(cdp_url)
+                    with SessionLocal() as circuit_session:
+                        circuit_open = llm_circuit_is_open(circuit_session)
+                        if circuit_open:
+                            circuit = probe_llm_circuit(
+                                circuit_session,
+                                settings,
+                                build_llm_provider(settings),
+                            )
+                            gray_event(
+                                logger,
+                                "LLM_CIRCUIT_WAITING",
+                                worker_id=worker_id,
+                                **circuit,
+                            )
+                    if not circuit_open:
+                        run_once(worker_id, cdp_url)
+                        maintenance_once(cdp_url)
                 except Exception:
                     logger.exception("Worker loop failed; will retry safely")
                 STOP_EVENT.wait(settings.agent_poll_interval_seconds)

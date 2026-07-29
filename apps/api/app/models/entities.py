@@ -845,6 +845,42 @@ class WorkerInstance(Base):
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
 
 
+class LlmCircuitBreaker(TimestampMixin, Base):
+    __tablename__ = "llm_circuit_breakers"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_llm_circuit_breakers_user"),
+        CheckConstraint(
+            "probe_attempt_count >= 0",
+            name="ck_llm_circuit_probe_attempt_count_nonnegative",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE")
+    )
+    provider: Mapped[str] = mapped_column(String(30))
+    model: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), default="CLOSED")
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    probe_attempt_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_probe_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    next_probe_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    recovered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class ReconciliationTask(TimestampMixin, Base):
     __tablename__ = "reconciliation_tasks"
     id: Mapped[uuid.UUID] = mapped_column(

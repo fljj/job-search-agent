@@ -30,6 +30,12 @@ function mockOverviewApi() {
         pending_confirmation_count: 0,
         workers: [{ worker_id: 'worker-1', status: 'RUNNING' }],
         discrepancies: [],
+        llm_circuit: {
+          status: 'CLOSED',
+          provider: 'ZHIPU',
+          model: 'glm-5.2',
+          probe_attempt_count: 0,
+        },
       }
     }
     if (path === '/automation/rollouts') {
@@ -74,5 +80,49 @@ describe('OverviewPage 重新连接', () => {
       { method: 'POST' },
     ))
     await waitFor(() => expect(successSpy).toHaveBeenCalledWith('BOSS 已恢复，正在重新检查页面'))
+  })
+
+  it('LLM 熔断时展示提示并允许立即重试', async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path === '/automation/operations/status') return {
+        database_ready: true,
+        llm_configured: true,
+        unknown_action_count: 0,
+        pending_confirmation_count: 0,
+        workers: [],
+        discrepancies: [],
+        llm_circuit: {
+          status: 'OPEN',
+          provider: 'ZHIPU',
+          model: 'glm-5.2',
+          failure_code: 'LLM_RATE_LIMITED',
+          probe_attempt_count: 2,
+          next_probe_at: '2026-07-28T10:00:00+08:00',
+        },
+      }
+      if (path === '/automation/llm-circuit/retry') return {
+        status: 'CLOSED',
+        provider: 'ZHIPU',
+        model: 'glm-5.2',
+        probe_attempt_count: 0,
+      }
+      if (path === '/automation/runs') return { items: [] }
+      if (path === '/automation/actions') return { items: [] }
+      if (path === '/conversations') return { items: [] }
+      if (path === '/automation/rollouts') return { items: [] }
+      return {}
+    })
+    const successSpy = vi.spyOn(message, 'success').mockImplementation(() => undefined as never)
+
+    render(<OverviewPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '立即重试 LLM' }))
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith(
+      '/automation/llm-circuit/retry',
+      { method: 'POST' },
+    ))
+    await waitFor(() => expect(successSpy).toHaveBeenCalledWith(
+      'LLM 已恢复，Agent 将自动继续工作',
+    ))
   })
 })

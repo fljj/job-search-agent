@@ -15,6 +15,10 @@ interface Operations {
   database_ready: boolean; llm_configured: boolean; unknown_action_count: number
   pending_confirmation_count: number; workers: Array<{ worker_id: string; status: string }>
   discrepancies: unknown[]
+  llm_circuit: {
+    status: 'CLOSED' | 'OPEN' | 'PROBING'; provider: string; model: string
+    failure_code?: string; probe_attempt_count: number; next_probe_at?: string
+  }
 }
 interface Rollout {
   status: string; current_level: number; level_name: string; remaining_hours: number
@@ -28,6 +32,7 @@ export function OverviewPage() {
   const [operations, setOperations] = useState<Operations>()
   const [rollout, setRollout] = useState<Rollout>()
   const [reconnectingRunId, setReconnectingRunId] = useState<string>()
+  const [retryingLlm, setRetryingLlm] = useState(false)
   const load = async () => {
     const [runData, actionData, conversationData, operationData, rolloutData] = await Promise.all([
       api<{ items: Run[] }>('/automation/runs'),
@@ -51,6 +56,22 @@ export function OverviewPage() {
       setReconnectingRunId(undefined)
     }
   }
+  const retryLlm = async () => {
+    setRetryingLlm(true)
+    try {
+      const circuit = await api<Operations['llm_circuit']>(
+        '/automation/llm-circuit/retry',
+        { method: 'POST' },
+      )
+      if (circuit.status === 'CLOSED') message.success('LLM 已恢复，Agent 将自动继续工作')
+      else message.error('LLM 仍不可用，系统会按计划继续重试')
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'LLM 重试失败')
+    } finally {
+      setRetryingLlm(false)
+    }
+  }
   useEffect(() => {
     void Promise.all([
       api<{ items: Run[] }>('/automation/runs'),
@@ -67,7 +88,16 @@ export function OverviewPage() {
   const processedCount = currentRuns.reduce((sum, item) => sum + item.processed_count, 0)
   const currentWorkers = activeWorkers(operations?.workers)
   const safetyErrors = Object.values(rollout?.safety_metrics ?? {}).reduce((sum, value) => sum + value, 0)
+  const llmCircuit = operations?.llm_circuit
   return <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    {llmCircuit && llmCircuit.status !== 'CLOSED' && <Alert type="error" showIcon
+      message="LLM 暂不可用，Agent 业务已暂停"
+      description={<Space direction="vertical">
+        <span>原因：{llmCircuit.failure_code ?? '正在探测'}；已探测 {llmCircuit.probe_attempt_count} 次
+          {llmCircuit.next_probe_at
+            ? `；下次自动重试：${new Date(llmCircuit.next_probe_at).toLocaleString('zh-CN')}` : ''}</span>
+        <Button danger loading={retryingLlm} onClick={() => void retryLlm()}>立即重试 LLM</Button>
+      </Space>} />}
     {(!operations?.database_ready || !operations?.llm_configured || safetyErrors > 0) &&
       <Alert type="error" showIcon message="Agent 当前存在阻断项"
         description="请在系统设置中检查数据库、LLM、灰度安全指标和平台会话。" />}

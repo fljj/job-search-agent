@@ -164,6 +164,15 @@
 `parsed_job_detail_id` 可省略，服务端优先复用职位最新解析记录；不存在解析记录时调用当前
 LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 
+### `POST /api/v1/automation/llm-circuit/retry`
+
+对当前配置的 LLM 发起一次最小健康探测，不执行职位评分或消息回复。仅当熔断器处于
+`OPEN` 时用于人工提前恢复；并发请求中只有一个进入 `PROBING`。成功返回 `CLOSED`，
+Worker 下一轮自动恢复业务；失败保持 `OPEN` 并更新失败码和下一次自动探测时间。
+
+`GET /api/v1/automation/operations/status` 的 `llm_circuit` 返回状态、供应商、模型、
+失败码、探测次数以及最近/下次探测时间，不返回 API Key。
+
 响应包含：
 
 - `total_score`、`grade`；

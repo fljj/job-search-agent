@@ -11,6 +11,7 @@ from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import Settings, get_settings
 from apps.api.app.models import entities as db
 from apps.api.app.services.action_service import observe_action, reconcile_action
+from apps.api.app.services.llm_circuit_service import llm_circuit_status
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 
 
@@ -302,6 +303,7 @@ def operations_status(session: Session) -> dict[str, object]:
         "database_ready": database_ready,
         "migration_revision": revision,
         "llm_configured": settings.llm_configured,
+        "llm_circuit": llm_circuit_status(session, settings),
         "selector_version": get_browser_selectors().version,
         "executor_mode": settings.agent_executor_mode,
         "calendar_provider": settings.calendar_provider,

@@ -19,12 +19,15 @@ from apps.api.app.services.automation_service import (
 )
 from apps.api.app.services.conversation_service import create_greeting_draft
 from apps.api.app.services.job_service import import_job
+from apps.api.app.services.llm_circuit_service import open_llm_circuit
 from apps.api.app.services.score_service import create_score
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
 from packages.scoring.llm_engine import LlmScoreValidationError
 
 RETRYABLE_LLM_CODES = {
+    "LLM_NOT_CONFIGURED",
+    "LLM_AUTHENTICATION_FAILED",
     "LLM_RATE_LIMITED",
     "LLM_TIMEOUT",
     "LLM_NETWORK_ERROR",
@@ -169,7 +172,16 @@ def process_job_discovery_batch(
             )
         except LlmProviderError as exc:
             if exc.code in RETRYABLE_LLM_CODES:
-                retry_backoff_until = _schedule_retry(record, exc.code, current)
+                open_llm_circuit(
+                    session,
+                    get_settings(),
+                    exc.code,
+                    now=current,
+                )
+                record.status = "RETRYABLE"
+                record.reason_codes = [exc.code, "WAITING_FOR_LLM_RECOVERY"]
+                record.next_retry_at = current
+                retry_backoff_until = current
                 deferred_ids = {
                     deferred.summary.external_job_id
                     for deferred in batch.items[index:]

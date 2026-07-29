@@ -47,6 +47,9 @@ class FakeLlmProvider:
     def prompt_version(self, purpose: str) -> str:
         return f"{purpose.replace('_', '-')}-fake-v1"
 
+    def health_check(self) -> None:
+        return None
+
     def parse_job(self, request: JobInput) -> LlmResult[ParsedJob]:
         return self._result(FakeLlmJobParser().parse(request), "job-parse-fake-v1")
 

@@ -219,6 +219,18 @@ users
 - `browser_read_runs`：追加保存平台、状态、页面类型、原因码、列表游标、脱敏列表提取结果、导入对象 ID 及输入指纹；`input_fingerprint` 唯一。列表结果保存在 `extracted_items` JSONB，职位/对话详情仍通过外键指向正式业务实体。
 - `page_evidence`：每次读取记录唯一，保存已去除 query/fragment 的 URL、页面标题、内容哈希、选择器版本和捕获时间；不保存 Cookie、Token 或完整 HTML。
 
+## 7. LLM 熔断状态
+
+`llm_circuit_breakers` 按用户唯一，记录当前供应商和模型的全局可用性：
+
+- `status`：`CLOSED`、`OPEN` 或 `PROBING`；
+- `failure_code`：最近一次认证、余额/限流、超时、网络或服务错误；
+- `probe_attempt_count`：独立健康探测连续失败次数；
+- `opened_at`、`last_probe_at`、`next_probe_at`、`recovered_at`；
+- 同一时刻只允许一个探测将状态从 `OPEN` 改为 `PROBING`。
+
+熔断状态不删除或终结等待中的职位、消息和动作。恢复后由原有幂等状态机继续处理。
+
 第三阶段重复读取使用“平台 + 状态 + 页面类型 + 内容哈希 + 原因码”生成指纹。职位、对话和消息同时受已有来源唯一约束保护。
 
 ## 7. 第四阶段数据表

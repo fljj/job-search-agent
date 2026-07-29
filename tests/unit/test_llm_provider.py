@@ -109,6 +109,17 @@ def test_qwen_retries_network_error_only_once() -> None:
     assert len(transport.calls) == 2
 
 
+def test_health_check_uses_one_minimal_request_without_business_schema() -> None:
+    transport = StubTransport(response("OK"))
+
+    qwen(transport).health_check()
+
+    payload = cast(dict[str, object], transport.calls[0]["payload"])
+    assert payload["max_tokens"] == 1
+    assert "response_format" not in payload
+    assert len(transport.calls) == 1
+
+
 @pytest.mark.parametrize("error", [LlmAuthenticationError("auth"), LlmInvalidResponseError("bad")])
 def test_qwen_does_not_retry_non_network_error(error: Exception) -> None:
     transport = StubTransport(error)

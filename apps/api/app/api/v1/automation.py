@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.v1.helpers import response
+from apps.api.app.core.config import get_settings
 from apps.api.app.core.database import get_session
+from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.schemas.automation import (
     AgentRunStartRequest,
     AgentRunTickRequest,
@@ -26,6 +28,7 @@ from apps.api.app.services.automation_service import (
     list_settings,
     upsert_setting,
 )
+from apps.api.app.services.llm_circuit_service import probe_llm_circuit
 from apps.api.app.services.operations_service import (
     audit_discrepancies,
     list_reconciliation_tasks,
@@ -98,6 +101,21 @@ def start(payload: AgentRunStartRequest,
 @router.get("/runs")
 def runs(session: Session = Depends(get_session)) -> dict[str, object]:
     return response({"items": list_runs(session)})
+
+
+@router.post("/llm-circuit/retry")
+def retry_llm_circuit(
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    settings = get_settings()
+    return response(
+        probe_llm_circuit(
+            session,
+            settings,
+            build_llm_provider(settings),
+            force=True,
+        )
+    )
 
 
 @router.get("/actions")

@@ -15,6 +15,7 @@ from apps.api.app.schemas.automation import AgentRunStartRequest, AutomationDisp
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.llm_circuit_service import open_llm_circuit
 from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.browser_worker.actions import ActionExecutor
@@ -210,9 +211,8 @@ def tick_run(
                 resume = create_resume_draft(session, message.id, llm_provider)
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
         except LlmProviderError as exc:
+            open_llm_circuit(session, settings, exc.code, now=current)
             _record_failure(session, run, exc.code)
-            if run.consecutive_failure_count >= settings.agent_failure_threshold:
-                return _pause_after_failure(session, run, ["CONSECUTIVE_LLM_FAILURES"])
             return _finish_failed_tick(session, run, current, exc.code)
         except (ValueError, ResourceNotFoundError) as exc:
             _record_failure(session, run, type(exc).__name__)

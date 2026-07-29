@@ -109,6 +109,30 @@ class QwenLlmProvider:
     def prompt_version(self, purpose: str) -> str:
         return PROMPTS[purpose][0]
 
+    def health_check(self) -> None:
+        """发送最小请求验证认证、余额、限流和服务可用性。"""
+        payload: dict[str, object] = {
+            "model": self._model,
+            "stream": False,
+            "messages": [{"role": "user", "content": "回复 OK"}],
+            "max_tokens": 1,
+        }
+        payload.update(self._request_options)
+        payload["max_tokens"] = 1
+        try:
+            self._transport.post(
+                self._url,
+                {
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                payload,
+                self._timeout,
+            )
+        except LlmProviderError as exc:
+            exc.attempt_number = 1
+            raise
+
     def parse_job(self, request: JobInput) -> LlmResult[ParsedJob]:
         return self._complete("parse_job", request, ParsedJob)
 
