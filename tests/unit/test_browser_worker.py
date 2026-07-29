@@ -162,17 +162,42 @@ def test_extracts_only_pending_exact_platform_consent_cards() -> None:
                     selectors.consent_card_buttons: "同意",
                 }
             ),
-        ]
+        ],
+        selectors.location_consent_cards: [
+            FakeElement(
+                texts={
+                    selectors.location_consent_title: "您是否接受此工作地点?",
+                    selectors.location_consent_button: "可以接受",
+                },
+                attributes={
+                    (
+                        selectors.location_consent_detail,
+                        "aria-label",
+                    ): "世纪开元文化创意产业园（济南历城区）",
+                    (
+                        selectors.location_consent_button,
+                        "class",
+                    ): "btn-v2 btn-light-v2",
+                },
+            )
+        ],
     }
 
     result = extract_current_page(page, Platform.BOSS, selectors, "v1")
 
     assert result.conversation is not None
-    assert len(result.conversation.platform_consents) == 2
+    assert len(result.conversation.platform_consents) == 3
     assert result.conversation.platform_consents[0].consent_type is (PlatformConsentType.CONTACT)
     assert result.conversation.platform_consents[0].pending is True
     assert result.conversation.platform_consents[1].consent_type is (PlatformConsentType.RESUME)
     assert result.conversation.platform_consents[1].pending is False
+    assert result.conversation.platform_consents[2].consent_type is (
+        PlatformConsentType.LOCATION
+    )
+    assert result.conversation.platform_consents[2].detail == (
+        "世纪开元文化创意产业园（济南历城区）"
+    )
+    assert result.conversation.platform_consents[2].pending is True
 
 
 def test_extracts_real_boss_conversation_list_id_from_d_c() -> None:

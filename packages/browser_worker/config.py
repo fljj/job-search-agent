@@ -66,6 +66,10 @@ class PlatformSelectors(BaseModel):
     consent_cards: str | None = None
     consent_card_title: str | None = None
     consent_card_buttons: str | None = None
+    location_consent_cards: str | None = None
+    location_consent_title: str | None = None
+    location_consent_detail: str | None = None
+    location_consent_button: str | None = None
 
 
 class BrowserSelectorsConfig(BaseModel):

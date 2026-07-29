@@ -33,12 +33,14 @@ class MessageDirection(StrEnum):
 class PlatformConsentType(StrEnum):
     RESUME = "RESUME"
     CONTACT = "CONTACT"
+    LOCATION = "LOCATION"
 
 
 class BrowserPlatformConsent(BaseModel):
     external_consent_id: str
     consent_type: PlatformConsentType
     prompt: str
+    detail: str | None = None
     pending: bool
 
 

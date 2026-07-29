@@ -369,6 +369,41 @@ def _extract_conversation(
                     pending=agree_text == "同意" and "disabled" not in classes,
                 )
             )
+    if (
+        selectors.location_consent_cards
+        and selectors.location_consent_title
+        and selectors.location_consent_detail
+        and selectors.location_consent_button
+    ):
+        for element in page.elements(selectors.location_consent_cards):
+            prompt = element.text(selectors.location_consent_title)
+            if prompt != "您是否接受此工作地点?":
+                continue
+            address = element.attribute(
+                selectors.location_consent_detail,
+                "aria-label",
+            ) or element.text(selectors.location_consent_detail)
+            if not address:
+                continue
+            accept_text = element.text(selectors.location_consent_button)
+            classes = (
+                element.attribute(selectors.location_consent_button, "class")
+                or ""
+            ).split()
+            platform_consents.append(
+                BrowserPlatformConsent(
+                    external_consent_id=_hash(
+                        f"{conversation_id}:LOCATION:{address}"
+                    ),
+                    consent_type=PlatformConsentType.LOCATION,
+                    prompt=prompt,
+                    detail=address,
+                    pending=(
+                        accept_text == "可以接受"
+                        and "disabled" not in classes
+                    ),
+                )
+            )
     conversation = BrowserConversation(
         external_conversation_id=conversation_id,
         recruiter_name=recruiter,

@@ -31,6 +31,7 @@ from packages.browser_worker.models import (
     BrowserPlatformConsent,
     MessageDirection,
 )
+from packages.job_parser.normalizers import normalize_location
 from packages.llm.ports import LlmProvider
 from packages.scoring.llm_engine import LlmScoreValidationError
 
@@ -339,6 +340,7 @@ def execute_pending_platform_consents(
                 [
                     "RESUME_CONSENT_ACCEPT",
                     "CONTACT_CONSENT_ACCEPT",
+                    "LOCATION_CONSENT_ACCEPT",
                 ]
             ),
             db.ActionQueue.status == "APPROVED",
@@ -373,11 +375,18 @@ def _queue_platform_consents(
     for consent in consents:
         if not consent.pending:
             continue
-        action_type = (
-            "RESUME_CONSENT_ACCEPT"
-            if consent.consent_type.value == "RESUME"
-            else "CONTACT_CONSENT_ACCEPT"
-        )
+        if consent.consent_type.value == "LOCATION":
+            if not consent.detail or not _location_consent_allowed(
+                session,
+                run,
+                consent.detail,
+            ):
+                continue
+            action_type = "LOCATION_CONSENT_ACCEPT"
+        elif consent.consent_type.value == "RESUME":
+            action_type = "RESUME_CONSENT_ACCEPT"
+        else:
+            action_type = "CONTACT_CONSENT_ACCEPT"
         external_id = consent.external_consent_id
         fingerprint = hashlib.sha256(
             f"{conversation.id}:{action_type}:{external_id}".encode()
@@ -401,7 +410,11 @@ def _queue_platform_consents(
             conversation_id=conversation.id,
             action_type=action_type,
             status="APPROVED",
-            content=consent.prompt,
+            content=(
+                consent.detail
+                if consent.consent_type.value == "LOCATION"
+                else consent.prompt
+            ),
             platform=conversation.platform,
             target_company=(
                 job.company_name if job else conversation.observed_company_name or "未知公司"
@@ -429,6 +442,33 @@ def _queue_platform_consents(
                 correlation_id=f"platform-consent:{action.id}",
             )
         )
+
+
+def _location_consent_allowed(
+    session: Session,
+    run: db.AgentRun,
+    address: str,
+) -> bool:
+    strategy = session.get(db.JobStrategy, run.strategy_id)
+    if strategy is None:
+        return False
+    normalized_address = normalize_location(address) or ""
+    onsite_rule = next(
+        (
+            rule
+            for rule in strategy.work_mode_rules
+            if rule.work_mode == "ONSITE" and rule.enabled
+        ),
+        None,
+    )
+    if onsite_rule is None:
+        return False
+    return any(
+        (normalize_location(location.location_name) or "")
+        in normalized_address
+        for location in onsite_rule.locations
+        if normalize_location(location.location_name)
+    )
 
 
 def _terminal_state_from_messages(

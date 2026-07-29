@@ -1226,6 +1226,7 @@ def _recent_conversation_context(
                     "RESUME",
                     "RESUME_CONSENT_ACCEPT",
                     "CONTACT_CONSENT_ACCEPT",
+                    "LOCATION_CONSENT_ACCEPT",
                 ]
             ),
         )

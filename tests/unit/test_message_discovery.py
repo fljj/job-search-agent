@@ -21,6 +21,7 @@ from adapters.llm.fake import FakeLlmProvider
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.models import entities as db
 from apps.api.app.services.message_discovery_service import (
+    _location_consent_allowed,
     _next_seen_message_keys,
     _terminal_state_from_messages,
     process_next_inbound_job_score,
@@ -67,6 +68,34 @@ def detail(item: BrowserConversationSummary) -> ReadResult:
             company_name=item.company_name,
             external_job_id=item.external_job_id,
         ),
+    )
+
+
+def test_location_consent_uses_strategy_onsite_locations() -> None:
+    session = MagicMock(spec=Session)
+    strategy = SimpleNamespace(
+        work_mode_rules=[
+            SimpleNamespace(
+                work_mode="ONSITE",
+                enabled=True,
+                locations=[
+                    SimpleNamespace(location_name="济南市"),
+                ],
+            )
+        ]
+    )
+    session.get.return_value = strategy
+    run = db.AgentRun(strategy_id=uuid4())
+
+    assert _location_consent_allowed(
+        session,
+        run,
+        "世纪开元文化创意产业园(济南历城区)",
+    )
+    assert not _location_consent_allowed(
+        session,
+        run,
+        "青岛市市南区",
     )
 
 

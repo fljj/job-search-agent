@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-29-v13",
+  "version": "2026-07-29-v14",
   "platforms": {
     "BOSS": {
       "allowed_hosts": ["www.zhipin.com", "m.zhipin.com"],
@@ -65,7 +65,11 @@
       "sent_resume_items": "[data-testid='sent-resume'], .message-item.resume",
       "consent_cards": ".message-dialog-both.message-card-wrap",
       "consent_card_title": ".message-card-top-title",
-      "consent_card_buttons": ".card-btn:last-child"
+      "consent_card_buttons": ".card-btn:last-child",
+      "location_consent_cards": ".msg-dialog-position",
+      "location_consent_title": ".msg-dialog-title",
+      "location_consent_detail": ".msg-dialog-desc",
+      "location_consent_button": ".msg-dialog-footer-v2 .btn-light-v2"
     },
     "MAIMAI": {
       "allowed_hosts": ["maimai.cn", "www.maimai.cn"],

@@ -341,8 +341,14 @@ SENSITIVE
 - “我想要一份您的附件简历，您是否同意”；
 - “我想要和您交换联系方式，您是否同意”。
 
-服务层必须把两类动作分别记录为 `RESUME_CONSENT_ACCEPT` 和
-`CONTACT_CONSENT_ACCEPT`，保存资格快照、目标身份、稳定指纹和审计事件。
+BOSS 的“您是否接受此工作地点?”卡片同样使用确定性规则处理。程序必须提取卡片中的
+完整地址，并与当前策略启用的 `ONSITE` 允许地点比较；地址属于济南允许范围时点击
+“可以接受”，其他城市或地点无法可靠识别时不点击。该路径不调用 LLM，动作记录为
+`LOCATION_CONSENT_ACCEPT`。
+
+服务层必须把对应动作分别记录为 `RESUME_CONSENT_ACCEPT`、
+`CONTACT_CONSENT_ACCEPT` 和 `LOCATION_CONSENT_ACCEPT`，保存资格快照、目标身份、
+稳定指纹和审计事件。
 浏览器适配器只允许执行上述精确提示，执行前重新核对唯一会话和未处理状态，执行后回读
 卡片已失效或已同意的证据。点击后结果无法确认时进入 `OUTCOME_UNKNOWN`，不得直接
 重复点击。`UNKNOWN`、`MISMATCH`、硬性排除或目标身份变化时不得自动同意。

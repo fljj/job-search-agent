@@ -90,6 +90,7 @@ class PlaywrightActionExecutor:
         if command.action_type in {
             "RESUME_CONSENT_ACCEPT",
             "CONTACT_CONSENT_ACCEPT",
+            "LOCATION_CONSENT_ACCEPT",
         }:
             return self._execute_platform_consent_over_raw_cdp(cdp_url, command)
         if command.action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
@@ -349,7 +350,18 @@ class PlaywrightActionExecutor:
             "我想要一份您的附件简历，您是否同意",
             "我想要和您交换联系方式，您是否同意",
         }
-        if command.platform != "BOSS" or command.content not in allowed_prompts:
+        location_consent = command.action_type == "LOCATION_CONSENT_ACCEPT"
+        if (
+            command.platform != "BOSS"
+            or (
+                location_consent
+                and (not command.content or "济南" not in command.content)
+            )
+            or (
+                not location_consent
+                and command.content not in allowed_prompts
+            )
+        ):
             return ExecutionResult(
                 outcome=ExecutionOutcome.FAILED_FINAL,
                 error_code="PLATFORM_CONSENT_NOT_ALLOWED",
@@ -397,6 +409,8 @@ class PlaywrightActionExecutor:
                         else "APPROVED_TARGET_PAGE_AMBIGUOUS"
                     ),
                 )
+            if location_consent:
+                return self._accept_location_consent(matches[0], command)
             return self._accept_platform_consent(matches[0], command)
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
@@ -466,6 +480,106 @@ class PlaywrightActionExecutor:
                 ),
                 error_code="RAW_CDP_ACTION_ERROR",
             )
+
+    def _accept_location_consent(
+        self,
+        websocket_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        performed = False
+        try:
+            with RawCdpPageReader(websocket_url) as page:
+                state = self._location_consent_state(
+                    page,
+                    command.content or "",
+                )
+                if state == "ACCEPTED":
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.SUCCEEDED,
+                        observed_content=command.content,
+                    )
+                if state != "PENDING":
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="LOCATION_CONSENT_CARD_NOT_FOUND",
+                    )
+                point = page._evaluate(
+                    "(() => {"
+                    f"const address={json.dumps(command.content)};"
+                    "const cards=[...document.querySelectorAll('.msg-dialog-position')];"
+                    "const card=cards.find(item => "
+                    "(item.querySelector('.msg-dialog-title')?.textContent||'').trim()"
+                    "==='您是否接受此工作地点?' && "
+                    "((item.querySelector('.msg-dialog-desc')?.getAttribute('aria-label')"
+                    "||item.querySelector('.msg-dialog-desc')?.textContent||'').trim())"
+                    "===address);"
+                    "const accept=card && [...card.querySelectorAll("
+                    "'.msg-dialog-footer-v2 .btn-light-v2')].find(item => "
+                    "item.getClientRects().length>0 && "
+                    "(item.textContent||'').trim()==='可以接受');"
+                    "if(!accept)return null;const r=accept.getBoundingClientRect();"
+                    "return {x:r.x+r.width/2,y:r.y+r.height/2};"
+                    "})()"
+                )
+                if not isinstance(point, dict):
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="LOCATION_CONSENT_BUTTON_NOT_READY",
+                    )
+                performed = True
+                self._trusted_click(page, point)
+                for _ in range(30):
+                    state = self._location_consent_state(
+                        page,
+                        command.content or "",
+                    )
+                    if state in {"ACCEPTED", "MISSING"}:
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.SUCCEEDED,
+                            evidence_hash=hashlib.sha256(
+                                f"{page.url}:{command.content}".encode()
+                            ).hexdigest(),
+                            observed_content=command.content,
+                        )
+                    time.sleep(0.1)
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="LOCATION_CONSENT_RESULT_NOT_OBSERVED",
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=(
+                    ExecutionOutcome.OUTCOME_UNKNOWN
+                    if performed
+                    else ExecutionOutcome.FAILED_RETRYABLE
+                ),
+                error_code="RAW_CDP_ACTION_ERROR",
+            )
+
+    @staticmethod
+    def _location_consent_state(
+        page: RawCdpPageReader,
+        address: str,
+    ) -> str:
+        result = page._evaluate(
+            "(() => {"
+            f"const address={json.dumps(address)};"
+            "const cards=[...document.querySelectorAll('.msg-dialog-position')];"
+            "const card=cards.find(item => "
+            "(item.querySelector('.msg-dialog-title')?.textContent||'').trim()"
+            "==='您是否接受此工作地点?' && "
+            "((item.querySelector('.msg-dialog-desc')?.getAttribute('aria-label')"
+            "||item.querySelector('.msg-dialog-desc')?.textContent||'').trim())"
+            "===address);"
+            "if(!card)return 'MISSING';"
+            "const accept=[...card.querySelectorAll("
+            "'.msg-dialog-footer-v2 .btn-light-v2')].find(item => "
+            "(item.textContent||'').trim()==='可以接受');"
+            "if(!accept || accept.classList.contains('disabled'))return 'ACCEPTED';"
+            "return 'PENDING';"
+            "})()"
+        )
+        return str(result)
 
     @staticmethod
     def _platform_consent_state(
