@@ -853,6 +853,20 @@ class LlmCircuitBreaker(TimestampMixin, Base):
     )
 
 
+class LlmRuntimeSetting(TimestampMixin, Base):
+    __tablename__ = "llm_runtime_settings"
+    __table_args__ = (UniqueConstraint("user_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE")
+    )
+    provider: Mapped[str] = mapped_column(String(30))
+    model: Mapped[str] = mapped_column(String(100))
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
 class ReconciliationTask(TimestampMixin, Base):
     __tablename__ = "reconciliation_tasks"
     id: Mapped[uuid.UUID] = mapped_column(

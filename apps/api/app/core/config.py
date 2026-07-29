@@ -13,9 +13,15 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     llm_provider: str = "ZHIPU"
     llm_api_key: SecretStr | None = None
+    qwen_api_key: SecretStr | None = None
     zhipu_api_key: SecretStr | None = None
     llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     llm_model: str = "glm-5.2"
+    llm_providers: str = "ZHIPU,QWEN"
+    qwen_model: str = "qwen-plus"
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    zhipu_model: str = "glm-5.2"
+    zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     llm_timeout_seconds: int = Field(default=30, ge=1, le=300)
     llm_max_retries: int = Field(default=1, ge=0, le=3)
     agent_lease_seconds: int = Field(default=30, ge=5, le=300)
@@ -50,7 +56,33 @@ class Settings(BaseSettings):
 
     @property
     def selected_llm_api_key(self) -> SecretStr | None:
-        return self.zhipu_api_key if self.llm_provider.upper() == "ZHIPU" else self.llm_api_key
+        if self.llm_provider.upper() == "ZHIPU":
+            return self.zhipu_api_key
+        return self.qwen_api_key or self.llm_api_key
+
+    @property
+    def available_llm_providers(self) -> list[str]:
+        return [
+            item.strip().upper()
+            for item in self.llm_providers.split(",")
+            if item.strip().upper() in {"QWEN", "ZHIPU"}
+        ]
+
+    def with_llm_selection(self, provider: str, model: str) -> "Settings":
+        normalized = provider.upper()
+        base_url = (
+            self.zhipu_base_url if normalized == "ZHIPU" else self.qwen_base_url
+        )
+        return self.model_copy(
+            update={
+                "llm_provider": normalized,
+                "llm_model": model,
+                "llm_base_url": base_url,
+            }
+        )
+
+    def configured_model_for(self, provider: str) -> str:
+        return self.zhipu_model if provider.upper() == "ZHIPU" else self.qwen_model
 
     @property
     def calendar_configured(self) -> bool:

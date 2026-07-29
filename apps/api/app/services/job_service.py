@@ -6,9 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
-from apps.api.app.core.config import get_settings
 from apps.api.app.core.job_parser_config import get_job_parser_config
-from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.job import (
     JobImportPayload,
@@ -17,6 +15,7 @@ from apps.api.app.schemas.job import (
     ParsedJobResponse,
 )
 from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.llm_config_service import build_runtime_llm_provider
 from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.job_parser.models import JobInput, ParsedJob
@@ -129,7 +128,7 @@ def parse_job(
     if normalized_mode == "RULE":
         parsed = RuleJobParser(get_job_parser_config()).parse(domain_job)
     elif normalized_mode == "LLM":
-        llm_provider = provider or build_llm_provider(get_settings())
+        llm_provider = provider or build_runtime_llm_provider(session)
         try:
             llm_result = llm_provider.parse_job(domain_job)
         except LlmProviderError as exc:

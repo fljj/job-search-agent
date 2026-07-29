@@ -33,7 +33,6 @@ from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings, reload_settings
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.core.job_parser_config import get_job_parser_config
-from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.core.telegram_config import get_telegram_policy
 from apps.api.app.models import entities as db
@@ -48,6 +47,10 @@ from apps.api.app.services.job_discovery_service import (
 from apps.api.app.services.llm_circuit_service import (
     llm_circuit_is_open,
     probe_llm_circuit,
+)
+from apps.api.app.services.llm_config_service import (
+    build_runtime_llm_provider,
+    runtime_settings,
 )
 from apps.api.app.services.message_discovery_service import (
     execute_pending_platform_consents,
@@ -186,7 +189,7 @@ def _discover_messages(
         process_next_inbound_job_score(
             session,
             run,
-            build_llm_provider(get_settings()),
+            build_runtime_llm_provider(session),
         )
         if executor is not None
         else "SKIPPED"
@@ -351,7 +354,7 @@ def _run_boss_job_discovery(
             session,
             run,
             job_batch,
-            provider=build_llm_provider(get_settings()),
+            provider=build_runtime_llm_provider(session),
             executor=executor,
             cdp_url=cdp_url,
         )
@@ -462,7 +465,7 @@ def _run_telegram_job_discovery(
         session,
         run,
         batch,
-        provider=build_llm_provider(get_settings()),
+        provider=build_runtime_llm_provider(session),
         executor=executor,
         cdp_url=cdp_url,
     )
@@ -632,6 +635,8 @@ def _request_stop(_signum: int, _frame: object) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = get_settings()
+    with SessionLocal() as config_session:
+        selected_settings = runtime_settings(config_session, settings)
     log_path = configure_runtime_logging(settings)
     install_redacting_filter()
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
@@ -640,8 +645,8 @@ def main() -> None:
         "WORKER_STARTING",
         worker_id=worker_id,
         log_path=log_path,
-        llm_provider=settings.llm_provider,
-        llm_model=settings.llm_model,
+        llm_provider=selected_settings.llm_provider,
+        llm_model=selected_settings.llm_model,
         executor_mode=settings.agent_executor_mode,
     )
     cdp_url = os.getenv("AGENT_CDP_URL", "http://127.0.0.1:9222")
@@ -678,10 +683,15 @@ def main() -> None:
                         circuit_open = llm_circuit_is_open(circuit_session)
                         if circuit_open:
                             settings = reload_settings()
+                            selected_settings = runtime_settings(
+                                circuit_session, settings
+                            )
                             circuit = probe_llm_circuit(
                                 circuit_session,
-                                settings,
-                                build_llm_provider(settings),
+                                selected_settings,
+                                build_runtime_llm_provider(
+                                    circuit_session, selected_settings
+                                ),
                             )
                             runtime_event(
                                 logger,

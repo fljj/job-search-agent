@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import Mock
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -13,6 +14,7 @@ from adapters.browser.message_discovery import (
     MessageDiscoveryBatch,
 )
 from adapters.llm.errors import LlmConfigurationError, LlmRateLimitError
+from apps.api.app.core.config import Settings
 from apps.api.app.core.database import Base
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AutomationDispatchRequest
@@ -22,6 +24,11 @@ from apps.api.app.services.conversation_service import (
     create_reply_draft,
     create_resume_draft,
     import_message,
+)
+from apps.api.app.services.llm_config_service import (
+    llm_configuration,
+    runtime_settings,
+    select_llm_configuration,
 )
 from apps.api.app.services.message_discovery_service import persist_discovery_batch
 from apps.api.app.services.scheduling_service import analyze_invitation
@@ -48,6 +55,31 @@ def session() -> Iterator[Session]:
         yield value
     Base.metadata.drop_all(engine)
     engine.dispose()
+
+
+def test_llm_selection_is_stored_without_api_key_and_applies_immediately(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        llm_providers="ZHIPU,QWEN",
+        zhipu_model="glm-test",
+        qwen_model="qwen-test",
+        zhipu_api_key=SecretStr("zhipu-secret"),
+        qwen_api_key=SecretStr("qwen-secret"),
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.llm_config_service.get_settings",
+        lambda: settings,
+    )
+
+    selected = select_llm_configuration(session, "QWEN", "qwen-test")
+
+    assert selected["provider"] == "QWEN"
+    assert selected["model"] == "qwen-test"
+    assert runtime_settings(session, settings).llm_provider == "QWEN"
+    assert "secret" not in str(llm_configuration(session))
 
 
 def test_explicit_inbound_resume_request_does_not_require_score(

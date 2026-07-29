@@ -12,6 +12,7 @@ from apps.api.app.core.config import Settings, get_settings
 from apps.api.app.models import entities as db
 from apps.api.app.services.action_service import observe_action, reconcile_action
 from apps.api.app.services.llm_circuit_service import llm_circuit_status
+from apps.api.app.services.llm_config_service import runtime_settings
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 
 
@@ -284,7 +285,7 @@ def verify_successful_actions(
 
 
 def operations_status(session: Session) -> dict[str, object]:
-    settings = get_settings()
+    settings = runtime_settings(session)
     now = datetime.now(UTC)
     try:
         with session.begin_nested():
@@ -362,6 +363,7 @@ def apply_retention(
 
 
 def startup_preflight(session: Session, settings: Settings) -> list[str]:
+    settings = runtime_settings(session, settings)
     reasons: list[str] = []
     try:
         session.execute(text("SELECT 1"))

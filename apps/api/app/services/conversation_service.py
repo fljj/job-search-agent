@@ -8,9 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
-from apps.api.app.core.config import get_settings
 from apps.api.app.core.conversation_config import get_conversation_policy
-from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.conversation import (
     ConversationPayload,
@@ -22,6 +20,7 @@ from apps.api.app.schemas.score import ScoreRequest
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.job_service import get_job_entity, get_parsed_entity
 from apps.api.app.services.knowledge_service import get_knowledge_entities
+from apps.api.app.services.llm_config_service import build_runtime_llm_provider
 from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.score_service import create_score
@@ -383,7 +382,7 @@ def create_reply_draft(
             None,
             reply_source=ReplySource.RULE_TEMPLATE,
         )
-    llm_provider = _optional_llm_provider(provider)
+    llm_provider = _optional_llm_provider(session, provider)
     score = _current_score(session, conversation)
     if (
         score is None
@@ -462,7 +461,7 @@ def create_greeting_draft(
     )
     if existing:
         return _draft_response(session, existing)
-    llm_provider = provider or build_llm_provider(get_settings())
+    llm_provider = provider or build_runtime_llm_provider(session)
     profile_facts = _profile_facts(
         profile,
         parsed.required_skills + parsed.preferred_skills,
@@ -550,7 +549,7 @@ def create_resume_draft(
         )
         authorization_basis = "INBOUND_EXPLICIT_RESUME_REQUEST"
     else:
-        llm_provider = _optional_llm_provider(provider)
+        llm_provider = _optional_llm_provider(session, provider)
         if llm_provider is None:
             evaluation = ConversationEvaluation(
                 resume_requested=False,
@@ -1270,11 +1269,14 @@ def _full_time_education_reply(
     )
 
 
-def _optional_llm_provider(provider: LlmProvider | None) -> LlmProvider | None:
+def _optional_llm_provider(
+    session: Session,
+    provider: LlmProvider | None,
+) -> LlmProvider | None:
     if provider is not None:
         return provider
     try:
-        return build_llm_provider(get_settings())
+        return build_runtime_llm_provider(session)
     except LlmProviderError:
         return None
 

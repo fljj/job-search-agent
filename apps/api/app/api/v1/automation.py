@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from apps.api.app.api.v1.helpers import response
 from apps.api.app.core.config import reload_settings
 from apps.api.app.core.database import get_session
-from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.schemas.automation import (
     AgentRunStartRequest,
     AgentRunTickRequest,
@@ -28,6 +27,10 @@ from apps.api.app.services.automation_service import (
     upsert_setting,
 )
 from apps.api.app.services.llm_circuit_service import probe_llm_circuit
+from apps.api.app.services.llm_config_service import (
+    build_runtime_llm_provider,
+    runtime_settings,
+)
 from apps.api.app.services.operations_service import (
     audit_discrepancies,
     list_reconciliation_tasks,
@@ -71,12 +74,12 @@ def runs(session: Session = Depends(get_session)) -> dict[str, object]:
 def retry_llm_circuit(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
-    settings = reload_settings()
+    settings = runtime_settings(session, reload_settings())
     return response(
         probe_llm_circuit(
             session,
             settings,
-            build_llm_provider(settings),
+            build_runtime_llm_provider(session, settings),
             force=True,
         )
     )

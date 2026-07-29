@@ -172,7 +172,7 @@ def test_authorization_key_is_not_in_payload() -> None:
 
 def test_score_prompt_lists_exact_evidence_contract() -> None:
     version, prompt = PROMPTS["score_job"]
-    assert version == "job-score-v6"
+    assert version == "job-score-v8"
     assert "title=15，skills=25" in prompt
     assert "industry=10，management=5" in prompt
     assert "total_score必须等于七项score之和" in prompt

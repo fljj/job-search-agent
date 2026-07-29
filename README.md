@@ -56,12 +56,16 @@ docker --version
 cp .env.example .env
 ```
 
-打开 `.env`，至少配置智谱密钥：
+打开 `.env`，声明允许使用的供应商、模型和对应密钥：
 
 ```dotenv
-LLM_PROVIDER=ZHIPU
+LLM_PROVIDERS=ZHIPU,QWEN
 ZHIPU_API_KEY=你的智谱API密钥
-LLM_MODEL=glm-5.2
+ZHIPU_MODEL=glm-5.2
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+QWEN_API_KEY=你的千问API密钥
+QWEN_MODEL=qwen-plus
+QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_TIMEOUT_SECONDS=120
 AGENT_EXECUTOR_MODE=REAL
 CALENDAR_PROVIDER=APPLE
@@ -70,9 +74,9 @@ APPLE_CALENDAR_NAME=求职面试
 
 不要提交 `.env`。系统不会在接口或日志中返回 API Key。
 
-修改 LLM API Key、模型或服务地址后，无需重启项目。在总览的 LLM 异常提示中点击
-“重新加载配置并重试 LLM”；Worker 的下一次自动健康探测也会重新读取 `.env`。探测成功
-后自动解除全局暂停并继续业务。操作系统环境变量优先于 `.env`；如果 Key 是通过终端
+`.env` 不再指定当前模型。当前供应商和模型在“系统设置”的“LLM 配置状态”中切换，
+保存后后续调用和健康探针立即生效。新增或修改 `.env` 中的供应商、模型、密钥或服务
+地址后需要重启 API 和 Worker。操作系统环境变量优先于 `.env`；如果 Key 是通过终端
 `export` 设置的，仍需重新启动对应进程。数据库地址等基础设施配置不支持热重载。
 
 常用 Worker 配置：
@@ -168,8 +172,8 @@ npm run dev
 求职策略支持独立配置是否接受兼职。接受兼职时，明确要求异地现场办公的岗位仍会
 排除；未写明办公方式的兼职岗位会保留并在后续沟通中确认，不会仅按公司所在地误判。
 
-LLM 配置显示“未配置”时，确认 `ZHIPU_API_KEY` 写在项目根目录 `.env`，然后重启 API
-和 Worker。修改 `.env` 不会自动刷新已经运行的进程。
+LLM 配置显示“未配置”时，确认对应供应商的 API Key 已写入项目根目录 `.env`，然后
+重启 API 和 Worker。供应商和模型的日常切换不需要重启。
 
 可在不访问招聘网站的情况下检查智谱连接：
 

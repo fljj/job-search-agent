@@ -1,9 +1,9 @@
-"""手动真实 LLM 只读评分冒烟；不访问数据库或浏览器，不产生招聘平台写操作。"""
+"""手动真实 LLM 只读评分冒烟；读取模型选择，不产生招聘平台写操作。"""
 
 from decimal import Decimal
 
-from apps.api.app.core.config import get_settings
-from apps.api.app.core.llm import build_llm_provider
+from apps.api.app.core.database import SessionLocal
+from apps.api.app.services.llm_config_service import build_runtime_llm_provider
 from packages.job_parser.models import JobInput, WorkMode
 from packages.scoring.evidence import with_evidence_catalog
 from packages.scoring.llm_engine import validate_llm_score
@@ -23,7 +23,8 @@ from packages.scoring.models import (
 
 
 def main() -> None:
-    provider = build_llm_provider(get_settings())
+    with SessionLocal() as session:
+        provider = build_runtime_llm_provider(session)
     job = JobInput(
         title="高级 Java 后端工程师",
         company_name="只读冒烟测试公司",

@@ -28,6 +28,25 @@ def test_zhipu_never_reuses_qwen_api_key() -> None:
     assert settings.llm_configured is False
 
 
+def test_provider_catalog_uses_provider_specific_models_and_keys() -> None:
+    settings = Settings(
+        _env_file=None,
+        llm_providers="QWEN,ZHIPU",
+        qwen_model="qwen-plus-test",
+        zhipu_model="glm-test",
+        qwen_api_key=SecretStr("qwen-key"),
+        zhipu_api_key=SecretStr("zhipu-key"),
+    )
+
+    assert settings.available_llm_providers == ["QWEN", "ZHIPU"]
+    qwen = settings.with_llm_selection("QWEN", settings.qwen_model)
+    zhipu = settings.with_llm_selection("ZHIPU", settings.zhipu_model)
+    assert qwen.llm_model == "qwen-plus-test"
+    assert qwen.selected_llm_api_key is settings.qwen_api_key
+    assert zhipu.llm_model == "glm-test"
+    assert zhipu.selected_llm_api_key is settings.zhipu_api_key
+
+
 def test_reload_settings_reads_updated_llm_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

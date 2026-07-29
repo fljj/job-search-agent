@@ -22,6 +22,7 @@ from apps.api.app.services.conversation_service import (
 )
 from apps.api.app.services.job_service import import_job
 from apps.api.app.services.llm_circuit_service import open_llm_circuit
+from apps.api.app.services.llm_config_service import runtime_settings
 from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID
@@ -120,7 +121,7 @@ def process_next_inbound_job_score(
             provider=provider,
         )
     except LlmProviderError as exc:
-        open_llm_circuit(session, get_settings(), exc.code, now=current)
+        open_llm_circuit(session, runtime_settings(session), exc.code, now=current)
         _inbound_scoring_event(
             session, run, conversation, "INBOUND_JOB_SCORE_LLM_BLOCKED", [exc.code]
         )

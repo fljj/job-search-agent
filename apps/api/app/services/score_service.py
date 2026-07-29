@@ -5,8 +5,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
-from apps.api.app.core.config import get_settings
-from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.score import ScoreRequest, ScoreResponse
 from apps.api.app.services.errors import ResourceNotFoundError
@@ -17,6 +15,7 @@ from apps.api.app.services.job_service import (
     to_job_domain,
     to_parsed_domain,
 )
+from apps.api.app.services.llm_config_service import build_runtime_llm_provider
 from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.strategy_service import to_domain as strategy_to_domain
 from apps.api.app.services.user_service import DEFAULT_USER_ID
@@ -111,7 +110,7 @@ def create_score(
             reassessment_key,
         )
 
-    llm_provider = provider or build_llm_provider(get_settings())
+    llm_provider = provider or build_runtime_llm_provider(session)
     if request.parsed_job_detail_id is None:
         llm_parsed_record = session.scalar(
             select(db.ParsedJobDetail)

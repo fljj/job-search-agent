@@ -18,7 +18,10 @@ interface SettingForm {
   work_start_hour: number; work_end_hour: number
 }
 
-interface LlmStatus { provider: string; model: string; configured: boolean }
+interface LlmOption { provider: string; model: string; configured: boolean }
+interface LlmStatus {
+  provider: string; model: string; configured: boolean; options: LlmOption[]
+}
 interface AgentRun {
   id: string; platform: string; strategy_id: string; status: string; heartbeat_at?: string
   processed_count: number; action_count: number; failure_count: number
@@ -41,6 +44,8 @@ interface StrategyOption { id: string; name: string; enabled: boolean }
 export function AutomationPage() {
   const [form] = Form.useForm<SettingForm>()
   const [llm, setLlm] = useState<LlmStatus>()
+  const [selectedLlm, setSelectedLlm] = useState<string>()
+  const [savingLlm, setSavingLlm] = useState(false)
   const [runs, setRuns] = useState<AgentRun[]>([])
   const [actions, setActions] = useState<AutomaticAction[]>([])
   const [platform, setPlatform] = useState('BOSS')
@@ -59,7 +64,8 @@ export function AutomationPage() {
       api<OperationsStatus>('/automation/operations/status'),
       api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
     ])
-    setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
+    setLlm(llmStatus); setSelectedLlm(`${llmStatus.provider}:${llmStatus.model}`)
+    setRuns(runList.items); setActions(actionList.items)
     setOperations(operationStatus)
     setStrategies(strategyList.items)
   }
@@ -72,6 +78,7 @@ export function AutomationPage() {
       api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
     ]).then(([llmStatus, runList, actionList, operationStatus, strategyList]) => {
       setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
+      setSelectedLlm(`${llmStatus.provider}:${llmStatus.model}`)
       setOperations(operationStatus)
       setStrategies(strategyList.items)
       if (strategyList.items.length === 1) setStrategyId(strategyList.items[0].id)
@@ -81,6 +88,23 @@ export function AutomationPage() {
   const save = async (values: SettingForm) => {
     await api('/automation/settings', { method: 'PUT', body: JSON.stringify(values) })
     message.success('自动化配置已保存')
+  }
+  const saveLlm = async () => {
+    const option = llm?.options.find(
+      (item) => `${item.provider}:${item.model}` === selectedLlm,
+    )
+    if (!option) return
+    setSavingLlm(true)
+    try {
+      const updated = await api<LlmStatus>('/system/llm-status', {
+        method: 'PUT',
+        body: JSON.stringify({ provider: option.provider, model: option.model }),
+      })
+      setLlm(updated)
+      message.success(`已切换到 ${updated.provider} / ${updated.model}，后续调用立即生效`)
+    } finally {
+      setSavingLlm(false)
+    }
   }
   const start = async () => {
     if (!strategyId) return message.warning('请填写已启用的策略 ID')
@@ -109,6 +133,21 @@ export function AutomationPage() {
           {llm?.configured ? '已配置' : '未配置'}
         </Tag> },
       ]} />
+      <Space wrap>
+        <Select style={{ width: 320 }} value={selectedLlm}
+          onChange={setSelectedLlm}
+          options={(llm?.options ?? []).map((item) => ({
+            value: `${item.provider}:${item.model}`,
+            label: `${item.provider} / ${item.model}${item.configured ? '' : '（未配置密钥）'}`,
+            disabled: !item.configured,
+          }))} />
+        <Button type="primary" loading={savingLlm}
+          disabled={!selectedLlm || selectedLlm === `${llm?.provider}:${llm?.model}`}
+          onClick={() => void saveLlm().catch(showRequestError)}>
+          切换模型
+        </Button>
+        <span>API Key 仅从环境变量读取，不会保存到数据库。</span>
+      </Space>
     </Card>
 
     <Card title="运行自检与对账">

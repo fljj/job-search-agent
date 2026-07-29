@@ -1,21 +1,37 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from apps.api.app.api.v1.helpers import response
 from apps.api.app.core.config import get_settings
+from apps.api.app.core.database import get_session
+from apps.api.app.services.llm_config_service import (
+    llm_configuration,
+    select_llm_configuration,
+)
 
 router = APIRouter(prefix="/system", tags=["system"])
 
 
+class LlmSelectionPayload(BaseModel):
+    provider: str = Field(min_length=1, max_length=30)
+    model: str = Field(min_length=1, max_length=100)
+
+
 @router.get("/llm-status")
-def llm_status() -> dict[str, object]:
+def llm_status(session: Session = Depends(get_session)) -> dict[str, object]:
     """返回不含密钥和端点凭证的 LLM 配置摘要。"""
-    settings = get_settings()
+    return response(llm_configuration(session))
+
+
+@router.put("/llm-status")
+def save_llm_selection(
+    payload: LlmSelectionPayload,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    """保存当前模型选择；API Key 始终只从环境变量读取。"""
     return response(
-        {
-            "provider": settings.llm_provider,
-            "model": settings.llm_model,
-            "configured": settings.llm_configured,
-        }
+        select_llm_configuration(session, payload.provider, payload.model)
     )
 
 

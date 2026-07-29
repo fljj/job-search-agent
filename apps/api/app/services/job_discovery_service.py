@@ -20,6 +20,7 @@ from apps.api.app.services.automation_service import (
 from apps.api.app.services.conversation_service import create_greeting_draft
 from apps.api.app.services.job_service import import_job
 from apps.api.app.services.llm_circuit_service import open_llm_circuit
+from apps.api.app.services.llm_config_service import runtime_settings
 from apps.api.app.services.score_service import create_score
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
@@ -174,7 +175,7 @@ def process_job_discovery_batch(
             if exc.code in RETRYABLE_LLM_CODES:
                 open_llm_circuit(
                     session,
-                    get_settings(),
+                    runtime_settings(session),
                     exc.code,
                     now=current,
                 )

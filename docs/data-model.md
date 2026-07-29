@@ -354,6 +354,8 @@ SESSION_PAUSED
 - `automation_settings` 按全局、平台和策略范围保存开关、限额、工作时段和紧急停止。
 - `agent_runs` 保存平台运行、暂停原因、游标和租约；`llm_circuit_breakers` 保存模型全局
   熔断状态。
+- `llm_runtime_settings` 每个用户一条，只保存系统设置中选中的 `provider`、`model`
+  和版本；API Key、Token 和供应商凭证禁止写入数据库。
 - 动作、尝试、回读、对账和审计仍分别由 `action_queue`、`action_attempts`、
   `reconciliation_tasks` 和 `audit_events` 保存，不因取消运行级别而弱化。
 

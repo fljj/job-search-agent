@@ -285,7 +285,10 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 
 ### 7.8 控制台只读接口
 
-- `GET /api/v1/system/llm-status`：返回 `provider/model/configured`，禁止返回 API Key、Base URL 凭证或完整环境配置。
+- `GET /api/v1/system/llm-status`：返回当前 `provider/model/configured` 和环境允许的
+  `options`，禁止返回 API Key、Base URL 凭证或完整环境配置。
+- `PUT /api/v1/system/llm-status`：保存当前 `provider/model`。只能选择环境允许且已
+  配置对应 API Key 的选项；保存后后续调用与健康探针立即生效。
 - `GET /api/v1/automation/runs`：按时间倒序返回 Agent 状态、心跳、计数、租约和暂停原因。
 - `GET /api/v1/automation/actions`：仅返回 `authorization_source=AUTO` 的普通自动动作及发送结果/失败证据。
 - `GET /api/v1/conversations`：返回对话绑定策略、可选最新评分、页面观察到的公司/

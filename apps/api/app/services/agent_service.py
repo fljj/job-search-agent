@@ -9,13 +9,16 @@ from adapters.browser.fake_actions import FakeActionExecutor
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.calendar import build_calendar_gateway
 from apps.api.app.core.config import get_settings
-from apps.api.app.core.llm import build_llm_provider
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AgentRunStartRequest, AutomationDispatchRequest
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.llm_circuit_service import open_llm_circuit
+from apps.api.app.services.llm_config_service import (
+    build_runtime_llm_provider,
+    runtime_settings,
+)
 from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.browser_worker.actions import ActionExecutor
@@ -37,7 +40,7 @@ def start_run(session: Session, payload: AgentRunStartRequest) -> dict[str, obje
     strategy = session.get(db.JobStrategy, payload.strategy_id)
     if strategy is None or strategy.user_id != DEFAULT_USER_ID or not strategy.enabled:
         raise ResourceNotFoundError("启用的策略不存在")
-    build_llm_provider(get_settings())
+    build_runtime_llm_provider(session)
     rules = _effective_rules(session, payload.platform, strategy.id)
     if not rules.enabled or rules.paused:
         raise ValueError("自动化未启用或已暂停")
@@ -144,7 +147,7 @@ def tick_run(
     if executor is None and requested_run.platform != "MOCK":
         raise ValueError("真实平台 Agent 必须显式提供真实执行器")
     run = _acquire_lease(session, run_id, worker_id, current)
-    settings = get_settings()
+    settings = runtime_settings(session)
     rules = _effective_rules(session, run.platform, run.strategy_id)
     if not rules.enabled or rules.paused:
         return pause_run(session, run.id, ["AUTOMATION_DISABLED_OR_PAUSED"])
@@ -158,7 +161,7 @@ def tick_run(
         if platform_session is None or platform_session.status != "SESSION_READY":
             return pause_run(session, run.id, ["PLATFORM_SESSION_NOT_READY"])
 
-    llm_provider = provider or build_llm_provider(settings)
+    llm_provider = provider or build_runtime_llm_provider(session, settings)
     calendar_gateway = build_calendar_gateway(settings)
     action_executor = executor or FakeActionExecutor()
     processed = 0
