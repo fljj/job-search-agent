@@ -305,7 +305,7 @@ class MessageDiscoveryAdapter:
                             and result.page_type is PageType.JOB
                             and result.job is not None
                         ):
-                            job_page._evaluate("window.close()")
+                            self._close_target(cdp_url, target_id)
                             if cache is not None:
                                 cache[href] = result
                             return result
@@ -342,6 +342,22 @@ class MessageDiscoveryAdapter:
     @staticmethod
     def _close_target(cdp_url: str, target_id: str) -> None:
         try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            target = next(
+                (
+                    item
+                    for item in targets
+                    if str(item.get("id")) == target_id
+                ),
+                None,
+            )
+            if (
+                target is None
+                or target.get("type") != "page"
+                or "/job_detail/" not in str(target.get("url") or "")
+            ):
+                return
             with urlopen(
                 f"{cdp_url.rstrip('/')}/json/close/{target_id}", timeout=3
             ):

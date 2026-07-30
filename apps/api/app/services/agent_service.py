@@ -330,6 +330,7 @@ def _pending_drafts(
         .order_by(db.GeneratedDraft.created_at.asc())
     ).all()
     result: list[tuple[db.GeneratedDraft, db.Conversation, UUID | None]] = []
+    retry_included = False
     for draft in drafts:
         if len(result) >= limit:
             break
@@ -363,6 +364,9 @@ def _pending_drafts(
             )
             if not retry_ready:
                 continue
+            if retry_included:
+                continue
+            retry_included = True
         conversation = session.get(db.Conversation, draft.conversation_id)
         if conversation is None:
             continue

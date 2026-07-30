@@ -300,6 +300,22 @@ class BossJobDiscoveryAdapter:
     @staticmethod
     def _close_target(cdp_url: str, target_id: str) -> None:
         try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            target = next(
+                (
+                    item
+                    for item in targets
+                    if str(item.get("id")) == target_id
+                ),
+                None,
+            )
+            if (
+                target is None
+                or target.get("type") != "page"
+                or "/job_detail/" not in str(target.get("url") or "")
+            ):
+                return
             with urlopen(
                 f"{cdp_url.rstrip('/')}/json/close/{target_id}", timeout=3
             ):

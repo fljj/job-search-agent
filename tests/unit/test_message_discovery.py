@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -68,7 +69,39 @@ def detail(item: BrowserConversationSummary) -> ReadResult:
             company_name=item.company_name,
             external_job_id=item.external_job_id,
         ),
+)
+
+
+def test_linked_job_close_refuses_user_message_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class Response(BytesIO):
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            self.close()
+
+    def fake_open(url: str, timeout: int) -> Response:
+        calls.append(url)
+        return Response(
+            b'[{"id":"user-message","type":"page",'
+            b'"url":"https://www.zhipin.com/web/geek/chat"}]'
+        )
+
+    monkeypatch.setattr(
+        "adapters.browser.message_discovery.urlopen",
+        fake_open,
     )
+
+    MessageDiscoveryAdapter._close_target(
+        "http://127.0.0.1:9222",
+        "user-message",
+    )
+
+    assert calls == ["http://127.0.0.1:9222/json/list"]
 
 
 def test_location_consent_uses_strategy_onsite_locations() -> None:

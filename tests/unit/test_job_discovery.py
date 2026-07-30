@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
@@ -328,6 +329,38 @@ def test_closes_only_detail_targets_created_for_batch(
     adapter.close_details("http://127.0.0.1:9222", batch)
 
     assert closed == [("http://127.0.0.1:9222", "created-detail")]
+
+
+def test_target_close_refuses_user_job_list_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class Response(BytesIO):
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            self.close()
+
+    def fake_open(url: str, timeout: int) -> Response:
+        calls.append(url)
+        return Response(
+            b'[{"id":"user-page","type":"page",'
+            b'"url":"https://www.zhipin.com/web/geek/job"}]'
+        )
+
+    monkeypatch.setattr(
+        "adapters.browser.job_discovery.urlopen",
+        fake_open,
+    )
+
+    BossJobDiscoveryAdapter._close_target(
+        "http://127.0.0.1:9222",
+        "user-page",
+    )
+
+    assert calls == ["http://127.0.0.1:9222/json/list"]
 
 
 @pytest.mark.parametrize(
