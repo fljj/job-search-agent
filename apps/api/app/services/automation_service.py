@@ -202,6 +202,11 @@ def dispatch(
     if pending_task:
         pending_task.status = "SUPERSEDED"
     session.commit()
+    if (
+        action.status == ActionStatus.FAILED_RETRYABLE.value
+        and action.failure_code in PREWRITE_RETRYABLE_FAILURES
+    ):
+        approve_retry(session, action.id)
     result = execute_action(session, action.id, payload.cdp_url, executor)
     if (
         result.status == ActionStatus.SUCCEEDED.value

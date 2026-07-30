@@ -35,6 +35,7 @@ from packages.conversation_agent.llm_engine import (
 )
 from packages.conversation_agent.memory import (
     build_conversation_memory,
+    remove_known_job_context_questions,
     remove_repeated_questions,
 )
 from packages.conversation_agent.models import Decision, DraftResult, Intent, ReplySource
@@ -606,6 +607,7 @@ def create_resume_draft(
         authorization_basis = "INBOUND_POSITIVE_FEEDBACK"
     valid_message_ids = {item.id for item in messages}
     evidence_valid = has_valid_conversation_evidence(evaluation, valid_message_ids)
+    current_message_is_evidence = message.id in evaluation.evidence_message_ids
     resumes = session.scalars(
         select(db.Resume)
         .where(
@@ -638,6 +640,7 @@ def create_resume_draft(
     allowed = (
         qualification.value != "MISMATCH"
         and evidence_valid
+        and current_message_is_evidence
         and (evaluation.resume_requested or evaluation.positive_feedback)
         and selected is not None
         and not duplicate
@@ -1201,13 +1204,26 @@ def _build_scored_reply(
             generated.content,
             memory,
         )
-        if repeated_topics:
+        cleaned, known_context_topics = remove_known_job_context_questions(
+            cleaned,
+            work_mode=job.work_mode,
+        )
+        if repeated_topics or known_context_topics:
             generated = generated.model_copy(
                 update={
                     "content": cleaned,
                     "risk_codes": [
                         *generated.risk_codes,
-                        "REPEATED_QUESTION_REMOVED",
+                        *(
+                            ["REPEATED_QUESTION_REMOVED"]
+                            if repeated_topics
+                            else []
+                        ),
+                        *(
+                            ["KNOWN_JOB_CONTEXT_QUESTION_REMOVED"]
+                            if known_context_topics
+                            else []
+                        ),
                     ],
                 }
             )

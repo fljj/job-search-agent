@@ -95,6 +95,10 @@ class PlaywrightActionExecutor:
             return self._execute_platform_consent_over_raw_cdp(cdp_url, command)
         if command.action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
             return self._execute_reply_over_raw_cdp(cdp_url, command)
+        if command.action_type == "RESUME":
+            preparation = self._prepare_conversation_target(cdp_url, command)
+            if preparation is not None:
+                return preparation
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.connect_over_cdp(cdp_url)
@@ -103,6 +107,67 @@ class PlaywrightActionExecutor:
             return ExecutionResult(
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
                 error_code="PLAYWRIGHT_ERROR",
+            )
+
+    def _prepare_conversation_target(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult | None:
+        """发送简历前从消息列表打开唯一批准会话，不依赖用户当前焦点。"""
+        platform = Platform(command.platform)
+        selectors = self.config.platforms[platform.value]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches = 0
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(str(websocket_url)) as page:
+                    check = extract_current_page(
+                        page,
+                        platform,
+                        selectors,
+                        self.config.version,
+                    )
+                    if _reply_target_matches(check, command):
+                        matches += 1
+                        continue
+                    if not page.exists(selectors.conversation_list_root):
+                        continue
+                    if not self._open_approved_conversation(
+                        page,
+                        selectors,
+                        command,
+                    ):
+                        continue
+                    for _ in range(30):
+                        check = extract_current_page(
+                            page,
+                            platform,
+                            selectors,
+                            self.config.version,
+                        )
+                        if _reply_target_matches(check, command):
+                            matches += 1
+                            break
+                        time.sleep(0.1)
+            if matches == 1:
+                return None
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code=(
+                    "APPROVED_TARGET_PAGE_NOT_FOUND"
+                    if matches == 0
+                    else "APPROVED_TARGET_PAGE_AMBIGUOUS"
+                ),
+            )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="RAW_CDP_PREFLIGHT_ERROR",
             )
 
     def _execute_telegram_greeting(

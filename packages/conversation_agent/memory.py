@@ -76,6 +76,30 @@ def remove_repeated_questions(
     return cleaned, sorted(repeated)
 
 
+def remove_known_job_context_questions(
+    content: str,
+    *,
+    work_mode: str,
+) -> tuple[str, list[str]]:
+    """移除模型对已由职位信息明确回答的工作模式问题。"""
+    removed: set[str] = set()
+    kept: list[str] = []
+    for sentence in _sentences(content):
+        intents = set(classify_intents(sentence))
+        if (
+            _is_question(sentence)
+            and Intent.REMOTE_POLICY in intents
+            and work_mode in {"ONSITE", "REMOTE"}
+        ):
+            removed.add("WORK_MODE")
+            continue
+        kept.append(sentence)
+    cleaned = "".join(kept).strip()
+    if not cleaned:
+        cleaned = "感谢您的联系，岗位信息我已经了解，可以继续沟通。"
+    return cleaned, sorted(removed)
+
+
 def _is_question(content: str) -> bool:
     return any(marker in content for marker in QUESTION_MARKERS)
 

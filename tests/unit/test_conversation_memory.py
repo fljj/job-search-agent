@@ -1,5 +1,6 @@
 from packages.conversation_agent.memory import (
     build_conversation_memory,
+    remove_known_job_context_questions,
     remove_repeated_questions,
 )
 from packages.llm.models import ConversationTurn
@@ -53,3 +54,13 @@ def test_only_repeated_question_uses_safe_acknowledgement() -> None:
 
     assert content == "感谢您的补充，我已经了解这些信息，后续可以继续沟通。"
     assert repeated == ["JOB_DETAIL"]
+
+
+def test_known_onsite_job_does_not_ask_whether_remote_is_supported() -> None:
+    content, removed = remove_known_job_context_questions(
+        "AI 技能在团队中的实际比重如何？济南现场办公是否支持部分远程？",
+        work_mode="ONSITE",
+    )
+
+    assert content == "AI 技能在团队中的实际比重如何？"
+    assert removed == ["WORK_MODE"]

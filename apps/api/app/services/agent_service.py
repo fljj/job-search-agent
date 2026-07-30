@@ -11,6 +11,7 @@ from apps.api.app.core.calendar import build_calendar_gateway
 from apps.api.app.core.config import get_settings
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AgentRunStartRequest, AutomationDispatchRequest
+from apps.api.app.services.action_service import PREWRITE_RETRYABLE_FAILURES
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
@@ -189,6 +190,11 @@ def tick_run(
     ).all()
     for message in messages:
         try:
+            if "RESUME_REQUEST" in message.intents:
+                resume = create_resume_draft(session, message.id, llm_provider)
+                processed += 1
+                _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
+                continue
             draft = create_reply_draft(session, message.id, llm_provider)
             processed += 1
             _event(session, run.id, "DRAFT_CREATED", "draft", draft.id)
@@ -342,12 +348,21 @@ def _pending_drafts(
         )
         if decision is None or decision.decision != "ALLOW_AUTO":
             continue
-        if session.scalar(
-            select(db.ActionQueue.id).where(
+        existing_action = session.scalar(
+            select(db.ActionQueue).where(
                 db.ActionQueue.draft_id == draft.id
             )
-        ):
-            continue
+        )
+        if existing_action is not None:
+            retry_ready = (
+                existing_action.status == "FAILED_RETRYABLE"
+                and existing_action.failure_code
+                in PREWRITE_RETRYABLE_FAILURES
+                and existing_action.updated_at
+                <= datetime.now(UTC) - timedelta(seconds=60)
+            )
+            if not retry_ready:
+                continue
         conversation = session.get(db.Conversation, draft.conversation_id)
         if conversation is None:
             continue
