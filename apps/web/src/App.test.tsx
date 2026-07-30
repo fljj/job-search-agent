@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { statusColor } from './pages/automation-status'
-import { activeRuns, agentStatusText, type RunSummaryItem } from './pages/run-summary'
+import {
+  activeRuns,
+  agentStatusText,
+  runStatusText,
+  type RunSummaryItem,
+} from './pages/run-summary'
 import { activeWorkers, workerStatusText } from './pages/worker-status'
 
 describe('Agent 控制台状态展示', () => {
@@ -77,5 +82,16 @@ describe('总览平台运行聚合', () => {
 
   it('没有活动平台时显示未启动', () => {
     expect(agentStatusText([run('BOSS', 'STOPPED', 0)])).toBe('未启动')
+  })
+
+  it('平台已启用但没有 Worker 时不显示运行中', () => {
+    const runs = [
+      run('BOSS', 'RUNNING', 0),
+      run('MAIMAI', 'RUNNING', 0),
+      run('TELEGRAM', 'RUNNING', 0),
+    ]
+
+    expect(agentStatusText(runs, false)).toBe('Worker 未运行（3 个平台已启用）')
+    expect(runStatusText(runs[0], false)).toBe('已启用，等待 Worker')
   })
 })

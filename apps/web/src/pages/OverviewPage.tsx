@@ -2,7 +2,7 @@ import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag, mes
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
-import { activeRuns, agentStatusText, canReconnectRun } from './run-summary'
+import { activeRuns, agentStatusText, canReconnectRun, runStatusText } from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
 
 interface Run {
@@ -25,17 +25,23 @@ export function OverviewPage() {
   const [actions, setActions] = useState<Action[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [operations, setOperations] = useState<Operations>()
+  const [loadError, setLoadError] = useState<string>()
   const [reconnectingRunId, setReconnectingRunId] = useState<string>()
   const [retryingLlm, setRetryingLlm] = useState(false)
   const load = async () => {
-    const [runData, actionData, conversationData, operationData] = await Promise.all([
-      api<{ items: Run[] }>('/automation/runs'),
-      api<{ items: Action[] }>('/automation/actions'),
-      api<{ items: Conversation[] }>('/conversations'),
-      api<Operations>('/automation/operations/status'),
-    ])
-    setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
-    setOperations(operationData)
+    try {
+      const [runData, actionData, conversationData, operationData] = await Promise.all([
+        api<{ items: Run[] }>('/automation/runs'),
+        api<{ items: Action[] }>('/automation/actions'),
+        api<{ items: Conversation[] }>('/conversations'),
+        api<Operations>('/automation/operations/status'),
+      ])
+      setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
+      setOperations(operationData); setLoadError(undefined)
+    } catch (error) {
+      setRuns([]); setActions([]); setConversations([]); setOperations(undefined)
+      setLoadError(error instanceof Error ? error.message : '无法连接 API 服务')
+    }
   }
   const reconnect = async (run: Run) => {
     setReconnectingRunId(run.id)
@@ -73,14 +79,20 @@ export function OverviewPage() {
       api<Operations>('/automation/operations/status'),
     ]).then(([runData, actionData, conversationData, operationData]) => {
       setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
-      setOperations(operationData)
+      setOperations(operationData); setLoadError(undefined)
+    }).catch((error: unknown) => {
+      setRuns([]); setActions([]); setConversations([]); setOperations(undefined)
+      setLoadError(error instanceof Error ? error.message : '无法连接 API 服务')
     })
   }, [])
   const currentRuns = activeRuns(runs)
   const processedCount = currentRuns.reduce((sum, item) => sum + item.processed_count, 0)
   const currentWorkers = activeWorkers(operations?.workers)
+  const workerRunning = currentWorkers.length > 0
   const llmCircuit = operations?.llm_circuit
   return <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    {loadError && <Alert type="error" showIcon message="服务不可用"
+      description={`无法获取实时运行状态：${loadError}`} />}
     {llmCircuit && llmCircuit.status !== 'CLOSED' && <Alert type="error" showIcon
       message="LLM 暂不可用，Agent 业务已暂停"
       description={<Space direction="vertical">
@@ -96,7 +108,7 @@ export function OverviewPage() {
         description="请在系统设置中检查数据库、LLM 和平台会话。" />}
     <Row gutter={[16, 16]}>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="Agent 状态"
-        value={agentStatusText(runs)} /></Card></Col>
+        value={loadError ? '服务不可用' : agentStatusText(runs, workerRunning)} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="已处理职位/消息"
         value={processedCount} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="自动动作"
@@ -110,7 +122,7 @@ export function OverviewPage() {
           ? <Space size={[4, 4]} wrap>{currentRuns.map((run) =>
             <Space key={run.id} size={4}>
               <Tag color={statusColor(run.status)}>
-                {run.platform}:{run.status}
+                {run.platform}:{runStatusText(run, workerRunning)}
                 {run.status === 'PAUSED' && run.pause_reason_codes.length > 0
                   ? `（${run.pause_reason_codes.join('、')}）` : ''}
               </Tag>

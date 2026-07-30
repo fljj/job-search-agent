@@ -75,6 +75,15 @@ describe('OverviewPage 重新连接', () => {
     await waitFor(() => expect(successSpy).toHaveBeenCalledWith('BOSS 已恢复，正在重新检查页面'))
   })
 
+  it('API 不可用时清空旧状态并显示服务不可用', async () => {
+    vi.mocked(api).mockRejectedValue(new Error('连接失败'))
+
+    render(<OverviewPage />)
+
+    expect(await screen.findAllByText('服务不可用')).not.toHaveLength(0)
+    expect(screen.queryByText('BOSS:RUNNING')).toBeNull()
+  })
+
   it('LLM 熔断时展示提示并允许立即重试', async () => {
     vi.mocked(api).mockImplementation(async (path) => {
       if (path === '/automation/operations/status') return {

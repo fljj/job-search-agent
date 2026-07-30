@@ -25,13 +25,23 @@ export function activeRuns<T extends RunSummaryItem>(runs: T[]) {
     })
 }
 
-export function agentStatusText(runs: RunSummaryItem[]) {
+export function agentStatusText(
+  runs: RunSummaryItem[],
+  workerRunning = true,
+) {
   const currentRuns = activeRuns(runs)
   if (currentRuns.length === 0) return '未启动'
+  if (!workerRunning) return `Worker 未运行（${currentRuns.length} 个平台已启用）`
   if (currentRuns.every((item) => item.status === 'RUNNING')) {
     return currentRuns.length === 1 ? 'RUNNING' : `${currentRuns.length} 个平台运行中`
   }
   return currentRuns.some((item) => item.status === 'RUNNING') ? '部分运行' : '已暂停'
+}
+
+export function runStatusText(run: RunSummaryItem, workerRunning: boolean) {
+  return run.status === 'RUNNING' && !workerRunning
+    ? '已启用，等待 Worker'
+    : run.status
 }
 
 export function canReconnectRun(
