@@ -299,29 +299,9 @@ class BossJobDiscoveryAdapter:
 
     @staticmethod
     def _close_target(cdp_url: str, target_id: str) -> None:
-        try:
-            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
-                targets = json.loads(response.read())
-            target = next(
-                (
-                    item
-                    for item in targets
-                    if str(item.get("id")) == target_id
-                ),
-                None,
-            )
-            if (
-                target is None
-                or target.get("type") != "page"
-                or "/job_detail/" not in str(target.get("url") or "")
-            ):
-                return
-            with urlopen(
-                f"{cdp_url.rstrip('/')}/json/close/{target_id}", timeout=3
-            ):
-                pass
-        except (OSError, TimeoutError, ValueError):
-            pass
+        # BOSS 会复用并跳转同源标签页，创建时记录的目标不能作为关闭依据。
+        # Worker 不拥有用户浏览器标签页的生命周期，因此禁止自动关闭任何目标。
+        del cdp_url, target_id
 
     def close_details(self, cdp_url: str, batch: JobDiscoveryBatch) -> None:
         """批次完成后关闭扫描器创建的详情页，不影响用户原有标签页。"""

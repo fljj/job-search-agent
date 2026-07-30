@@ -128,6 +128,8 @@ def test_reply_executor_can_open_unique_approved_conversation_from_list() -> Non
     expression = page._evaluate.call_args.args[0]
     assert "derived:approved-conversation" in expression
     assert json.dumps("张招聘") in expression
+    assert "fullText.includes(expectedCompany)" in expression
+    assert "jobMatches || companyUniquelyIdentifies" in expression
 
 
 def test_reply_target_is_reverified_after_opening_conversation() -> None:

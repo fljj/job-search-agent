@@ -318,6 +318,27 @@ def _acquire_lease(
 def _pending_drafts(
     session: Session, run: db.AgentRun, limit: int
 ) -> list[tuple[db.GeneratedDraft, db.Conversation, UUID | None]]:
+    retry_cutoff = datetime.now(UTC) - timedelta(seconds=60)
+    selected_retry_id = session.scalar(
+        select(db.ActionQueue.id)
+        .join(
+            db.Conversation,
+            db.Conversation.id == db.ActionQueue.conversation_id,
+        )
+        .where(
+            db.Conversation.platform == run.platform,
+            db.Conversation.strategy_id == run.strategy_id,
+            ~db.Conversation.state.in_(
+                ["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]
+            ),
+            db.ActionQueue.status == "FAILED_RETRYABLE",
+            db.ActionQueue.failure_code.in_(PREWRITE_RETRYABLE_FAILURES),
+            db.ActionQueue.updated_at <= retry_cutoff,
+            db.ActionQueue.draft_id.is_not(None),
+        )
+        .order_by(db.ActionQueue.updated_at.asc(), db.ActionQueue.id.asc())
+        .limit(1)
+    )
     drafts = session.scalars(
         select(db.GeneratedDraft)
         .join(db.Conversation, db.Conversation.id == db.GeneratedDraft.conversation_id)
@@ -330,7 +351,6 @@ def _pending_drafts(
         .order_by(db.GeneratedDraft.created_at.asc())
     ).all()
     result: list[tuple[db.GeneratedDraft, db.Conversation, UUID | None]] = []
-    retry_included = False
     for draft in drafts:
         if len(result) >= limit:
             break
@@ -355,18 +375,8 @@ def _pending_drafts(
             )
         )
         if existing_action is not None:
-            retry_ready = (
-                existing_action.status == "FAILED_RETRYABLE"
-                and existing_action.failure_code
-                in PREWRITE_RETRYABLE_FAILURES
-                and existing_action.updated_at
-                <= datetime.now(UTC) - timedelta(seconds=60)
-            )
-            if not retry_ready:
+            if existing_action.id != selected_retry_id:
                 continue
-            if retry_included:
-                continue
-            retry_included = True
         conversation = session.get(db.Conversation, draft.conversation_id)
         if conversation is None:
             continue

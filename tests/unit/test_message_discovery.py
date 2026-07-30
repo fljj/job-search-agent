@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -8,6 +7,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from adapters.browser.message_discovery import (
+    BossMessageDiscoveryAdapter,
     DiscoveredConversation,
     MessageDiscoveryAdapter,
     MessageDiscoveryBatch,
@@ -72,24 +72,14 @@ def detail(item: BrowserConversationSummary) -> ReadResult:
 )
 
 
-def test_linked_job_close_refuses_user_message_page(
+def test_linked_job_close_never_calls_browser_close_api(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
-    class Response(BytesIO):
-        def __enter__(self) -> "Response":
-            return self
-
-        def __exit__(self, *_: object) -> None:
-            self.close()
-
-    def fake_open(url: str, timeout: int) -> Response:
+    def fake_open(url: str, timeout: int) -> None:
         calls.append(url)
-        return Response(
-            b'[{"id":"user-message","type":"page",'
-            b'"url":"https://www.zhipin.com/web/geek/chat"}]'
-        )
+        raise AssertionError("Worker 不得调用浏览器关闭接口")
 
     monkeypatch.setattr(
         "adapters.browser.message_discovery.urlopen",
@@ -101,7 +91,30 @@ def test_linked_job_close_refuses_user_message_page(
         "user-message",
     )
 
-    assert calls == ["http://127.0.0.1:9222/json/list"]
+    assert calls == []
+
+
+def test_boss_message_page_is_reopened_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = BossMessageDiscoveryAdapter(get_browser_selectors())
+    opened: list[object] = []
+    response = MagicMock()
+    response.__enter__.return_value = response
+    monkeypatch.setattr(
+        adapter,
+        "_find_list_target",
+        MagicMock(side_effect=ValueError("消息页缺失")),
+    )
+    monkeypatch.setattr(
+        "adapters.browser.message_discovery.urlopen",
+        lambda request, timeout: opened.append(request) or response,
+    )
+
+    assert adapter.ensure_list_page("http://127.0.0.1:9222")
+    assert len(opened) == 1
+    assert opened[0].get_method() == "PUT"
+    assert "/json/new?https://www.zhipin.com/web/geek/chat" in opened[0].full_url
 
 
 def test_location_consent_uses_strategy_onsite_locations() -> None:

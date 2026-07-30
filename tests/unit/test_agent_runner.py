@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from adapters.browser.fake_actions import FakeActionExecutor
 from adapters.browser.message_discovery import (
+    BossMessageDiscoveryAdapter,
     MessageDiscoveryAdapter,
     MessageDiscoveryBatch,
 )
@@ -239,6 +240,46 @@ def test_message_discovery_pauses_only_after_consecutive_failures(
     )
     assert paused == [maimai_run.id]
     assert boss_run.id not in paused
+
+
+def test_boss_missing_message_page_is_reopened_without_pausing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    session.scalars.return_value.all.return_value = []
+    session.execute.return_value.all.return_value = []
+    run = db.AgentRun(id=uuid4(), platform="BOSS", cursor={})
+    adapter = BossMessageDiscoveryAdapter(get_browser_selectors())
+    monkeypatch.setattr(
+        adapter,
+        "scan",
+        MagicMock(side_effect=ValueError("消息页缺失")),
+    )
+    ensure = MagicMock(return_value=True)
+    monkeypatch.setattr(adapter, "ensure_list_page", ensure)
+    paused = MagicMock()
+    events: list[str] = []
+    monkeypatch.setattr("scripts.run_agent_worker.pause_run", paused)
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_settings",
+        lambda: MagicMock(agent_tick_batch_size=10),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.runtime_event",
+        lambda _logger, event, **_values: events.append(event),
+    )
+
+    assert not _discover_messages(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        adapter,
+    )
+    ensure.assert_called_once_with("http://127.0.0.1:9222")
+    paused.assert_not_called()
+    session.commit.assert_called_once()
+    assert events == ["PLATFORM_PAGE_REOPENED"]
 
 
 def test_disabled_maimai_recommendations_do_not_block_ordinary_messages(

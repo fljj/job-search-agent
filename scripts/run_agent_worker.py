@@ -178,6 +178,22 @@ def _discover_messages(
             limit=get_settings().agent_tick_batch_size,
         )
     except (OSError, TimeoutError, ValueError) as exc:
+        if isinstance(adapter, BossMessageDiscoveryAdapter):
+            try:
+                reopened = adapter.ensure_list_page(cdp_url)
+            except (OSError, TimeoutError, ValueError):
+                reopened = False
+            if reopened:
+                runtime_event(
+                    logger,
+                    "PLATFORM_PAGE_REOPENED",
+                    worker_id=worker_id,
+                    run_id=run.id,
+                    platform=run.platform,
+                    page_type="MESSAGE_LIST",
+                )
+                session.commit()
+                return False
         root_cursor = dict(run.cursor or {})
         raw_health = root_cursor.get("message_discovery_health")
         health = raw_health if isinstance(raw_health, dict) else {}
