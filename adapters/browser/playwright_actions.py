@@ -750,8 +750,7 @@ class PlaywrightActionExecutor:
         recruiter_selector = selectors.conversation_list_item_recruiter
         job_selector = selectors.conversation_list_item_job_title
         company_selector = selectors.conversation_list_item_company
-        return bool(
-            page._evaluate(
+        point = page._evaluate(
                 "(() => {"
                 f"const items = [...document.querySelectorAll({json.dumps(item_selector)})];"
                 f"const expectedId = {json.dumps(command.conversation_key)};"
@@ -763,8 +762,7 @@ class PlaywrightActionExecutor:
                 f"const recruiterSelector = {json.dumps(recruiter_selector)};"
                 f"const jobSelector = {json.dumps(job_selector)};"
                 f"const companySelector = {json.dumps(company_selector)};"
-                "const visible = items.filter(item => item.getClientRects().length > 0);"
-                "let matches = visible.filter(item => {"
+                "let matches = items.filter(item => {"
                 " const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim() || '';"
                 " if (recruiter !== expectedRecruiter) return false;"
                 " if (expectedId?.startsWith('derived:')) return true;"
@@ -787,11 +785,17 @@ class PlaywrightActionExecutor:
                 " });"
                 " if (narrowed.length === 1) matches = narrowed;"
                 "}"
-                "if (matches.length !== 1) return false;"
-                "matches[0].click(); return true;"
+                "if (matches.length !== 1) return null;"
+                "matches[0].scrollIntoView({block: 'center'});"
+                "const rect = matches[0].getBoundingClientRect();"
+                "if (!rect.width || !rect.height) return null;"
+                "return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};"
                 "})()"
             )
-        )
+        if not isinstance(point, dict):
+            return False
+        PlaywrightActionExecutor._trusted_click(page, point)
+        return True
 
     def _send_reply_on_raw_page(
         self,
@@ -1183,17 +1187,8 @@ class PlaywrightActionExecutor:
                     )
                 ):
                     matches.append(page)
-            elif check.conversation:
-                if (
-                    _conversation_key_matches(
-                        check.conversation.external_conversation_id,
-                        command.conversation_key,
-                    )
-                    and command.recruiter in check.conversation.recruiter_name
-                    and command.company in (check.conversation.company_name or "")
-                    and command.job_title in (check.conversation.job_title or "")
-                ):
-                    matches.append(page)
+            elif check.conversation and _reply_target_matches(check, command):
+                matches.append(page)
         if not matches:
             return ExecutionResult(
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
@@ -1218,7 +1213,9 @@ class PlaywrightActionExecutor:
                 platform,
                 selectors,
                 self.config.version,
-                expected_company=command.company,
+                expected_company=(
+                    command.company if command.action_type == "GREETING" else None
+                ),
                 expected_job_title=command.job_title,
                 expected_recruiter=command.recruiter,
             )
@@ -1297,12 +1294,7 @@ class PlaywrightActionExecutor:
                     outcome=ExecutionOutcome.FAILED_FINAL,
                     error_code="CONVERSATION_TARGET_MISMATCH",
                 )
-            elif (
-                not check.conversation.company_name
-                or command.company not in check.conversation.company_name
-                or not check.conversation.job_title
-                or command.job_title not in check.conversation.job_title
-            ):
+            elif not _reply_target_matches(check, command):
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_FINAL,
                     error_code="JOB_TARGET_MISMATCH",

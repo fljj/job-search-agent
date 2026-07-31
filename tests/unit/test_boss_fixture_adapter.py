@@ -111,7 +111,7 @@ def test_sends_text_and_reads_back_result_on_fixture_page() -> None:
 def test_reply_executor_can_open_unique_approved_conversation_from_list() -> None:
     executor = PlaywrightActionExecutor(get_browser_selectors())
     page = MagicMock()
-    page._evaluate.return_value = True
+    page._evaluate.return_value = {"x": 100, "y": 200}
     command = approved_command(
         "REPLY",
         conversation_key="derived:approved-conversation",
@@ -130,6 +130,7 @@ def test_reply_executor_can_open_unique_approved_conversation_from_list() -> Non
     assert json.dumps("张招聘") in expression
     assert "fullText.includes(expectedCompany)" in expression
     assert "jobMatches || companyUniquelyIdentifies" in expression
+    assert page._command.call_count == 2
 
 
 def test_reply_target_is_reverified_after_opening_conversation() -> None:
@@ -263,6 +264,26 @@ def test_selects_unique_existing_resume_and_reads_back_result() -> None:
         result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
             page, approved_command("RESUME", attachment_name="后端开发简历")
         )
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert page.locator("[data-testid='sent-resume']").filter(
+            has_text="后端开发简历"
+        ).count() == 1
+
+
+def test_inbound_resume_allows_hunter_and_client_company_to_differ() -> None:
+    with fixture_page("conversation-detail.html") as page:
+        browser = page.context.browser
+        assert browser is not None
+        command = approved_command(
+            "RESUME",
+            conversation_key="derived:hunter-conversation",
+            attachment_name="后端开发简历",
+        ).model_copy(update={"company": "代招客户公司"})
+
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_browser(
+            browser, command
+        )
+
         assert result.outcome is ExecutionOutcome.SUCCEEDED
         assert page.locator("[data-testid='sent-resume']").filter(
             has_text="后端开发简历"

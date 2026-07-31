@@ -241,7 +241,8 @@ def process_job_discovery_batch(
             retry_backoff_until or batch.next_scan_at
         ).isoformat(),
         "exhausted": batch.exhausted,
-        "refresh_before_scan": batch.refresh_before_next_scan,
+        # 保留字段兼容既有游标，但 BOSS 常驻页面不得主动刷新。
+        "refresh_before_scan": False,
         "switch_search_before_scan": batch.exhausted,
     }
     run.cursor = root_cursor

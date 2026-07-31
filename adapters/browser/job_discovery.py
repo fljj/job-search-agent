@@ -69,9 +69,8 @@ class BossJobDiscoveryAdapter:
         validate_local_cdp_url(cdp_url)
         target = self._find_list_target(cdp_url)
         with RawCdpPageReader(target) as page:
-            if refresh_before_scan:
-                page._evaluate("location.reload()")
-                time.sleep(2)
+            # BOSS 消息和职位会通过站内事件自行更新。主动刷新容易使长时间运行的
+            # 登录会话失效；该参数仅为兼容历史游标保留，不得驱动页面刷新。
             if (
                 switch_search_before_scan
                 and search_keys
@@ -161,7 +160,7 @@ class BossJobDiscoveryAdapter:
                 ),
             ]))[-2000:]
             current = datetime.now(UTC)
-            next_search, wrapped = next_job_search(
+            next_search, _ = next_job_search(
                 search_key, search_keys or [], exhausted=exhausted
             )
             return JobDiscoveryBatch(
@@ -177,7 +176,7 @@ class BossJobDiscoveryAdapter:
                 seen_job_ids=seen,
                 exhausted=exhausted,
                 next_search_key=next_search,
-                refresh_before_next_scan=wrapped,
+                refresh_before_next_scan=False,
             )
 
     def _activate_search(
@@ -419,7 +418,7 @@ def is_potentially_relevant_title(
 def next_job_search(
     current: str, search_keys: list[str], *, exhausted: bool
 ) -> tuple[str, bool]:
-    """返回下一次扫描入口，以及是否需要在下一次扫描前刷新页面。"""
+    """返回下一次扫描入口；第二项为兼容旧游标保留且始终禁止刷新。"""
     if not exhausted or not search_keys:
         return current, False
     try:
@@ -427,7 +426,7 @@ def next_job_search(
     except ValueError:
         return search_keys[0], False
     next_index = (current_index + 1) % len(search_keys)
-    return search_keys[next_index], next_index == 0
+    return search_keys[next_index], False
 
 
 def is_job_list_exhausted(

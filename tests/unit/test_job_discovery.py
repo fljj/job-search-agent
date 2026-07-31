@@ -263,7 +263,7 @@ def test_job_search_rotation_keeps_current_search_until_exhausted() -> None:
     assert next_job_search("Java", searches, exhausted=False) == ("Java", False)
 
 
-def test_job_search_rotation_switches_tabs_and_refreshes_after_full_cycle() -> None:
+def test_job_search_rotation_switches_tabs_without_refreshing() -> None:
     searches = ["推荐", "Java", "区块链工程师"]
 
     assert next_job_search("推荐", searches, exhausted=True) == ("Java", False)
@@ -273,8 +273,44 @@ def test_job_search_rotation_switches_tabs_and_refreshes_after_full_cycle() -> N
     )
     assert next_job_search("区块链工程师", searches, exhausted=True) == (
         "推荐",
-        True,
+        False,
     )
+
+
+def test_scan_ignores_legacy_refresh_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = object.__new__(BossJobDiscoveryAdapter)
+    adapter.config = MagicMock(version="test")
+    adapter.selectors = MagicMock(job_list_root="[data-testid='job-list']")
+    page = MagicMock()
+    page.__enter__.return_value = page
+    page.__exit__.return_value = False
+    listing = MagicMock(
+        status=SessionStatus.SESSION_READY,
+        page_type=PageType.JOB_LIST,
+        jobs=[],
+        cursor=None,
+    )
+    monkeypatch.setattr(adapter, "_find_list_target", lambda _cdp_url: "ws://page")
+    monkeypatch.setattr(
+        "adapters.browser.job_discovery.RawCdpPageReader",
+        lambda _target: page,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.job_discovery.extract_current_page",
+        lambda *_args, **_kwargs: listing,
+    )
+
+    batch = adapter.scan(
+        "http://127.0.0.1:9222",
+        search_key="推荐",
+        search_keys=["推荐", "Java", "区块链工程师"],
+        refresh_before_scan=True,
+    )
+
+    assert batch.refresh_before_next_scan is False
+    assert all("location.reload" not in call.args[0] for call in page._evaluate.call_args_list)
 
 
 def test_search_activation_waits_for_page_refresh(
