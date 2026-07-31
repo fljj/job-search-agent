@@ -1,5 +1,7 @@
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -309,7 +311,11 @@ def test_closes_only_detail_targets_created_for_batch(
     monkeypatch.setattr(
         BossJobDiscoveryAdapter,
         "_close_target",
-        staticmethod(lambda cdp_url, target_id: closed.append((cdp_url, target_id))),
+        staticmethod(
+            lambda cdp_url, target_id, expected_url: closed.append(
+                (cdp_url, target_id, expected_url)
+            )
+        ),
     )
     adapter = object.__new__(BossJobDiscoveryAdapter)
     now = datetime.now(UTC)
@@ -320,24 +326,45 @@ def test_closes_only_detail_targets_created_for_batch(
         scanned_at=now,
         next_scan_at=now,
         items=[
-            DiscoveredJob(summary=summary(1), detail_target_id="created-detail"),
+            DiscoveredJob(
+                summary=summary(1),
+                detail_target_id="created-detail",
+                detail_target_url="https://www.zhipin.com/job_detail/job-1.html",
+            ),
             DiscoveredJob(summary=summary(2)),
         ],
     )
 
     adapter.close_details("http://127.0.0.1:9222", batch)
 
-    assert closed == [("http://127.0.0.1:9222", "created-detail")]
+    assert closed == [
+        (
+            "http://127.0.0.1:9222",
+            "created-detail",
+            "https://www.zhipin.com/job_detail/job-1.html",
+        )
+    ]
 
 
-def test_target_close_never_calls_browser_close_api(
+def test_target_close_does_not_close_a_different_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
-    def fake_open(url: str, timeout: int) -> None:
+    def fake_open(url: str, timeout: int) -> object:
         calls.append(url)
-        raise AssertionError("Worker 不得调用浏览器关闭接口")
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps(
+            [
+                {
+                    "id": "worker-detail",
+                    "type": "page",
+                    "url": "https://www.zhipin.com/job_detail/job-2.html",
+                }
+            ]
+        ).encode()
+        return response
 
     monkeypatch.setattr(
         "adapters.browser.job_discovery.urlopen",
@@ -346,10 +373,45 @@ def test_target_close_never_calls_browser_close_api(
 
     BossJobDiscoveryAdapter._close_target(
         "http://127.0.0.1:9222",
-        "user-page",
+        "worker-detail",
+        "https://www.zhipin.com/job_detail/job-1.html",
     )
 
-    assert calls == []
+    assert calls == ["http://127.0.0.1:9222/json/list"]
+
+
+def test_target_close_closes_the_exact_worker_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_open(url: str, timeout: int) -> object:
+        calls.append(url)
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps(
+            [
+                {
+                    "id": "worker-detail",
+                    "type": "page",
+                    "url": "https://www.zhipin.com/job_detail/job-1.html?source=scan",
+                }
+            ]
+        ).encode()
+        return response
+
+    monkeypatch.setattr("adapters.browser.job_discovery.urlopen", fake_open)
+
+    BossJobDiscoveryAdapter._close_target(
+        "http://127.0.0.1:9222",
+        "worker-detail",
+        "https://www.zhipin.com/job_detail/job-1.html",
+    )
+
+    assert calls == [
+        "http://127.0.0.1:9222/json/list",
+        "http://127.0.0.1:9222/json/close/worker-detail",
+    ]
 
 
 @pytest.mark.parametrize(

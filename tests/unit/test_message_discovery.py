@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -72,14 +73,25 @@ def detail(item: BrowserConversationSummary) -> ReadResult:
 )
 
 
-def test_linked_job_close_never_calls_browser_close_api(
+def test_linked_job_close_does_not_close_message_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
-    def fake_open(url: str, timeout: int) -> None:
+    def fake_open(url: str, timeout: int) -> object:
         calls.append(url)
-        raise AssertionError("Worker 不得调用浏览器关闭接口")
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps(
+            [
+                {
+                    "id": "user-message",
+                    "type": "page",
+                    "url": "https://www.zhipin.com/web/geek/chat",
+                }
+            ]
+        ).encode()
+        return response
 
     monkeypatch.setattr(
         "adapters.browser.message_discovery.urlopen",
@@ -89,9 +101,10 @@ def test_linked_job_close_never_calls_browser_close_api(
     MessageDiscoveryAdapter._close_target(
         "http://127.0.0.1:9222",
         "user-message",
+        "https://www.zhipin.com/job_detail/job-1.html",
     )
 
-    assert calls == []
+    assert calls == ["http://127.0.0.1:9222/json/list"]
 
 
 def test_boss_message_page_is_reopened_when_missing(

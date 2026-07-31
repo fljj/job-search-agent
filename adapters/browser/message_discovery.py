@@ -305,17 +305,19 @@ class MessageDiscoveryAdapter:
                             and result.page_type is PageType.JOB
                             and result.job is not None
                         ):
-                            self._close_target(cdp_url, target_id)
+                            if created_target_id and target_id == created_target_id:
+                                self._close_target(cdp_url, target_id, href)
                             if cache is not None:
                                 cache[href] = result
                             return result
                 except (OSError, TimeoutError, ValueError):
                     continue
             time.sleep(0.1)
-        for target_id in opened_target_ids or {created_target_id}:
+        for target_id in opened_target_ids:
             if not target_id:
                 continue
-            self._close_target(cdp_url, target_id)
+            if created_target_id and target_id == created_target_id:
+                self._close_target(cdp_url, target_id, href)
         if cache is not None:
             cache[href] = None
         return None
@@ -340,10 +342,32 @@ class MessageDiscoveryAdapter:
         )
 
     @staticmethod
-    def _close_target(cdp_url: str, target_id: str) -> None:
-        # BOSS 会复用并跳转同源标签页，创建时记录的目标不能作为关闭依据。
-        # Worker 不拥有用户浏览器标签页的生命周期，因此禁止自动关闭任何目标。
-        del cdp_url, target_id
+    def _close_target(cdp_url: str, target_id: str, expected_url: str) -> None:
+        """只关闭仍指向本次关联职位的 Worker 自有目标。"""
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            target = next(
+                (item for item in targets if str(item.get("id")) == target_id),
+                None,
+            )
+            current = urlparse(str(target.get("url") or "")) if target else None
+            expected = urlparse(expected_url)
+            if (
+                target is None
+                or target.get("type") != "page"
+                or current is None
+                or current.hostname != expected.hostname
+                or current.path != expected.path
+                or "/job_detail/" not in current.path
+            ):
+                return
+            with urlopen(
+                f"{cdp_url.rstrip('/')}/json/close/{target_id}", timeout=3
+            ):
+                pass
+        except (OSError, TimeoutError, ValueError):
+            return
 
 
 class BossMessageDiscoveryAdapter(MessageDiscoveryAdapter):
