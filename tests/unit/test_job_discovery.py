@@ -277,6 +277,45 @@ def test_job_search_rotation_switches_tabs_and_refreshes_after_full_cycle() -> N
     )
 
 
+def test_search_activation_waits_for_page_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = object.__new__(BossJobDiscoveryAdapter)
+    page = MagicMock()
+    page._evaluate.side_effect = [False, False, True]
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "adapters.browser.job_discovery.time.sleep",
+        sleeps.append,
+    )
+
+    adapter._activate_search(page, "推荐")
+
+    assert page._evaluate.call_count == 3
+    assert sleeps == [0.25, 0.25]
+
+
+def test_list_target_detection_waits_for_page_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = object.__new__(BossJobDiscoveryAdapter)
+    matches = MagicMock(
+        side_effect=[[], [], ["ws://127.0.0.1:9222/devtools/page/job-list"]]
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(adapter, "_matching_list_targets", matches)
+    monkeypatch.setattr(
+        "adapters.browser.job_discovery.time.sleep",
+        sleeps.append,
+    )
+
+    target = adapter._find_list_target("http://127.0.0.1:9222")
+
+    assert target == "ws://127.0.0.1:9222/devtools/page/job-list"
+    assert matches.call_count == 3
+    assert sleeps == [0.5, 0.5]
+
+
 def test_unknown_job_search_recovers_to_first_configured_search() -> None:
     assert next_job_search(
         "已删除的入口", ["推荐", "Java"], exhausted=True

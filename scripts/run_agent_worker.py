@@ -394,7 +394,20 @@ def _run_boss_job_discovery(
             limit=1 if retry_job_id else get_settings().boss_job_batch_size,
             interval_seconds=get_settings().boss_job_scan_interval_seconds,
         )
-    except (OSError, TimeoutError, ValueError):
+    except (OSError, TimeoutError, ValueError) as exc:
+        runtime_event(
+            logger,
+            "JOB_SCAN_FAILED",
+            worker_id=worker_id,
+            run_id=run.id,
+            error_type=type(exc).__name__,
+            error_message=str(exc)[:300],
+            search_key=str(job_cursor.get("search_key") or ""),
+            refresh_before_scan=bool(job_cursor.get("refresh_before_scan", False)),
+            switch_search_before_scan=bool(
+                job_cursor.get("switch_search_before_scan", not bool(raw_job_cursor))
+            ),
+        )
         pause_run(session, run.id, ["JOB_DISCOVERY_UNAVAILABLE"])
         return
     try:

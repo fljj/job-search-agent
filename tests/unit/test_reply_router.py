@@ -60,6 +60,28 @@ def test_salary_question_uses_rule_reply() -> None:
     assert "远程岗位期望月薪25K" in routed.result.content
 
 
+def test_conversational_salary_question_uses_rule_reply() -> None:
+    context = ReplyRouteContext(
+        salary_expectations=[SalaryExpectation("ONSITE", "CNY", Decimal("15.00"))]
+    )
+
+    routed = route_reply("薪资的话 您目前期望的是多少哇", context)
+
+    assert routed.source is ReplySource.RULE_TEMPLATE
+    assert routed.result is not None
+    assert routed.result.content == (
+        "我的薪资期望是：现场岗位期望月薪15K。"
+        "具体可以结合岗位职责和整体方案沟通。"
+    )
+
+
+def test_salary_statement_without_question_does_not_trigger_rule_reply() -> None:
+    routed = route_reply("这个岗位薪资是10-14K", _context())
+
+    assert routed.source is ReplySource.LLM
+    assert routed.result is None
+
+
 def test_location_question_uses_rule_reply() -> None:
     routed = route_reply("是否接受济南现场办公？", _context())
 

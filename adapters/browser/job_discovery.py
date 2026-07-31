@@ -183,26 +183,42 @@ class BossJobDiscoveryAdapter:
     def _activate_search(
         self, page: RawCdpPageReader, search_key: str
     ) -> None:
-        activated = page._evaluate(
-            "(() => {"
-            f"const expected = {json.dumps(search_key)}.trim().toLocaleLowerCase();"
-            "const visible = element => element.getClientRects().length > 0 "
-            "&& getComputedStyle(element).visibility !== 'hidden';"
-            "const candidates = Array.from(document.querySelectorAll("
-            "'.c-expect-select a'));"
-            "const target = candidates.find(element => visible(element) "
-            "&& (() => {"
-            "const actual = (element.textContent || '').trim().toLocaleLowerCase();"
-            "return actual === expected || actual.startsWith(`${expected}(`);"
-            "})());"
-            "if (!target) return false;"
-            "target.click(); return true;"
-            "})()"
-        )
-        if not activated:
-            raise ValueError(f"BOSS 职位搜索入口不可用: {search_key}")
+        for _ in range(40):
+            activated = page._evaluate(
+                "(() => {"
+                f"const expected = {json.dumps(search_key)}.trim().toLocaleLowerCase();"
+                "const visible = element => element.getClientRects().length > 0 "
+                "&& getComputedStyle(element).visibility !== 'hidden';"
+                "const candidates = Array.from(document.querySelectorAll("
+                "'.c-expect-select a'));"
+                "const target = candidates.find(element => visible(element) "
+                "&& (() => {"
+                "const actual = (element.textContent || '').trim().toLocaleLowerCase();"
+                "return actual === expected || actual.startsWith(`${expected}(`);"
+                "})());"
+                "if (!target) return false;"
+                "target.click(); return true;"
+                "})()"
+            )
+            if activated:
+                return
+            time.sleep(0.25)
+        raise ValueError(f"BOSS 职位搜索入口不可用: {search_key}")
 
     def _find_list_target(self, cdp_url: str) -> str:
+        matches: list[str] = []
+        for _ in range(60):
+            matches = self._matching_list_targets(cdp_url)
+            if len(matches) == 1:
+                return matches[0]
+            time.sleep(0.5)
+        raise ValueError(
+            "未找到唯一 BOSS 职位列表页"
+            if not matches
+            else "检测到多个 BOSS 职位列表页"
+        )
+
+    def _matching_list_targets(self, cdp_url: str) -> list[str]:
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
             targets = json.loads(response.read())
         matches: list[str] = []
@@ -216,13 +232,7 @@ class BossJobDiscoveryAdapter:
                         matches.append(str(websocket_url))
             except (OSError, TimeoutError, ValueError):
                 continue
-        if len(matches) != 1:
-            raise ValueError(
-                "未找到唯一 BOSS 职位列表页"
-                if not matches
-                else "检测到多个 BOSS 职位列表页"
-            )
-        return matches[0]
+        return matches
 
     def _open_detail(
         self,

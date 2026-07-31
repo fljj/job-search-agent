@@ -357,9 +357,14 @@ def create_reply_draft(
     strategy = (
         session.get(db.JobStrategy, conversation.strategy_id) if conversation.strategy_id else None
     )
+    job = session.get(db.Job, conversation.job_id) if conversation.job_id else None
     route = route_reply(
         message.content,
-        _reply_route_context(session, strategy),
+        _reply_route_context(
+            session,
+            strategy,
+            job_work_mode=job.work_mode if job else None,
+        ),
     )
     if route.result is not None:
         fingerprint = _fingerprint(
@@ -931,6 +936,8 @@ def _knowledge_versions(session: Session) -> list[tuple[str, int]]:
 def _reply_route_context(
     session: Session,
     strategy: db.JobStrategy | None,
+    *,
+    job_work_mode: str | None = None,
 ) -> ReplyRouteContext:
     profile = session.scalar(
         select(db.CandidateProfile).where(db.CandidateProfile.user_id == DEFAULT_USER_ID)
@@ -962,6 +969,10 @@ def _reply_route_context(
     )
     if strategy is None:
         return ReplyRouteContext(candidate_knowledge=candidate_knowledge)
+    matching_salary_rules = [
+        rule for rule in strategy.salary_rules if rule.work_mode == job_work_mode
+    ]
+    salary_rules = matching_salary_rules or list(strategy.salary_rules)
     return ReplyRouteContext(
         arrival_time_reply=strategy.arrival_time_reply,
         salary_expectations=[
@@ -970,10 +981,7 @@ def _reply_route_context(
                 currency=rule.currency,
                 expected_monthly_k=rule.expected_monthly_k,
             )
-            for rule in sorted(
-                strategy.salary_rules,
-                key=lambda item: item.work_mode,
-            )
+            for rule in sorted(salary_rules, key=lambda item: item.work_mode)
         ],
         onsite_locations=[
             location.location_name
