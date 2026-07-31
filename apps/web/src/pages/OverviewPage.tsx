@@ -1,16 +1,19 @@
 import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag, message } from 'antd'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
 import { activeRuns, agentStatusText, canReconnectRun } from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
+import { businessLabel } from './business-labels'
 
 interface Run {
   id: string; platform: string; status: string; processed_count: number
   action_count: number; failure_count: number; pause_reason_codes: string[]
 }
-interface Action { status: string; action_type: string }
-interface Conversation { state: string; latest_score?: number }
+interface OverviewMetrics {
+  generated_at: string; job_count: number; active_conversation_count: number
+  successful_action_count: number; waiting_message_count: number; failed_action_count: number
+}
 interface Operations {
   database_ready: boolean; llm_configured: boolean; unknown_action_count: number
   pending_confirmation_count: number; workers: Array<{ worker_id: string; status: string }>
@@ -25,27 +28,25 @@ interface Operations {
 }
 export function OverviewPage() {
   const [runs, setRuns] = useState<Run[]>([])
-  const [actions, setActions] = useState<Action[]>([])
-  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [metrics, setMetrics] = useState<OverviewMetrics>()
   const [operations, setOperations] = useState<Operations>()
   const [loadError, setLoadError] = useState<string>()
   const [reconnectingRunId, setReconnectingRunId] = useState<string>()
   const [retryingLlm, setRetryingLlm] = useState(false)
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const [runData, actionData, conversationData, operationData] = await Promise.all([
+      const [runData, metricData, operationData] = await Promise.all([
         api<{ items: Run[] }>('/automation/runs'),
-        api<{ items: Action[] }>('/automation/actions'),
-        api<{ items: Conversation[] }>('/conversations'),
+        api<OverviewMetrics>('/automation/overview'),
         api<Operations>('/automation/operations/status'),
       ])
-      setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
+      setRuns(runData.items); setMetrics(metricData)
       setOperations(operationData); setLoadError(undefined)
     } catch (error) {
-      setRuns([]); setActions([]); setConversations([]); setOperations(undefined)
+      setRuns([]); setMetrics(undefined); setOperations(undefined)
       setLoadError(error instanceof Error ? error.message : '无法连接 API 服务')
     }
-  }
+  }, [])
   const reconnect = async (run: Run) => {
     setReconnectingRunId(run.id)
     try {
@@ -75,19 +76,13 @@ export function OverviewPage() {
     }
   }
   useEffect(() => {
-    void Promise.all([
-      api<{ items: Run[] }>('/automation/runs'),
-      api<{ items: Action[] }>('/automation/actions'),
-      api<{ items: Conversation[] }>('/conversations'),
-      api<Operations>('/automation/operations/status'),
-    ]).then(([runData, actionData, conversationData, operationData]) => {
-      setRuns(runData.items); setActions(actionData.items); setConversations(conversationData.items)
-      setOperations(operationData); setLoadError(undefined)
-    }).catch((error: unknown) => {
-      setRuns([]); setActions([]); setConversations([]); setOperations(undefined)
-      setLoadError(error instanceof Error ? error.message : '无法连接 API 服务')
-    })
-  }, [])
+    const initial = window.setTimeout(() => void load(), 0)
+    const timer = window.setInterval(() => void load(), 15_000)
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(timer)
+    }
+  }, [load])
   const currentRuns = activeRuns(runs)
   const processedCount = currentRuns.reduce((sum, item) => sum + item.processed_count, 0)
   const currentWorkers = activeWorkers(operations?.workers)
@@ -113,9 +108,9 @@ export function OverviewPage() {
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="Agent 状态"
         value={loadError ? '服务不可用' : agentStatusText(runs, workerRunning)} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="已处理职位/消息"
-        value={processedCount} /></Card></Col>
+        value={processedCount} suffix={` / 待处理 ${metrics?.waiting_message_count ?? 0}`} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="自动动作"
-        value={actions.filter((item) => item.status === 'SUCCEEDED').length} /></Card></Col>
+        value={metrics?.successful_action_count ?? 0} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="待确认面试"
         value={operations?.pending_confirmation_count ?? 0} /></Card></Col>
     </Row>
@@ -125,7 +120,7 @@ export function OverviewPage() {
           ? <Space size={[4, 4]} wrap>{currentRuns.map((run) =>
             <Space key={run.id} size={4}>
               <Tag color={statusColor(run.status)}>
-                {run.platform}:{run.status}
+                {run.platform}:{businessLabel(run.status)}
                 {run.status === 'PAUSED' && run.pause_reason_codes.length > 0
                   ? `（${run.pause_reason_codes.join('、')}）` : ''}
               </Tag>
@@ -136,8 +131,8 @@ export function OverviewPage() {
         { key: 'platform', label: '平台', children:
           <Space wrap>{(operations?.platform_readiness ?? []).map((item) =>
             <Tag key={item.platform} color={item.status === 'SESSION_READY' ? 'green' : 'orange'}>
-              {item.platform}:{item.status}{item.reason_codes.length
-                ? `（${item.reason_codes.join('、')}）` : ''}
+              {item.platform}:{businessLabel(item.status)}{item.reason_codes.length
+                ? `（${item.reason_codes.map(businessLabel).join('、')}）` : ''}
             </Tag>)}</Space> },
         { key: 'worker', label: 'Worker', children: <Tag color={
           currentWorkers.length > 1 ? 'red'
@@ -150,7 +145,9 @@ export function OverviewPage() {
         { key: 'unknown', label: '未知结果', children: operations?.unknown_action_count ?? 0 },
         { key: 'discrepancies', label: '审计差异', children: operations?.discrepancies.length ?? 0 },
         { key: 'conversations', label: '活跃会话', children:
-          conversations.filter((item) => !['ENDED', 'DECLINED'].includes(item.state)).length },
+          metrics?.active_conversation_count ?? 0 },
+        { key: 'statsAt', label: '统计时间', children: metrics?.generated_at
+          ? new Date(metrics.generated_at).toLocaleString('zh-CN') : '-' },
       ]} />
     </Card>
   </Space>

@@ -6,14 +6,13 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
 import { activeWorkers, workerStatusText } from './worker-status'
+import { businessLabel } from './business-labels'
 
 interface SettingForm {
   scope_type: 'GLOBAL' | 'PLATFORM' | 'STRATEGY'; scope_key: string
   enabled: boolean; paused: boolean; auto_greet_enabled: boolean
   auto_greet_min_score: number; auto_reply_enabled: boolean
-  auto_reply_min_confidence: number; auto_resume_enabled: boolean
-  auto_resume_min_score: number
-  low_score_decline_enabled: boolean
+  auto_resume_enabled: boolean
   maimai_recommendation_enabled: boolean
   maimai_recommendation_resume_enabled: boolean
   emergency_stop: boolean; job_scan_enabled: boolean
@@ -216,11 +215,11 @@ export function AutomationPage() {
       </Space>
       <Table rowKey="id" dataSource={runs} columns={[
         { title: '平台', dataIndex: 'platform' },
-        { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag> },
+        { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{businessLabel(value)}</Tag> },
         { title: '心跳', dataIndex: 'heartbeat_at', render: (value?: string) => value ? new Date(value).toLocaleString() : '-' },
         { title: '已处理', dataIndex: 'processed_count' }, { title: '已执行', dataIndex: 'action_count' },
         { title: '失败', render: (_: unknown, run: AgentRun) => `${run.failure_count}（连续 ${run.consecutive_failure_count}）` },
-        { title: '暂停原因', dataIndex: 'pause_reason_codes', render: (items: string[]) => items.join('、') || '-' },
+        { title: '暂停原因', dataIndex: 'pause_reason_codes', render: (items: string[]) => items.map(businessLabel).join('、') || '-' },
         { title: '游标', dataIndex: 'cursor', render: (value: Record<string, unknown>) =>
           <code>{JSON.stringify(value)}</code> },
         { title: '操作', render: (_: unknown, run: AgentRun) => <Space>
@@ -234,12 +233,12 @@ export function AutomationPage() {
 
     <Card title="自动动作审计（无需逐条确认）">
       <Table rowKey="id" dataSource={actions} columns={[
-        { title: '类型', dataIndex: 'action_type' }, { title: '平台', dataIndex: 'platform' },
+        { title: '类型', dataIndex: 'action_type', render: businessLabel }, { title: '平台', dataIndex: 'platform' },
         { title: '公司/职位', render: (_: unknown, item: AutomaticAction) => `${item.company} / ${item.job_title}` },
         { title: '招聘人', dataIndex: 'recruiter' },
         { title: '附件', dataIndex: 'attachment_name', render: (value?: string) => value ?? '-' },
-        { title: '结果', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag> },
-        { title: '失败原因', dataIndex: 'failure_code', render: (value?: string) => value ?? '-' },
+        { title: '结果', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{businessLabel(value)}</Tag> },
+        { title: '失败原因', dataIndex: 'failure_code', render: (value?: string) => value ? businessLabel(value) : '-' },
       ]} />
     </Card>
 
@@ -247,8 +246,7 @@ export function AutomationPage() {
       onFinish={(value) => void save(value).catch(showRequestError)}
       initialValues={{ scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
         auto_greet_enabled: false, auto_greet_min_score: 80, auto_reply_enabled: false,
-        auto_reply_min_confidence: .9, auto_resume_enabled: false, auto_resume_min_score: 60,
-        low_score_decline_enabled: true, maimai_recommendation_enabled: false,
+        auto_resume_enabled: false, maimai_recommendation_enabled: false,
         maimai_recommendation_resume_enabled: false,
         emergency_stop: false, job_scan_enabled: false, company_cooldown_hours: 24,
         recruiter_cooldown_hours: 24, work_start_hour: 8, work_end_hour: 22 }}>
@@ -263,7 +261,6 @@ export function AutomationPage() {
         <Form.Item name="auto_greet_enabled" label="自动招呼" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="auto_reply_enabled" label="自动回复" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="auto_resume_enabled" label="自动简历" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="low_score_decline_enabled" label="低分礼貌拒绝" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="maimai_recommendation_enabled" label="脉脉推荐处理" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="maimai_recommendation_resume_enabled" label="脉脉推荐同意简历" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="job_scan_enabled" label="主动扫描职位" valuePropName="checked"><Switch /></Form.Item>
@@ -273,8 +270,6 @@ export function AutomationPage() {
       </Space>
       <Space wrap>
         <Form.Item name="auto_greet_min_score" label="招呼最低分"><InputNumber min={80} max={100} /></Form.Item>
-        <Form.Item name="auto_reply_min_confidence" label="回复最低置信度"><InputNumber min={.75} max={1} step={.01} /></Form.Item>
-        <Form.Item name="auto_resume_min_score" label="非入站简历最低分（预留）"><InputNumber min={60} max={100} /></Form.Item>
         <Form.Item name="company_cooldown_hours" label="公司冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
         <Form.Item name="recruiter_cooldown_hours" label="招聘人冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
         <Form.Item name="work_start_hour" label="工作开始小时"><InputNumber min={0} max={23} /></Form.Item>

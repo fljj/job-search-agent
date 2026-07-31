@@ -2,7 +2,7 @@ import hashlib
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models import entities as db
@@ -24,16 +24,23 @@ from packages.policy_engine.automation import (
 from packages.policy_engine.state_machine import ActionStatus
 
 
-def list_automatic_actions(session: Session) -> list[dict[str, object]]:
-    rows = session.scalars(
+def list_automatic_actions(
+    session: Session, page: int = 1, page_size: int = 50
+) -> tuple[list[dict[str, object]], int]:
+    query = (
         select(db.ActionQueue)
         .where(
             db.ActionQueue.user_id == DEFAULT_USER_ID,
             db.ActionQueue.authorization_source == "AUTO",
         )
-        .order_by(db.ActionQueue.created_at.desc())
+    )
+    total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = session.scalars(
+        query.order_by(db.ActionQueue.created_at.desc(), db.ActionQueue.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
-    return [
+    items: list[dict[str, object]] = [
         {
             "id": row.id,
             "agent_run_id": row.agent_run_id,
@@ -50,6 +57,7 @@ def list_automatic_actions(session: Session) -> list[dict[str, object]]:
         }
         for row in rows
     ]
+    return items, total
 
 POLICY_VERSION = "automation-policy-v1"
 
@@ -101,14 +109,16 @@ def upsert_setting(session: Session, payload: AutomationSettingPayload) -> dict[
         db.AutomationSetting.scope_type == payload.scope_type,
         db.AutomationSetting.scope_key == payload.scope_key,
     ))
-    values = payload.model_dump(exclude={"scope_type", "scope_key"})
     if setting is None:
+        values = payload.model_dump(exclude={"scope_type", "scope_key"})
         setting = db.AutomationSetting(
             user_id=DEFAULT_USER_ID, scope_type=payload.scope_type,
             scope_key=payload.scope_key, **values,
         )
         session.add(setting)
     else:
+        supplied_fields = payload.model_fields_set - {"scope_type", "scope_key"}
+        values = payload.model_dump(include=supplied_fields)
         for key, value in values.items():
             setattr(setting, key, value)
     session.commit()

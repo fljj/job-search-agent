@@ -12,7 +12,8 @@ interface Profile {
 }
 interface KnowledgeItem {
   id: string; category: string; key: string; fact: string; source: string
-  allowed_for_auto_reply: boolean; sensitivity: string
+  allowed_for_auto_reply: boolean; sensitivity: string; version: number
+  verified_at: string; valid_until?: string
 }
 interface Resume {
   id: string; attachment_name: string; platform: string; target_directions: string[]
@@ -73,6 +74,19 @@ export function ProfilePage() {
       body: JSON.stringify({ ...values, verified_at: new Date().toISOString() }),
     })
     knowledgeForm.resetFields(); await loadRelated(); message.success('可信事实已保存')
+  }
+  const toggleKnowledge = async (item: KnowledgeItem) => {
+    await api(`/knowledge-items/${item.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        category: item.category, key: item.key, fact: item.fact, source: item.source,
+        sensitivity: item.sensitivity,
+        allowed_for_auto_reply: !item.allowed_for_auto_reply,
+        verified_at: item.verified_at, valid_until: item.valid_until, version: item.version,
+      }),
+    })
+    await loadRelated()
+    message.success(item.allowed_for_auto_reply ? '知识项已停用' : '知识项已启用')
   }
   const saveResume = async (values: Record<string, unknown>) => {
     await api('/resumes', {
@@ -140,6 +154,11 @@ export function ProfilePage() {
           { title: '权限', render: (_: unknown, item: KnowledgeItem) =>
             <Tag color={item.allowed_for_auto_reply ? 'green' : 'orange'}>
               {item.allowed_for_auto_reply ? '允许自动引用' : '禁止自动引用'}</Tag> },
+          { title: '版本', dataIndex: 'version', render: (value: number) => `v${value}` },
+          { title: '操作', render: (_: unknown, item: KnowledgeItem) =>
+            <Button size="small" onClick={() => void toggleKnowledge(item)}>
+              {item.allowed_for_auto_reply ? '停用' : '启用'}
+            </Button> },
         ]} /></Card>
       </Space>,
     },

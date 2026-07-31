@@ -340,7 +340,12 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     }
     saved_setting = client.put("/api/v1/automation/settings", json=automation_setting)
     assert saved_setting.status_code == 200
-    assert client.get("/api/v1/automation/settings").json()["data"]["items"][0]["enabled"] is False
+    assert client.put("/api/v1/automation/settings", json={
+        "scope_type": "GLOBAL", "scope_key": "GLOBAL", "enabled": False,
+    }).status_code == 200
+    persisted_setting = client.get("/api/v1/automation/settings").json()["data"]["items"][0]
+    assert persisted_setting["enabled"] is False
+    assert persisted_setting["auto_reply_enabled"] is True
     denied_auto = client.post("/api/v1/automation/dispatch", json={
         "action_type": "REPLY", "conversation_id": conversation_id,
         "draft_id": reply.json()["data"]["id"], "cdp_url": "http://127.0.0.1:9222",

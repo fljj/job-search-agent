@@ -1,8 +1,8 @@
 import hashlib
 import json
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, select
+from sqlalchemy.orm import Session, aliased
 
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.job_parser_config import get_job_parser_config
@@ -116,52 +116,76 @@ def list_jobs(
     work_mode: str | None = None,
     hard_rejected: bool | None = None,
 ) -> tuple[list[JobResponse], int]:
-    query = select(db.Job).where(db.Job.user_id == DEFAULT_USER_ID)
+    score_rank = (
+        select(
+            db.JobScore.id.label("score_id"),
+            db.JobScore.job_id.label("job_id"),
+            func.row_number().over(
+                partition_by=db.JobScore.job_id,
+                order_by=(db.JobScore.created_at.desc(), db.JobScore.id.desc()),
+            ).label("rank"),
+        )
+        .where(db.JobScore.strategy_id == strategy_id)
+        .subquery()
+        if strategy_id is not None
+        else None
+    )
+    latest_score = aliased(db.JobScore)
+    query = (
+        select(db.Job, latest_score)
+        if score_rank is not None
+        else select(db.Job)
+    ).where(db.Job.user_id == DEFAULT_USER_ID)
+    if score_rank is not None:
+        query = query.join(
+            score_rank,
+            and_(score_rank.c.job_id == db.Job.id, score_rank.c.rank == 1),
+        ).join(latest_score, latest_score.id == score_rank.c.score_id)
     if job_id is not None:
         query = query.where(db.Job.id == job_id)
     if work_mode:
         query = query.where(db.Job.work_mode == work_mode)
-    jobs = session.scalars(
+    if grade:
+        query = query.where(latest_score.grade == grade)
+    if eligibility:
+        query = query.where(latest_score.eligibility == eligibility)
+    if effective_job_status:
+        query = query.where(latest_score.effective_job_status == effective_job_status)
+    if hard_rejected is not None:
+        query = query.where(latest_score.hard_rejected == hard_rejected)
+    if strategy_id is None and any((grade, eligibility, effective_job_status, hard_rejected is not None)):
+        raise ValueError("评分结果筛选必须同时提供 strategy_id")
+    total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = session.execute(
         query.order_by(db.Job.created_at.desc(), db.Job.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
+    jobs = [row[0] for row in rows]
+    communication_rows = _communication_rows(session, jobs)
     items: list[JobResponse] = []
-    for job in jobs:
-        latest_score = None
-        if strategy_id is not None:
-            latest_score = session.scalar(
-                select(db.JobScore)
-                .where(db.JobScore.job_id == job.id, db.JobScore.strategy_id == strategy_id)
-                .order_by(db.JobScore.created_at.desc(), db.JobScore.id.desc())
-                .limit(1)
-            )
-            if latest_score is None:
-                continue
-            if grade and latest_score.grade != grade:
-                continue
-            if eligibility and latest_score.eligibility != eligibility:
-                continue
-            if effective_job_status and latest_score.effective_job_status != effective_job_status:
-                continue
-            if hard_rejected is not None and latest_score.hard_rejected != hard_rejected:
-                continue
-        elif any((grade, eligibility, effective_job_status, hard_rejected is not None)):
-            raise ValueError("评分结果筛选必须同时提供 strategy_id")
-        summary = None if latest_score is None else {
-            "id": str(latest_score.id), "total_score": latest_score.total_score,
-            "grade": latest_score.grade, "eligibility": latest_score.eligibility,
-            "hard_rejected": latest_score.hard_rejected,
-            "effective_job_status": latest_score.effective_job_status,
+    for row in rows:
+        job = row[0]
+        score = row[1] if score_rank is not None else None
+        summary = None if score is None else {
+            "id": str(score.id), "total_score": score.total_score,
+            "grade": score.grade, "eligibility": score.eligibility,
+            "hard_rejected": score.hard_rejected,
+            "effective_job_status": score.effective_job_status,
         }
         items.append(
             _response(
                 job,
                 summary,
-                _communication_summary(session, job, latest_score),
+                _build_communication_summary(
+                    score,
+                    communication_rows[0].get(job.id),
+                    communication_rows[1].get(job.id),
+                    communication_rows[2].get(job.id),
+                ),
             )
         )
-    total = len(items)
-    start = (page - 1) * page_size
-    return items[start:start + page_size], total
+    return items, total
 
 
 def get_job(session: Session, job_id: object) -> JobResponse:
@@ -421,6 +445,50 @@ def _communication_summary(
         .order_by(db.JobDiscoveryRecord.updated_at.desc())
         .limit(1)
     )
+    return _build_communication_summary(latest_score, conversation, action, record)
+
+
+def _communication_rows(
+    session: Session, jobs: list[db.Job]
+) -> tuple[
+    dict[object, db.Conversation],
+    dict[object, db.ActionQueue],
+    dict[object, db.JobDiscoveryRecord],
+]:
+    job_ids = [job.id for job in jobs]
+    if not job_ids:
+        return {}, {}, {}
+
+    def latest_by_job(rows: list[object]) -> dict[object, object]:
+        result: dict[object, object] = {}
+        for item in rows:
+            result.setdefault(item.job_id, item)  # type: ignore[attr-defined]
+        return result
+
+    conversations = latest_by_job(list(session.scalars(
+        select(db.Conversation).where(db.Conversation.job_id.in_(job_ids)).order_by(
+            db.Conversation.created_at.desc(), db.Conversation.id.desc()
+        )
+    ).all()))
+    actions = latest_by_job(list(session.scalars(
+        select(db.ActionQueue).where(
+            db.ActionQueue.job_id.in_(job_ids), db.ActionQueue.action_type == "GREETING"
+        ).order_by(db.ActionQueue.created_at.desc(), db.ActionQueue.id.desc())
+    ).all()))
+    records = latest_by_job(list(session.scalars(
+        select(db.JobDiscoveryRecord).where(
+            db.JobDiscoveryRecord.job_id.in_(job_ids)
+        ).order_by(db.JobDiscoveryRecord.updated_at.desc(), db.JobDiscoveryRecord.id.desc())
+    ).all()))
+    return conversations, actions, records  # type: ignore[return-value]
+
+
+def _build_communication_summary(
+    latest_score: db.JobScore | None,
+    conversation: db.Conversation | None,
+    action: db.ActionQueue | None,
+    record: db.JobDiscoveryRecord | None,
+) -> dict[str, object]:
     if conversation is not None:
         status = "CONVERSATION_ACTIVE"
     elif action is not None and action.status == "SUCCEEDED":

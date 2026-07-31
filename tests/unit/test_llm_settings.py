@@ -47,6 +47,18 @@ def test_provider_catalog_uses_provider_specific_models_and_keys() -> None:
     assert zhipu.selected_llm_api_key is settings.zhipu_api_key
 
 
+def test_non_local_api_binding_requires_access_token() -> None:
+    with pytest.raises(ValueError, match="API_ACCESS_TOKEN"):
+        Settings(_env_file=None, api_host="0.0.0.0", api_access_token=None)
+
+    settings = Settings(
+        _env_file=None,
+        api_host="0.0.0.0",
+        api_access_token=SecretStr("local-test-token"),
+    )
+    assert settings.api_host == "0.0.0.0"
+
+
 def test_reload_settings_reads_updated_llm_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -2,7 +2,7 @@ import sys
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "postgresql+psycopg://job_agent:job_agent@localhost:55432/job_agent"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    api_host: str = "127.0.0.1"
+    api_access_token: SecretStr | None = None
     llm_provider: str = "ZHIPU"
     llm_api_key: SecretStr | None = None
     qwen_api_key: SecretStr | None = None
@@ -48,6 +50,14 @@ class Settings(BaseSettings):
     agent_log_dir: str = "~/Desktop/job-search-agent/logs"
     agent_log_max_bytes: int = Field(default=20_000_000, ge=1_000_000)
     agent_log_backup_count: int = Field(default=14, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_api_binding(self) -> "Settings":
+        if self.api_host not in {"127.0.0.1", "localhost", "::1"}:
+            token = self.api_access_token
+            if token is None or not token.get_secret_value():
+                raise ValueError("非本机 API 监听必须配置 API_ACCESS_TOKEN")
+        return self
 
     @property
     def llm_configured(self) -> bool:

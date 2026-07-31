@@ -154,11 +154,14 @@ cd ../..
 
 ```bash
 source .venv/bin/activate
-uvicorn apps.api.app.main:app --reload
+uvicorn apps.api.app.main:app --host 127.0.0.1 --reload
 ```
 
 - API：<http://localhost:8000>
 - API 文档：<http://localhost:8000/docs>
+
+API 默认只接受本机访问。若确需监听非回环地址，必须同时配置
+`API_ACCESS_TOKEN`，调用方通过 `X-Local-Access-Token` 请求头传递令牌。
 
 终端二启动前端：
 

@@ -3,6 +3,8 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.api.v1 import (
@@ -31,6 +33,23 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def enforce_local_access(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
+    token = settings.api_access_token
+    client_host = request.client.host if request.client else ""
+    is_local = client_host in {"127.0.0.1", "::1", "localhost", "testclient"}
+    if request.url.path.startswith("/api/") and not is_local and token is None:
+        return _error("LOCAL_ACCESS_DENIED", "API 仅允许本机访问", 403)
+    if token is not None and request.url.path.startswith("/api/"):
+        expected = token.get_secret_value()
+        provided = request.headers.get("X-Local-Access-Token", "")
+        if provided != expected:
+            return _error("LOCAL_ACCESS_DENIED", "本地访问令牌无效", 401)
+    return await call_next(request)
 
 for router in (profiles.router, strategies.router, jobs.router, scores.router,
                knowledge.router, resumes.router, conversations.router, browser.router,

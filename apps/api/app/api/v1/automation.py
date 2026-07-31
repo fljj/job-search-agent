@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.v1.helpers import response
@@ -35,6 +35,7 @@ from apps.api.app.services.operations_service import (
     audit_discrepancies,
     list_reconciliation_tasks,
     operations_status,
+    overview_metrics,
     process_reconciliation_queue,
     verify_successful_actions,
 )
@@ -86,8 +87,13 @@ def retry_llm_circuit(
 
 
 @router.get("/actions")
-def actions(session: Session = Depends(get_session)) -> dict[str, object]:
-    return response({"items": list_automatic_actions(session)})
+def actions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    items, total = list_automatic_actions(session, page, page_size)
+    return response({"items": items, "page": page, "page_size": page_size, "total": total})
 
 
 @router.get("/runs/{run_id}")
@@ -117,6 +123,11 @@ def tick(
 @router.get("/operations/status")
 def operation_status(session: Session = Depends(get_session)) -> dict[str, object]:
     return response(operations_status(session))
+
+
+@router.get("/overview")
+def overview(session: Session = Depends(get_session)) -> dict[str, object]:
+    return response(overview_metrics(session))
 
 
 @router.get("/operations/reconciliation")

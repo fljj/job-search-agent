@@ -425,3 +425,10 @@ R2 处理状态补充：`PROCESSING` 表示已取得处理权，`RETRY_WAIT` 保
   `llm_invocation_id`，只有全部版本一致才允许复用。
 - `calendar_checks` 保存 provider、查询区间、时区和脱敏查询证据；
   `schedule_confirmations.reply_source` 记录人工来源。
+
+## R4 数据完整性补充
+
+- `messages.status` 和 `action_queue.status` 使用数据库 CHECK 约束保护合法状态；
+- `action_queue.draft_id` 在非空时唯一，防止同一回复草稿生成重复动作；
+- `audit_events.request_id` 可关联同一次 API 请求的审计记录，并建立查询索引；
+- 历史数据由迁移原样保留，新增约束不改变既有业务记录。

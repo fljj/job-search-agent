@@ -367,6 +367,46 @@ def operations_status(session: Session) -> dict[str, object]:
     }
 
 
+def overview_metrics(session: Session) -> dict[str, object]:
+    """数据库聚合总览，不使用任一列表接口的当前页推导全局指标。"""
+    active_conversation_states = [
+        "NEW", "ACTIVE", "WAITING_RECRUITER", "WAITING_USER", "SCHEDULING"
+    ]
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "job_count": session.scalar(
+            select(func.count()).select_from(db.Job).where(db.Job.user_id == DEFAULT_USER_ID)
+        ) or 0,
+        "active_conversation_count": session.scalar(
+            select(func.count()).select_from(db.Conversation).where(
+                db.Conversation.user_id == DEFAULT_USER_ID,
+                db.Conversation.state.in_(active_conversation_states),
+            )
+        ) or 0,
+        "successful_action_count": session.scalar(
+            select(func.count()).select_from(db.ActionQueue).where(
+                db.ActionQueue.user_id == DEFAULT_USER_ID,
+                db.ActionQueue.status == "SUCCEEDED",
+            )
+        ) or 0,
+        "waiting_message_count": session.scalar(
+            select(func.count())
+            .select_from(db.Message)
+            .join(db.Conversation, db.Conversation.id == db.Message.conversation_id)
+            .where(
+                db.Conversation.user_id == DEFAULT_USER_ID,
+                db.Message.status.in_(["RECEIVED", "RETRY_WAIT", "WAITING_FOR_LLM"]),
+            )
+        ) or 0,
+        "failed_action_count": session.scalar(
+            select(func.count()).select_from(db.ActionQueue).where(
+                db.ActionQueue.user_id == DEFAULT_USER_ID,
+                db.ActionQueue.status.in_(["FAILED_RETRYABLE", "FAILED_FINAL", "OUTCOME_UNKNOWN"]),
+            )
+        ) or 0,
+    }
+
+
 def apply_retention(
     session: Session, now: datetime | None = None
 ) -> dict[str, int]:

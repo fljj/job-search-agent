@@ -455,7 +455,15 @@ class Conversation(TimestampMixin, Base):
 
 class Message(Base):
     __tablename__ = "messages"
-    __table_args__ = (UniqueConstraint("conversation_id", "external_message_id"),)
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "external_message_id"),
+        CheckConstraint(
+            "status IN ('RECEIVED','AWAITING_IDENTITY','SUPERSEDED','PROCESSING',"
+            "'RETRY_WAIT','WAITING_FOR_LLM','QUARANTINED','COMPLETED',"
+            "'MISMATCH_DECLINED')",
+            name="ck_messages_status",
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"))
     external_message_id: Mapped[str] = mapped_column(String(200))
@@ -574,6 +582,18 @@ class ActionQueue(TimestampMixin, Base):
         UniqueConstraint("idempotency_key"),
         UniqueConstraint("confirmation_task_id"),
         UniqueConstraint("send_fingerprint"),
+        Index(
+            "uq_action_queue_draft_id",
+            "draft_id",
+            unique=True,
+            postgresql_where=text("draft_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "status IN ('PENDING_APPROVAL','APPROVED','EXECUTING','SUCCEEDED',"
+            "'FAILED_RETRYABLE','FAILED_FINAL','CANCELLED','EXPIRED','SUPERSEDED',"
+            "'OUTCOME_UNKNOWN')",
+            name="ck_action_queue_status",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
@@ -761,6 +781,7 @@ class PlatformRecommendation(TimestampMixin, Base):
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_request_id", "request_id"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     actor_type: Mapped[str] = mapped_column(String(30))
@@ -772,6 +793,7 @@ class AuditEvent(Base):
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
     correlation_id: Mapped[str] = mapped_column(String(100))
+    request_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

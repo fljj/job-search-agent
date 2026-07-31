@@ -1,4 +1,4 @@
-import { Button, Card, Input, Select, Space, message } from 'antd'
+import { Button, Card, Input, InputNumber, Select, Space, Switch, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
@@ -40,10 +40,31 @@ export function StrategyPage() {
     setValue(template)
     await load()
   }
+  const updateField = (field: string, fieldValue: unknown) => {
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>
+      setValue(JSON.stringify({ ...parsed, [field]: fieldValue }, null, 2))
+    } catch {
+      message.error('请先修复高级 JSON 格式')
+    }
+  }
+  const parsed = (() => {
+    try { return JSON.parse(value) as Record<string, unknown> } catch { return {} }
+  })()
   return <Card title="求职策略"><Space direction="vertical" style={{ width: '100%' }}>
     <Select placeholder="选择已有策略进行编辑" allowClear value={selectedId} onChange={(id) => id ? void select(id) : setSelectedId(undefined)}
       options={strategies.map((item) => ({ value: item.id, label: `${item.name} v${item.version}` }))} />
-    <Input.TextArea value={value} onChange={(event) => setValue(event.target.value)} rows={20} />
+    <Card size="small" title="常用设置"><Space wrap>
+      <Input value={String(parsed.name ?? '')} placeholder="策略名称"
+        onChange={(event) => updateField('name', event.target.value)} />
+      <InputNumber value={Number(parsed.priority ?? 100)} min={1} max={1000}
+        addonBefore="优先级" onChange={(next) => updateField('priority', next)} />
+      <Space>启用<Switch checked={Boolean(parsed.enabled)}
+        onChange={(checked) => updateField('enabled', checked)} /></Space>
+    </Space></Card>
+    <Card size="small" title="高级 JSON（地点、薪资和工作模式由服务端再次校验）">
+      <Input.TextArea value={value} onChange={(event) => setValue(event.target.value)} rows={18} />
+    </Card>
     <Button type="primary" onClick={save}>{selectedId ? '更新策略' : '创建策略'}</Button>
   </Space></Card>
 }

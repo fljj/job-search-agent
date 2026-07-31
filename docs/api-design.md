@@ -433,3 +433,10 @@ LLM 熔断、幂等、回读对账及电话/面试时间确认规则继续独立
 - `POST /api/v1/messages/{message_id}/replay`：人工重放已隔离消息。
   仅允许 `QUARANTINED`、身份可靠且尚无草稿的消息恢复为 `RECEIVED`；其他状态返回
   `409 INVALID_STATE`。接口写入审计事件，不直接发送任何平台消息。
+
+## R4 列表与总览接口
+
+- `GET /api/v1/automation/actions?page=1&page_size=50`：返回稳定分页的自动动作及全量 `total`；
+- `GET /api/v1/automation/overview`：独立返回职位总数、活跃会话、成功/失败动作和待处理消息数；
+- API 默认仅限本机；配置 `API_ACCESS_TOKEN` 后，API 请求必须携带
+  `X-Local-Access-Token`。拒绝访问时返回 `LOCAL_ACCESS_DENIED`。
