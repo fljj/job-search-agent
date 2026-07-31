@@ -10,7 +10,8 @@ def test_only_approved_action_can_start_execution() -> None:
         require_transition("PENDING_APPROVAL", ActionStatus.EXECUTING)
 
 
-def test_outcome_unknown_is_terminal() -> None:
+def test_outcome_unknown_can_only_enter_reconciliation_execution() -> None:
+    require_transition("OUTCOME_UNKNOWN", ActionStatus.EXECUTING)
     with pytest.raises(ValueError):
         require_transition("OUTCOME_UNKNOWN", ActionStatus.APPROVED)
 
@@ -26,3 +27,14 @@ def test_low_score_decline_has_a_stable_action_type() -> None:
 
 def test_mismatch_decline_has_a_stable_action_type() -> None:
     assert ActionType.MISMATCH_DECLINE.value == "MISMATCH_DECLINE"
+
+
+@pytest.mark.parametrize("action_type", [
+    "RESUME_CONSENT_ACCEPT",
+    "CONTACT_CONSENT_ACCEPT",
+    "LOCATION_CONSENT_ACCEPT",
+    "PLATFORM_RECOMMENDATION_ACCEPT",
+    "PLATFORM_RECOMMENDATION_REJECT",
+])
+def test_platform_write_actions_have_stable_action_types(action_type: str) -> None:
+    assert ActionType(action_type).value == action_type

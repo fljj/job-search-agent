@@ -200,6 +200,7 @@ users
   内容，不作为 LLM 故障时普通消息的自动降级来源。迁移前历史数据保持 `NULL`，迁移后由应用层
   保证所有新草稿写入来源。
 - `policy_decisions`：动作类型、权限结果、原因码、策略版本和输入快照。
+  自动卡片和平台推荐等无草稿动作允许 `draft_id` 为空，但仍必须保存策略决策。
 - `confirmation_tasks`：只保存电话、面试具体时间和日历写操作的 `PENDING_APPROVAL` 数据；`decision_id` 唯一。
 
 第二阶段幂等：模拟消息使用外部消息 ID，草稿使用消息/评分、知识版本和生成器版本生成指纹。
@@ -324,6 +325,11 @@ EXPIRED
 SUPERSEDED
 OUTCOME_UNKNOWN
 ```
+
+动作队列使用 `observation_baseline` 保存发送前的平台计数或卡片状态，使用
+`write_started_at` 区分是否已进入外部写入边界；每次 `action_attempts` 同步保存
+`write_started` 和本次基线。Worker 会把超时的 `EXECUTING` 回收为
+`OUTCOME_UNKNOWN`，随后只能通过只读对账进入最终状态，不能直接重发。
 
 ### 8.4 平台会话状态
 

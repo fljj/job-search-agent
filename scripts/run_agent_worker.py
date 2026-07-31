@@ -9,7 +9,7 @@ import socket
 import threading
 from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -37,6 +37,7 @@ from apps.api.app.core.job_parser_config import get_job_parser_config
 from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.core.telegram_config import get_telegram_policy
 from apps.api.app.models import entities as db
+from apps.api.app.services.action_service import recover_stale_executing_actions
 from apps.api.app.services.agent_service import pause_run, tick_run
 from apps.api.app.services.automation_service import _effective_rules
 from apps.api.app.services.job_discovery_service import (
@@ -584,6 +585,17 @@ def _tick_and_log(
 
 def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
     with SessionLocal() as session:
+        recovered = recover_stale_executing_actions(
+            session,
+            older_than=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        if recovered:
+            runtime_event(
+                logger,
+                "STALE_ACTIONS_RECOVERED",
+                worker_id=worker_id,
+                recovered_count=recovered,
+            )
         run_ids = session.scalars(
             select(db.AgentRun.id).where(db.AgentRun.status == "RUNNING")
         ).all()

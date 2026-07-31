@@ -8,6 +8,29 @@ class ActionType(StrEnum):
     LOW_SCORE_DECLINE = "LOW_SCORE_DECLINE"
     MISMATCH_DECLINE = "MISMATCH_DECLINE"
     SCHEDULE_REPLY = "SCHEDULE_REPLY"
+    RESUME_CONSENT_ACCEPT = "RESUME_CONSENT_ACCEPT"
+    CONTACT_CONSENT_ACCEPT = "CONTACT_CONSENT_ACCEPT"
+    LOCATION_CONSENT_ACCEPT = "LOCATION_CONSENT_ACCEPT"
+    PLATFORM_RECOMMENDATION_ACCEPT = "PLATFORM_RECOMMENDATION_ACCEPT"
+    PLATFORM_RECOMMENDATION_REJECT = "PLATFORM_RECOMMENDATION_REJECT"
+
+
+EXTERNAL_WRITE_ACTIONS = frozenset(ActionType)
+RECONCILABLE_ACTIONS = frozenset(
+    {
+        ActionType.GREETING,
+        ActionType.REPLY,
+        ActionType.RESUME,
+        ActionType.LOW_SCORE_DECLINE,
+        ActionType.MISMATCH_DECLINE,
+        ActionType.SCHEDULE_REPLY,
+        ActionType.RESUME_CONSENT_ACCEPT,
+        ActionType.CONTACT_CONSENT_ACCEPT,
+        ActionType.LOCATION_CONSENT_ACCEPT,
+        ActionType.PLATFORM_RECOMMENDATION_ACCEPT,
+        ActionType.PLATFORM_RECOMMENDATION_REJECT,
+    }
+)
 
 
 class ActionStatus(StrEnum):
@@ -36,7 +59,8 @@ ALLOWED_TRANSITIONS: dict[ActionStatus, set[ActionStatus]] = {
     ActionStatus.FAILED_RETRYABLE: {ActionStatus.APPROVED, ActionStatus.CANCELLED},
     ActionStatus.SUCCEEDED: set(), ActionStatus.FAILED_FINAL: set(),
     ActionStatus.CANCELLED: set(), ActionStatus.EXPIRED: set(),
-    ActionStatus.SUPERSEDED: set(), ActionStatus.OUTCOME_UNKNOWN: set(),
+    ActionStatus.SUPERSEDED: set(),
+    ActionStatus.OUTCOME_UNKNOWN: {ActionStatus.EXECUTING},
 }
 
 

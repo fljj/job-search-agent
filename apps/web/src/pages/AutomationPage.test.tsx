@@ -29,6 +29,15 @@ function mockAutomationApi() {
     if (path === '/automation/actions') return { items: [] }
     if (path === '/automation/operations/status') return operations
     if (path === '/strategies?enabled=true') return { items: [{ id: 'strategy-1', name: '主策略', enabled: true }] }
+    if (path === '/automation/settings') return { items: [{
+      scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: true, paused: true,
+      auto_greet_enabled: true, auto_greet_min_score: 80, auto_reply_enabled: true,
+      auto_reply_min_confidence: .9, auto_resume_enabled: true, auto_resume_min_score: 60,
+      low_score_decline_enabled: true, maimai_recommendation_enabled: true,
+      maimai_recommendation_resume_enabled: true, emergency_stop: true,
+      job_scan_enabled: true, company_cooldown_hours: 24, recruiter_cooldown_hours: 24,
+      work_start_hour: 8, work_end_hour: 22,
+    }] }
     return {}
   })
 }
@@ -60,7 +69,7 @@ describe('AutomationPage', () => {
       '/automation/settings',
       expect.objectContaining({
         method: 'PUT',
-        body: expect.stringContaining('"emergency_stop":true'),
+        body: expect.stringContaining('"emergency_stop":false'),
       }),
     ))
   })

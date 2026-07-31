@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ExecutionOutcome(StrEnum):
@@ -23,6 +23,7 @@ class ApprovedCommand(BaseModel):
     delivery_mode: str = "CUSTOM"
     expected_platform_content: str | None = None
     attachment_name: str | None = None
+    observation_baseline: dict[str, object] = Field(default_factory=dict)
 
 
 class ExecutionResult(BaseModel):
@@ -31,6 +32,8 @@ class ExecutionResult(BaseModel):
     external_reference: str | None = None
     evidence_hash: str | None = None
     observed_content: str | None = None
+    write_started: bool = False
+    observation_baseline: dict[str, object] = Field(default_factory=dict)
 
 
 class ActionExecutor(Protocol):

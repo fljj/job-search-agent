@@ -103,4 +103,34 @@ def evaluate_automation(
         if not rules.auto_resume_enabled:
             return AutomationDecision.DENY, ["AUTO_RESUME_DISABLED"]
         return AutomationDecision.ALLOW_AUTO, ["INBOUND_RESUME_POLICY_MATCHED"]
+    if context.action_type == "RESUME_CONSENT_ACCEPT":
+        if context.qualification_status == "MISMATCH":
+            return AutomationDecision.DENY, ["QUALIFICATION_MISMATCH"]
+        if not context.explicit_resume_request:
+            return AutomationDecision.DENY, ["RESUME_CONSENT_NOT_EXPLICIT"]
+        if not rules.auto_resume_enabled:
+            return AutomationDecision.DENY, ["AUTO_RESUME_DISABLED"]
+        return AutomationDecision.ALLOW_AUTO, ["INBOUND_RESUME_CONSENT_POLICY_MATCHED"]
+    if context.action_type in {"CONTACT_CONSENT_ACCEPT", "LOCATION_CONSENT_ACCEPT"}:
+        if context.qualification_status not in {"ROUGH_MATCH", "FULL_MATCH"}:
+            return AutomationDecision.DENY, ["QUALIFICATION_NOT_READY_FOR_CONSENT"]
+        if context.original_decision != "ALLOW_AUTO":
+            return AutomationDecision.DENY, ["CONSENT_NOT_AUTHORIZED"]
+        if not rules.auto_reply_enabled:
+            return AutomationDecision.DENY, ["AUTO_REPLY_DISABLED"]
+        return AutomationDecision.ALLOW_AUTO, [f"{context.action_type}_POLICY_MATCHED"]
+    if context.action_type in {
+        "PLATFORM_RECOMMENDATION_ACCEPT",
+        "PLATFORM_RECOMMENDATION_REJECT",
+    }:
+        if not rules.maimai_recommendation_enabled:
+            return AutomationDecision.DENY, ["MAIMAI_RECOMMENDATION_DISABLED"]
+        if (
+            context.action_type == "PLATFORM_RECOMMENDATION_ACCEPT"
+            and not rules.maimai_recommendation_resume_enabled
+        ):
+            return AutomationDecision.DENY, ["MAIMAI_RECOMMENDATION_RESUME_DISABLED"]
+        if context.original_decision != "ALLOW_AUTO":
+            return AutomationDecision.DENY, ["RECOMMENDATION_NOT_AUTHORIZED"]
+        return AutomationDecision.ALLOW_AUTO, [f"{context.action_type}_POLICY_MATCHED"]
     return AutomationDecision.DENY, ["UNSUPPORTED_ACTION"]

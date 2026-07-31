@@ -452,7 +452,9 @@ class PolicyDecision(Base):
     __tablename__ = "policy_decisions"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generated_drafts.id", ondelete="CASCADE"))
+    draft_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("generated_drafts.id", ondelete="CASCADE"), nullable=True
+    )
     action_type: Mapped[str] = mapped_column(String(30))
     decision: Mapped[str] = mapped_column(String(30))
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, default=list)
@@ -555,6 +557,9 @@ class ActionQueue(TimestampMixin, Base):
     )
     expected_platform_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     observed_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observation_baseline: Mapped[dict[str, object]] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
     platform: Mapped[str] = mapped_column(String(30))
     target_company: Mapped[str] = mapped_column(String(200))
     target_job_title: Mapped[str] = mapped_column(String(200))
@@ -565,6 +570,9 @@ class ActionQueue(TimestampMixin, Base):
     send_fingerprint: Mapped[str] = mapped_column(String(64))
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    write_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -635,6 +643,12 @@ class ActionAttempt(Base):
     external_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
     evidence_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     observed_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    write_started: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    observation_baseline: Mapped[dict[str, object]] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -1,4 +1,3 @@
-import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -108,7 +107,7 @@ def test_sends_text_and_reads_back_result_on_fixture_page() -> None:
         ).count() == 1
 
 
-def test_reply_executor_can_open_unique_approved_conversation_from_list() -> None:
+def test_reply_executor_rejects_derived_conversation_identity() -> None:
     executor = PlaywrightActionExecutor(get_browser_selectors())
     page = MagicMock()
     page._evaluate.return_value = {"x": 100, "y": 200}
@@ -124,13 +123,9 @@ def test_reply_executor_can_open_unique_approved_conversation_from_list() -> Non
         command,
     )
 
-    assert opened
-    expression = page._evaluate.call_args.args[0]
-    assert "derived:approved-conversation" in expression
-    assert json.dumps("张招聘") in expression
-    assert "fullText.includes(expectedCompany)" in expression
-    assert "jobMatches || companyUniquelyIdentifies" in expression
-    assert page._command.call_count == 2
+    assert not opened
+    page._evaluate.assert_not_called()
+    page._command.assert_not_called()
 
 
 def test_reply_executor_scrolls_virtual_list_without_refreshing(
@@ -299,13 +294,13 @@ def test_selects_unique_existing_resume_and_reads_back_result() -> None:
         ).count() == 1
 
 
-def test_inbound_resume_allows_hunter_and_client_company_to_differ() -> None:
+def test_inbound_resume_rejects_changed_company_identity() -> None:
     with fixture_page("conversation-detail.html") as page:
         browser = page.context.browser
         assert browser is not None
         command = approved_command(
             "RESUME",
-            conversation_key="derived:hunter-conversation",
+            conversation_key="boss-chat-1",
             attachment_name="后端开发简历",
         ).model_copy(update={"company": "代招客户公司"})
 
@@ -313,10 +308,9 @@ def test_inbound_resume_allows_hunter_and_client_company_to_differ() -> None:
             browser, command
         )
 
-        assert result.outcome is ExecutionOutcome.SUCCEEDED
-        assert page.locator("[data-testid='sent-resume']").filter(
-            has_text="后端开发简历"
-        ).count() == 1
+        assert result.outcome is ExecutionOutcome.FAILED_RETRYABLE
+        assert result.error_code == "APPROVED_TARGET_PAGE_NOT_FOUND"
+        assert page.locator("[data-testid='sent-resume']").count() == 0
 
 
 def test_changed_page_stops_before_any_write() -> None:

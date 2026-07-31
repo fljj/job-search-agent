@@ -14,11 +14,18 @@ from adapters.browser.maimai_recommendations import (
 from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
 from apps.api.app.services.action_service import execute_action, reconcile_action
-from apps.api.app.services.automation_service import _effective_rules
+from apps.api.app.services.automation_service import (
+    authorize_automatic_action,
+    effective_rules,
+)
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.actions import ActionExecutor
-from packages.policy_engine.automation import AutomationRules
+from packages.policy_engine.automation import (
+    AutomationContext,
+    AutomationDecision,
+    AutomationRules,
+)
 from packages.policy_engine.recommendation import (
     RecommendationDecision,
     RecommendationRules,
@@ -48,7 +55,7 @@ def scan_recommendations(
 ) -> list[dict[str, object]]:
     if run.user_id != DEFAULT_USER_ID or run.platform != "MAIMAI":
         raise ValueError("推荐扫描仅支持当前用户的脉脉运行")
-    automation = _effective_rules(session, "MAIMAI", run.strategy_id)
+    automation = effective_rules(session, "MAIMAI", run.strategy_id)
     if (
         not automation.enabled
         or automation.paused
@@ -221,7 +228,8 @@ def _persist_card(
             row.reason_codes = [*reasons, "RECOMMENDATION_RESUME_DISABLED"]
     if enabled:
         action = _create_action(session, row, run, strategy, action_type)
-        row.action_id = action.id
+        if action is not None:
+            row.action_id = action.id
     _audit(session, row)
     return row
 
@@ -252,6 +260,8 @@ def _authorize_existing_recommendation(
     ):
         return
     action = _create_action(session, row, run, strategy, action_type)
+    if action is None:
+        return
     row.action_id = action.id
     _audit(session, row)
 
@@ -262,11 +272,43 @@ def _create_action(
     run: db.AgentRun,
     strategy: db.JobStrategy,
     action_type: str,
-) -> db.ActionQueue:
+) -> db.ActionQueue | None:
     identity = f"MAIMAI:{row.external_recommendation_id}:{action_type}"
     fingerprint = hashlib.sha256(identity.encode()).hexdigest()
+    existing = session.scalar(
+        select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == fingerprint)
+    )
+    if existing is not None:
+        return existing
+    context = AutomationContext(
+        action_type=action_type,
+        score=0,
+        grade="UNKNOWN",
+        eligible=True,
+        job_open=True,
+        original_decision="ALLOW_AUTO",
+        resume_available=action_type == "PLATFORM_RECOMMENDATION_ACCEPT",
+        qualification_status="UNKNOWN",
+    )
+    decision, reasons, policy = authorize_automatic_action(
+        session,
+        action_type=action_type,
+        platform="MAIMAI",
+        strategy_id=strategy.id,
+        context=context,
+        input_snapshot={
+            "recommendation_id": str(row.id),
+            "external_recommendation_id": row.external_recommendation_id,
+            "recommendation_decision": row.decision,
+            "reason_codes": row.reason_codes,
+        },
+    )
+    if decision is not AutomationDecision.ALLOW_AUTO:
+        row.reason_codes = list(dict.fromkeys([*row.reason_codes, *reasons]))
+        return None
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID,
+        policy_decision_id=policy.id,
         strategy_id=strategy.id,
         agent_run_id=run.id,
         authorization_source="AUTO",

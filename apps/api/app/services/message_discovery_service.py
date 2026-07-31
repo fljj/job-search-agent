@@ -16,6 +16,10 @@ from apps.api.app.schemas.conversation import ConversationPayload, MessagePayloa
 from apps.api.app.schemas.job import JobImportPayload
 from apps.api.app.schemas.score import ScoreRequest
 from apps.api.app.services.action_service import execute_action
+from apps.api.app.services.automation_service import (
+    authorize_automatic_action,
+    effective_rules,
+)
 from apps.api.app.services.conversation_service import (
     create_conversation,
     import_message,
@@ -34,6 +38,7 @@ from packages.browser_worker.models import (
 )
 from packages.job_parser.normalizers import normalize_location
 from packages.llm.ports import LlmProvider
+from packages.policy_engine.automation import AutomationContext, AutomationDecision
 from packages.scoring.llm_engine import LlmScoreValidationError
 
 TERMINAL_CONVERSATION_STATES = {
@@ -333,8 +338,11 @@ def execute_pending_platform_consents(
     cdp_url: str,
     executor: ActionExecutor,
 ) -> list[str]:
-    action_ids = session.scalars(
-        select(db.ActionQueue.id)
+    rules = effective_rules(session, run.platform, run.strategy_id)
+    if not rules.enabled or rules.paused or rules.emergency_stop:
+        return []
+    actions = session.scalars(
+        select(db.ActionQueue)
         .where(
             db.ActionQueue.agent_run_id == run.id,
             db.ActionQueue.action_type.in_(
@@ -350,8 +358,15 @@ def execute_pending_platform_consents(
         .limit(1)
     ).all()
     statuses = []
-    for action_id in action_ids:
-        result = execute_action(session, action_id, cdp_url, executor)
+    for action in actions:
+        if action.action_type == "RESUME_CONSENT_ACCEPT" and not rules.auto_resume_enabled:
+            continue
+        if action.action_type in {
+            "CONTACT_CONSENT_ACCEPT",
+            "LOCATION_CONSENT_ACCEPT",
+        } and not rules.auto_reply_enabled:
+            continue
+        result = execute_action(session, action.id, cdp_url, executor)
         statuses.append(result.status)
     return statuses
 
@@ -364,26 +379,25 @@ def _queue_platform_consents(
     consents: list[BrowserPlatformConsent],
     current: datetime,
 ) -> None:
-    if conversation.qualification_status not in {"ROUGH_MATCH", "FULL_MATCH"}:
-        return
     score = (
         session.get(db.JobScore, conversation.latest_job_score_id)
         if conversation.latest_job_score_id
         else None
     )
-    if score is not None and score.hard_rejected:
-        return
     for consent in consents:
         if not consent.pending:
             continue
+        safety_blockers: list[str] = []
+        if score is not None and score.hard_rejected:
+            safety_blockers.append("JOB_HARD_REJECTED")
         if consent.consent_type.value == "LOCATION":
-            if not consent.detail or not _location_consent_allowed(
-                session,
-                run,
-                consent.detail,
-            ):
-                continue
             action_type = "LOCATION_CONSENT_ACCEPT"
+            location_allowed = bool(
+                consent.detail
+                and _location_consent_allowed(session, run, consent.detail)
+            )
+            if not location_allowed:
+                safety_blockers.append("LOCATION_CONSENT_NOT_ALLOWED")
         elif consent.consent_type.value == "RESUME":
             action_type = "RESUME_CONSENT_ACCEPT"
         else:
@@ -396,8 +410,39 @@ def _queue_platform_consents(
             select(db.ActionQueue.id).where(db.ActionQueue.send_fingerprint == fingerprint)
         ):
             continue
+        context = AutomationContext(
+            action_type=action_type,
+            score=score.total_score if score is not None else 0,
+            grade=score.grade if score is not None else "UNKNOWN",
+            eligible=not bool(safety_blockers),
+            job_open=True,
+            original_decision=(
+                "DENY" if safety_blockers else "ALLOW_AUTO"
+            ),
+            explicit_resume_request=consent.consent_type.value == "RESUME",
+            resume_available=True,
+            qualification_status=conversation.qualification_status,
+        )
+        decision, reasons, policy = authorize_automatic_action(
+            session,
+            action_type=action_type,
+            platform=conversation.platform,
+            strategy_id=run.strategy_id,
+            context=context,
+            safety_blockers=safety_blockers,
+            input_snapshot={
+                "conversation_id": str(conversation.id),
+                "consent_type": consent.consent_type.value,
+                "external_consent_id": consent.external_consent_id,
+                "prompt": consent.prompt,
+                "detail": consent.detail,
+            },
+        )
+        if decision is not AutomationDecision.ALLOW_AUTO:
+            continue
         action = db.ActionQueue(
             user_id=DEFAULT_USER_ID,
+            policy_decision_id=policy.id,
             strategy_id=run.strategy_id,
             agent_run_id=run.id,
             authorization_source="AUTO",
@@ -439,7 +484,11 @@ def _queue_platform_consents(
                 before_state=None,
                 after_state="APPROVED",
                 reason_codes=["QUALIFIED_INBOUND_PLATFORM_CONSENT"],
-                metadata_json={"consent_type": consent.consent_type.value},
+                metadata_json={
+                    "consent_type": consent.consent_type.value,
+                    "policy_decision_id": str(policy.id),
+                    "reason_codes": reasons,
+                },
                 correlation_id=f"platform-consent:{action.id}",
             )
         )

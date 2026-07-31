@@ -138,3 +138,46 @@ def test_normal_reply_is_denied_after_qualification_becomes_mismatch() -> None:
 def test_invalid_work_hours_are_rejected() -> None:
     with pytest.raises(ValueError):
         rules(work_start_hour=22, work_end_hour=8)
+
+
+def test_resume_consent_uses_resume_switch_and_explicit_request() -> None:
+    consent = context(
+        action_type="RESUME_CONSENT_ACCEPT",
+        explicit_resume_request=True,
+        qualification_status="UNKNOWN",
+    )
+    assert evaluate_automation(consent, rules())[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(
+        consent.model_copy(update={"explicit_resume_request": False}), rules()
+    )[0] is AutomationDecision.DENY
+    assert evaluate_automation(consent, rules(auto_resume_enabled=False))[0] is AutomationDecision.DENY
+
+
+@pytest.mark.parametrize("action_type", ["CONTACT_CONSENT_ACCEPT", "LOCATION_CONSENT_ACCEPT"])
+def test_non_resume_consent_requires_qualification_and_reply_switch(action_type: str) -> None:
+    consent = context(action_type=action_type, qualification_status="ROUGH_MATCH")
+    assert evaluate_automation(consent, rules())[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(
+        consent.model_copy(update={"qualification_status": "UNKNOWN"}), rules()
+    )[0] is AutomationDecision.DENY
+    assert evaluate_automation(consent, rules(auto_reply_enabled=False))[0] is AutomationDecision.DENY
+
+
+@pytest.mark.parametrize(
+    ("action_type", "switch"),
+    [
+        ("PLATFORM_RECOMMENDATION_ACCEPT", "maimai_recommendation_resume_enabled"),
+        ("PLATFORM_RECOMMENDATION_REJECT", "maimai_recommendation_enabled"),
+    ],
+)
+def test_recommendation_actions_require_their_automation_switch(
+    action_type: str,
+    switch: str,
+) -> None:
+    recommendation = context(action_type=action_type)
+    enabled = rules(
+        maimai_recommendation_enabled=True,
+        maimai_recommendation_resume_enabled=True,
+    )
+    assert evaluate_automation(recommendation, enabled)[0] is AutomationDecision.ALLOW_AUTO
+    assert evaluate_automation(recommendation, enabled.model_copy(update={switch: False}))[0] is AutomationDecision.DENY

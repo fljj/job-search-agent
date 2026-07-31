@@ -243,11 +243,35 @@ def execute_action(
     session.add(attempt)
     session.commit()
     session.refresh(action)
-    command = _approved_command(session, action)
-    result = (executor or PlaywrightActionExecutor(get_browser_selectors())).execute(
-        cdp_url, command
-    )
-    _finish(session, action, attempt, result)
+    try:
+        command = _approved_command(session, action)
+    except Exception:
+        _finish(
+            session,
+            action,
+            attempt,
+            ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_FINAL,
+                error_code="APPROVED_COMMAND_INVALID",
+            ),
+        )
+        return _response(action)
+    try:
+        result = (executor or PlaywrightActionExecutor(get_browser_selectors())).execute(
+            cdp_url, command
+        )
+    except Exception:
+        # 执行器越过调用边界后可能已经写入平台，未知异常不能按发送前失败重试。
+        result = ExecutionResult(
+            outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+            error_code="EXECUTOR_UNHANDLED_ERROR",
+            write_started=True,
+        )
+    try:
+        _finish(session, action, attempt, result)
+    except Exception:
+        session.rollback()
+        _mark_persistence_unknown(session, action.id, attempt.id, result)
     return _response(action)
 
 
@@ -257,62 +281,51 @@ def reconcile_action(
     cdp_url: str,
     observer: PlaywrightActionExecutor | None = None,
 ) -> ActionResponse:
-    action = session.scalar(
-        select(db.ActionQueue)
-        .where(db.ActionQueue.id == action_id)
-        .with_for_update()
-    )
-    if action is None:
-        raise ResourceNotFoundError("动作不存在")
+    action = _get_action(session, action_id)
     if action.status != ActionStatus.OUTCOME_UNKNOWN.value:
         raise ValueError("只有结果不明确的动作可以对账")
-    result = (observer or PlaywrightActionExecutor(get_browser_selectors())).observe(
-        cdp_url, _approved_command(session, action)
+    claimed_id = session.scalar(
+        update(db.ActionQueue)
+        .where(
+            db.ActionQueue.id == action.id,
+            db.ActionQueue.status == ActionStatus.OUTCOME_UNKNOWN.value,
+        )
+        .values(
+            status=ActionStatus.EXECUTING.value,
+            failure_code="RECONCILIATION_IN_PROGRESS",
+            started_at=datetime.now(UTC),
+            version=db.ActionQueue.version + 1,
+        )
+        .returning(db.ActionQueue.id)
     )
-    before = action.status
+    if claimed_id is None:
+        raise ValueError("动作正在被其他对账任务处理")
     attempt_number = (
         session.scalar(select(func.count()).where(db.ActionAttempt.action_id == action.id)) or 0
     ) + 1
     attempt = db.ActionAttempt(
         action_id=action.id,
         attempt_number=attempt_number,
-        status=result.outcome.value,
-        error_code=result.error_code,
-        evidence_hash=result.evidence_hash,
-        observed_content=result.observed_content,
+        status="RECONCILING",
         started_at=datetime.now(UTC),
-        finished_at=datetime.now(UTC),
     )
     session.add(attempt)
-    if result.outcome is ExecutionOutcome.SUCCEEDED:
-        action.status = ActionStatus.SUCCEEDED.value
-        action.failure_code = None
-        action.observed_content = result.observed_content
-        action.finished_at = datetime.now(UTC)
-        _ensure_telegram_conversation(session, action)
-        reasons = ["PLATFORM_READBACK_CONFIRMED_SENT"]
-    elif (
-        result.outcome is ExecutionOutcome.FAILED_RETRYABLE
-        and result.error_code == "RESULT_CONFIRMED_NOT_SENT"
-    ):
-        action.status = ActionStatus.FAILED_RETRYABLE.value
-        action.failure_code = result.error_code
-        reasons = ["PLATFORM_READBACK_CONFIRMED_NOT_SENT"]
-    else:
-        action.failure_code = result.error_code
-        reasons = [result.error_code or "RECONCILIATION_STILL_UNKNOWN"]
-    action.version += 1
-    _audit(
-        session,
-        "ACTION_RECONCILED",
-        "action",
-        action.id,
-        before,
-        action.status,
-        reasons,
-    )
     session.commit()
     session.refresh(action)
+    try:
+        result = (observer or PlaywrightActionExecutor(get_browser_selectors())).observe(
+            cdp_url, _approved_command(session, action)
+        )
+    except Exception:
+        result = ExecutionResult(
+            outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+            error_code="RECONCILIATION_OBSERVER_ERROR",
+        )
+    try:
+        _finish(session, action, attempt, result, event="ACTION_RECONCILED")
+    except Exception:
+        session.rollback()
+        _mark_persistence_unknown(session, action.id, attempt.id, result)
     return _response(action)
 
 
@@ -368,6 +381,7 @@ def _approved_command(session: Session, action: db.ActionQueue) -> ApprovedComma
         delivery_mode=action.delivery_mode,
         expected_platform_content=action.expected_platform_content,
         attachment_name=action.attachment_name,
+        observation_baseline=action.observation_baseline,
     )
 
 
@@ -414,19 +428,30 @@ def list_tasks(session: Session) -> list[dict[str, object]]:
 
 
 def _finish(
-    session: Session, action: db.ActionQueue, attempt: db.ActionAttempt, result: ExecutionResult
+    session: Session,
+    action: db.ActionQueue,
+    attempt: db.ActionAttempt,
+    result: ExecutionResult,
+    *,
+    event: str = "ACTION_EXECUTION_FINISHED",
 ) -> None:
     target = ActionStatus(result.outcome.value)
     require_transition(action.status, target)
     action.status = target.value
     action.failure_code = result.error_code
     action.finished_at = datetime.now(UTC)
+    if result.write_started and action.write_started_at is None:
+        action.write_started_at = datetime.now(UTC)
+    if result.observation_baseline:
+        action.observation_baseline = result.observation_baseline
     action.version += 1
     attempt.status = target.value
     attempt.error_code = result.error_code
     attempt.external_reference = result.external_reference
     attempt.evidence_hash = result.evidence_hash
     attempt.observed_content = result.observed_content
+    attempt.write_started = result.write_started
+    attempt.observation_baseline = result.observation_baseline
     attempt.finished_at = datetime.now(UTC)
     if result.observed_content:
         action.observed_content = result.observed_content
@@ -449,7 +474,7 @@ def _finish(
         _ensure_telegram_conversation(session, action)
     _audit(
         session,
-        "ACTION_EXECUTION_FINISHED",
+        event,
         "action",
         action.id,
         "EXECUTING",
@@ -458,6 +483,85 @@ def _finish(
     )
     session.commit()
     session.refresh(action)
+
+
+def _mark_persistence_unknown(
+    session: Session,
+    action_id: UUID,
+    attempt_id: UUID,
+    result: ExecutionResult,
+) -> None:
+    """外部调用已经返回但结果落库失败时，以新的短事务保存安全终态。"""
+    action = _get_action(session, action_id)
+    attempt = session.get(db.ActionAttempt, attempt_id)
+    if action.status != ActionStatus.EXECUTING.value:
+        return
+    action.status = ActionStatus.OUTCOME_UNKNOWN.value
+    action.failure_code = "RESULT_PERSISTENCE_FAILED"
+    action.finished_at = datetime.now(UTC)
+    action.version += 1
+    if result.write_started and action.write_started_at is None:
+        action.write_started_at = datetime.now(UTC)
+    if result.observation_baseline:
+        action.observation_baseline = result.observation_baseline
+    if attempt is not None:
+        attempt.status = ActionStatus.OUTCOME_UNKNOWN.value
+        attempt.error_code = "RESULT_PERSISTENCE_FAILED"
+        attempt.write_started = result.write_started
+        attempt.observation_baseline = result.observation_baseline
+        attempt.finished_at = datetime.now(UTC)
+    _audit(
+        session,
+        "ACTION_RESULT_PERSISTENCE_FAILED",
+        "action",
+        action.id,
+        "EXECUTING",
+        "OUTCOME_UNKNOWN",
+        ["RESULT_PERSISTENCE_FAILED"],
+    )
+    session.commit()
+    session.refresh(action)
+
+
+def recover_stale_executing_actions(
+    session: Session,
+    *,
+    older_than: datetime,
+) -> int:
+    """回收失去执行进程的动作；无法证明未写入时统一进入只读对账。"""
+    actions = session.scalars(
+        select(db.ActionQueue).where(
+            db.ActionQueue.status == ActionStatus.EXECUTING.value,
+            db.ActionQueue.started_at < older_than,
+        )
+    ).all()
+    for action in actions:
+        action.status = ActionStatus.OUTCOME_UNKNOWN.value
+        action.failure_code = "STALE_EXECUTION_REQUIRES_RECONCILIATION"
+        action.finished_at = datetime.now(UTC)
+        action.version += 1
+        attempt = session.scalar(
+            select(db.ActionAttempt)
+            .where(db.ActionAttempt.action_id == action.id)
+            .order_by(db.ActionAttempt.attempt_number.desc())
+            .limit(1)
+        )
+        if attempt is not None and attempt.finished_at is None:
+            attempt.status = ActionStatus.OUTCOME_UNKNOWN.value
+            attempt.error_code = action.failure_code
+            attempt.finished_at = datetime.now(UTC)
+        _audit(
+            session,
+            "STALE_ACTION_RECOVERED",
+            "action",
+            action.id,
+            "EXECUTING",
+            "OUTCOME_UNKNOWN",
+            [action.failure_code],
+        )
+    if actions:
+        session.commit()
+    return len(actions)
 
 
 def _ensure_telegram_conversation(

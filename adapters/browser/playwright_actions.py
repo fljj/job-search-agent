@@ -29,9 +29,13 @@ from packages.browser_worker.models import Platform, ReadResult, SessionStatus
 
 
 def _conversation_key_matches(actual: str, expected: str | None) -> bool:
-    if not expected:
+    if not expected or expected.startswith("derived:"):
         return False
-    return expected.startswith("derived:") or actual == expected
+    return actual == expected
+
+
+def _identity_text_matches(actual: str | None, expected: str) -> bool:
+    return bool(actual and " ".join(actual.split()) == " ".join(expected.split()))
 
 
 def _reply_target_matches(
@@ -46,8 +50,9 @@ def _reply_target_matches(
             conversation.external_conversation_id,
             command.conversation_key,
         )
-        and command.recruiter in conversation.recruiter_name
-        and command.job_title in (conversation.job_title or "")
+        and _identity_text_matches(conversation.recruiter_name, command.recruiter)
+        and _identity_text_matches(conversation.job_title, command.job_title)
+        and _identity_text_matches(conversation.company_name, command.company)
     )
 
 
@@ -96,9 +101,7 @@ class PlaywrightActionExecutor:
         if command.action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
             return self._execute_reply_over_raw_cdp(cdp_url, command)
         if command.action_type == "RESUME":
-            preparation = self._prepare_conversation_target(cdp_url, command)
-            if preparation is not None:
-                return preparation
+            return self._execute_resume_over_raw_cdp(cdp_url, command)
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.connect_over_cdp(cdp_url)
@@ -180,7 +183,8 @@ class PlaywrightActionExecutor:
                 outcome=ExecutionOutcome.FAILED_FINAL,
                 error_code="TELEGRAM_TARGET_INVALID",
             )
-        performed = False
+        write_started = False
+        baseline: dict[str, object] = {}
         try:
             with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
                 targets = json.loads(response.read())
@@ -205,16 +209,9 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="TELEGRAM_CONTACT_NOT_READY",
                     )
-                already_sent = page._evaluate(
-                    "[...document.querySelectorAll('.Message.own')].some("
-                    "item => (item.innerText || '').includes("
-                    f"{json.dumps(command.content)}))"
-                )
-                if already_sent:
-                    return ExecutionResult(
-                        outcome=ExecutionOutcome.SUCCEEDED,
-                        observed_content=command.content,
-                    )
+                baseline = {"sent_message_count": int(page._evaluate(
+                    "document.querySelectorAll('.Message.own').length"
+                ) or 0)}
                 composer = self._telegram_element_point(
                     page,
                     "[contenteditable=true][role=textbox][aria-label=Message]",
@@ -243,7 +240,6 @@ class PlaywrightActionExecutor:
                             outcome=ExecutionOutcome.FAILED_RETRYABLE,
                             error_code="TELEGRAM_COMPOSER_FILL_FAILED",
                         )
-                    performed = True
                 send_button = None
                 for _ in range(50):
                     send_button = self._telegram_element_point(
@@ -259,7 +255,7 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="TELEGRAM_SEND_BUTTON_NOT_READY",
                     )
-                performed = True
+                write_started = True
                 self._trusted_click(page, send_button)
                 for _ in range(50):
                     observed = page._evaluate(
@@ -272,20 +268,26 @@ class PlaywrightActionExecutor:
                             outcome=ExecutionOutcome.SUCCEEDED,
                             external_reference=f"@{username}",
                             observed_content=command.content,
+                            write_started=True,
+                            observation_baseline=baseline,
                         )
                     time.sleep(0.1)
                 return ExecutionResult(
                     outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                     error_code="TELEGRAM_RESULT_NOT_OBSERVED",
+                    write_started=True,
+                    observation_baseline=baseline,
                 )
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
                 outcome=(
                     ExecutionOutcome.OUTCOME_UNKNOWN
-                    if performed
+                    if write_started
                     else ExecutionOutcome.FAILED_RETRYABLE
                 ),
                 error_code="TELEGRAM_CDP_ERROR",
+                write_started=write_started,
+                observation_baseline=baseline,
             )
 
     @staticmethod
@@ -513,14 +515,16 @@ class PlaywrightActionExecutor:
         websocket_url: str,
         command: ApprovedCommand,
     ) -> ExecutionResult:
-        performed = False
+        write_started = False
+        baseline = {"consent_state": "PENDING", "consent_prompt": command.content or ""}
         try:
             with RawCdpPageReader(websocket_url) as page:
                 state = self._platform_consent_state(page, command.content or "")
                 if state == "ACCEPTED":
                     return ExecutionResult(
-                        outcome=ExecutionOutcome.SUCCEEDED,
-                        observed_content=command.content,
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="PLATFORM_CONSENT_ALREADY_RESOLVED",
+                        observation_baseline=baseline,
                     )
                 if state != "PENDING":
                     return ExecutionResult(
@@ -545,7 +549,7 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="PLATFORM_CONSENT_BUTTON_NOT_READY",
                     )
-                performed = True
+                write_started = True
                 self._trusted_click(page, point)
                 for _ in range(30):
                     if self._platform_consent_state(page, command.content or "") == "ACCEPTED":
@@ -555,20 +559,26 @@ class PlaywrightActionExecutor:
                                 f"{page.url}:{command.content}".encode()
                             ).hexdigest(),
                             observed_content=command.content,
+                            write_started=True,
+                            observation_baseline=baseline,
                         )
                     time.sleep(0.1)
                 return ExecutionResult(
                     outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                     error_code="PLATFORM_CONSENT_RESULT_NOT_OBSERVED",
+                    write_started=True,
+                    observation_baseline=baseline,
                 )
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
                 outcome=(
                     ExecutionOutcome.OUTCOME_UNKNOWN
-                    if performed
+                    if write_started
                     else ExecutionOutcome.FAILED_RETRYABLE
                 ),
                 error_code="RAW_CDP_ACTION_ERROR",
+                write_started=write_started,
+                observation_baseline=baseline,
             )
 
     def _accept_location_consent(
@@ -576,7 +586,8 @@ class PlaywrightActionExecutor:
         websocket_url: str,
         command: ApprovedCommand,
     ) -> ExecutionResult:
-        performed = False
+        write_started = False
+        baseline = {"consent_state": "PENDING", "consent_prompt": command.content or ""}
         try:
             with RawCdpPageReader(websocket_url) as page:
                 state = self._location_consent_state(
@@ -585,8 +596,9 @@ class PlaywrightActionExecutor:
                 )
                 if state == "ACCEPTED":
                     return ExecutionResult(
-                        outcome=ExecutionOutcome.SUCCEEDED,
-                        observed_content=command.content,
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="LOCATION_CONSENT_ALREADY_RESOLVED",
+                        observation_baseline=baseline,
                     )
                 if state != "PENDING":
                     return ExecutionResult(
@@ -616,7 +628,7 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="LOCATION_CONSENT_BUTTON_NOT_READY",
                     )
-                performed = True
+                write_started = True
                 self._trusted_click(page, point)
                 for _ in range(30):
                     state = self._location_consent_state(
@@ -630,20 +642,26 @@ class PlaywrightActionExecutor:
                                 f"{page.url}:{command.content}".encode()
                             ).hexdigest(),
                             observed_content=command.content,
+                            write_started=True,
+                            observation_baseline=baseline,
                         )
                     time.sleep(0.1)
                 return ExecutionResult(
                     outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                     error_code="LOCATION_CONSENT_RESULT_NOT_OBSERVED",
+                    write_started=True,
+                    observation_baseline=baseline,
                 )
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
                 outcome=(
                     ExecutionOutcome.OUTCOME_UNKNOWN
-                    if performed
+                    if write_started
                     else ExecutionOutcome.FAILED_RETRYABLE
                 ),
                 error_code="RAW_CDP_ACTION_ERROR",
+                write_started=write_started,
+                observation_baseline=baseline,
             )
 
     @staticmethod
@@ -691,6 +709,142 @@ class PlaywrightActionExecutor:
             "})()"
         )
         return str(result)
+
+    def _execute_resume_over_raw_cdp(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        """使用原生 CDP 在唯一批准会话中发送附件简历。"""
+        if not command.attachment_name:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_FINAL,
+                error_code="ATTACHMENT_MISSING",
+            )
+        preparation = self._prepare_conversation_target(cdp_url, command)
+        if preparation is not None:
+            return preparation
+        selectors = self.config.platforms[command.platform]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches: list[str] = []
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(str(websocket_url)) as page:
+                    check = extract_current_page(
+                        page, Platform(command.platform), selectors, self.config.version
+                    )
+                if _reply_target_matches(check, command):
+                    matches.append(str(websocket_url))
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code=(
+                        "APPROVED_TARGET_PAGE_NOT_FOUND"
+                        if not matches
+                        else "APPROVED_TARGET_PAGE_AMBIGUOUS"
+                    ),
+                )
+            return self._send_resume_on_raw_page(matches[0], command)
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="RAW_CDP_PREFLIGHT_ERROR",
+            )
+
+    def _send_resume_on_raw_page(
+        self,
+        websocket_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        selectors = self.config.platforms[command.platform]
+        write_started = False
+        baseline: dict[str, object] = {}
+        try:
+            with RawCdpPageReader(websocket_url) as page:
+                baseline_count = int(page._evaluate(
+                    f"document.querySelectorAll({json.dumps(selectors.sent_resume_items)}).length"
+                ) or 0)
+                baseline = {"sent_resume_count": baseline_count}
+                trigger = self._visible_element_point(page, selectors.resume_trigger)
+                if trigger is None:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="RESUME_TRIGGER_NOT_READY",
+                        observation_baseline=baseline,
+                    )
+                self._trusted_click(page, trigger)
+                attachment_point = page._evaluate(
+                    "(() => { const expected="
+                    f"{json.dumps(command.attachment_name)};"
+                    "const items=[...document.querySelectorAll("
+                    f"{json.dumps(selectors.resume_items)}"
+                    ")].filter(item => item.getClientRects().length>0 && "
+                    "(item.textContent||'').trim()===expected);"
+                    "if(items.length!==1)return null;const r=items[0].getBoundingClientRect();"
+                    "return {x:r.x+r.width/2,y:r.y+r.height/2};})()"
+                )
+                if not isinstance(attachment_point, dict):
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="ATTACHMENT_TARGET_MISMATCH",
+                        observation_baseline=baseline,
+                    )
+                self._trusted_click(page, attachment_point)
+                confirm = self._visible_element_point(page, selectors.resume_confirm_button)
+                if confirm is None:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="RESUME_CONFIRM_NOT_READY",
+                        observation_baseline=baseline,
+                    )
+                write_started = True
+                self._trusted_click(page, confirm)
+                for _ in range(30):
+                    observed = page._evaluate(
+                        "Array.from(document.querySelectorAll("
+                        f"{json.dumps(selectors.sent_resume_items)}"
+                        f")).slice({baseline_count}).some(item => "
+                        f"(item.textContent||'').trim()==={json.dumps(command.attachment_name)})"
+                    )
+                    if observed:
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.SUCCEEDED,
+                            observed_content=command.attachment_name,
+                            write_started=True,
+                            observation_baseline=baseline,
+                        )
+                    time.sleep(0.1)
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="RESUME_RESULT_NOT_OBSERVED",
+                    write_started=True,
+                    observation_baseline=baseline,
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=(ExecutionOutcome.OUTCOME_UNKNOWN if write_started else ExecutionOutcome.FAILED_RETRYABLE),
+                error_code="RAW_CDP_ACTION_ERROR",
+                write_started=write_started,
+                observation_baseline=baseline,
+            )
+
+    @staticmethod
+    def _visible_element_point(
+        page: RawCdpPageReader,
+        selector: str,
+    ) -> dict[str, object] | None:
+        point = page._evaluate(
+            "(() => { const items=[...document.querySelectorAll("
+            f"{json.dumps(selector)}"
+            ")].filter(item => item.getClientRects().length>0 && !item.disabled);"
+            "if(items.length!==1)return null;const r=items[0].getBoundingClientRect();"
+            "return {x:r.x+r.width/2,y:r.y+r.height/2};})()"
+        )
+        return point if isinstance(point, dict) else None
 
     def _execute_reply_over_raw_cdp(
         self,
@@ -789,6 +943,8 @@ class PlaywrightActionExecutor:
         selectors: PlatformSelectors,
         command: ApprovedCommand,
     ) -> bool:
+        if not command.conversation_key or command.conversation_key.startswith("derived:"):
+            return False
         item_selector = selectors.conversation_list_items
         id_attribute = selectors.conversation_list_item_id_attribute
         id_json_key = selectors.conversation_list_item_id_json_key
@@ -807,29 +963,18 @@ class PlaywrightActionExecutor:
                 f"const recruiterSelector = {json.dumps(recruiter_selector)};"
                 f"const jobSelector = {json.dumps(job_selector)};"
                 f"const companySelector = {json.dumps(company_selector)};"
-                "let matches = items.filter(item => {"
+                "const matches = items.filter(item => {"
                 " const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim() || '';"
                 " if (recruiter !== expectedRecruiter) return false;"
-                " if (expectedId?.startsWith('derived:')) return true;"
                 " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
                 " if (!raw) return false;"
+                "  const job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
+                "  const company = item.querySelector(companySelector)?.textContent?.trim() || '';"
+                "  if (job !== expectedJob || company !== expectedCompany) return false;"
                 " if (!idJsonKey) return raw === expectedId;"
                 " try { return String(JSON.parse(raw)[idJsonKey]) === expectedId; }"
                 " catch { return false; }"
                 "});"
-                "if (matches.length > 1) {"
-                " const narrowed = matches.filter(item => {"
-                "  const job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
-                "  const company = item.querySelector(companySelector)?.textContent?.trim() || '';"
-                "  const fullText = item.textContent?.trim() || '';"
-                "  const jobMatches = !expectedJob || job.includes(expectedJob) || expectedJob.includes(job);"
-                "  const companyMatches = !expectedCompany || company.includes(expectedCompany) "
-                "   || expectedCompany.includes(company) || fullText.includes(expectedCompany);"
-                "  const companyUniquelyIdentifies = expectedCompany && fullText.includes(expectedCompany);"
-                "  return companyMatches && (jobMatches || companyUniquelyIdentifies);"
-                " });"
-                " if (narrowed.length === 1) matches = narrowed;"
-                "}"
                 "if (matches.length !== 1) return null;"
                 "matches[0].scrollIntoView({block: 'center'});"
                 "const rect = matches[0].getBoundingClientRect();"
@@ -848,7 +993,8 @@ class PlaywrightActionExecutor:
         command: ApprovedCommand,
     ) -> ExecutionResult:
         selectors = self.config.platforms[command.platform]
-        performed = False
+        write_started = False
+        baseline: dict[str, object] = {}
         try:
             with RawCdpPageReader(websocket_url) as page:
                 if not command.content:
@@ -856,20 +1002,14 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_FINAL,
                         error_code="EMPTY_CONTENT",
                     )
-                already_sent = page._evaluate(
-                    "Array.from(document.querySelectorAll("
-                    f"{json.dumps(selectors.sent_message_items)}"
-                    f")).some(item => (item.textContent || '').includes("
-                    f"{json.dumps(command.content)}))"
-                )
-                if already_sent:
-                    return ExecutionResult(
-                        outcome=ExecutionOutcome.SUCCEEDED,
-                        evidence_hash=hashlib.sha256(
-                            f"{page.url}:{command.model_dump_json()}".encode()
-                        ).hexdigest(),
-                        observed_content=command.content,
+                baseline_count = int(
+                    page._evaluate(
+                        "document.querySelectorAll("
+                        f"{json.dumps(selectors.sent_message_items)}).length"
                     )
+                    or 0
+                )
+                baseline = {"sent_message_count": baseline_count}
                 filled = page._evaluate(
                     "(() => { const element = document.querySelector("
                     f"{json.dumps(selectors.message_composer)}"
@@ -883,8 +1023,8 @@ class PlaywrightActionExecutor:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="COMPOSER_FILL_NOT_CONFIRMED",
+                        observation_baseline=baseline,
                     )
-                performed = True
                 for _ in range(30):
                     sent = page._evaluate(
                         "(() => { const composer = document.querySelector("
@@ -898,19 +1038,21 @@ class PlaywrightActionExecutor:
                         "if (!element) return false; element.click(); return true; })()"
                     )
                     if sent:
+                        write_started = True
                         break
                     time.sleep(0.1)
                 else:
                     return ExecutionResult(
-                        outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="SEND_BUTTON_NOT_READY",
+                        observation_baseline=baseline,
                     )
                 for _ in range(30):
                     observed = page._evaluate(
                         "Array.from(document.querySelectorAll("
                         f"{json.dumps(selectors.sent_message_items)}"
-                        f")).some(item => (item.textContent || '').includes("
-                        f"{json.dumps(command.content)}))"
+                        f")).slice({baseline_count}).some(item => "
+                        f"(item.textContent || '').trim() === {json.dumps(command.content.strip())})"
                     )
                     if observed:
                         return ExecutionResult(
@@ -919,20 +1061,26 @@ class PlaywrightActionExecutor:
                                 f"{page.url}:{command.model_dump_json()}".encode()
                             ).hexdigest(),
                             observed_content=command.content,
+                            write_started=True,
+                            observation_baseline=baseline,
                         )
                     time.sleep(0.1)
                 return ExecutionResult(
                     outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                     error_code="RESULT_NOT_OBSERVED",
+                    write_started=True,
+                    observation_baseline=baseline,
                 )
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
                 outcome=(
                     ExecutionOutcome.OUTCOME_UNKNOWN
-                    if performed
+                    if write_started
                     else ExecutionOutcome.FAILED_RETRYABLE
                 ),
                 error_code="RAW_CDP_ACTION_ERROR",
+                write_started=write_started,
+                observation_baseline=baseline,
             )
 
     def observe(self, cdp_url: str, command: ApprovedCommand) -> ExecutionResult:
@@ -940,6 +1088,8 @@ class PlaywrightActionExecutor:
         validate_local_cdp_url(cdp_url)
         if command.action_type == "GREETING" and command.platform == "TELEGRAM":
             return self._observe_telegram_greeting(cdp_url, command)
+        if command.action_type == "GREETING":
+            return self._observe_greeting_over_raw_cdp(cdp_url, command)
         if command.action_type in {
             "PLATFORM_RECOMMENDATION_ACCEPT",
             "PLATFORM_RECOMMENDATION_REJECT",
@@ -950,6 +1100,14 @@ class PlaywrightActionExecutor:
                 accept=command.action_type.endswith("ACCEPT"),
                 rules=get_recommendation_rules(),
             )
+        if command.action_type == "RESUME":
+            return self._observe_resume_over_raw_cdp(cdp_url, command)
+        if command.action_type in {
+            "RESUME_CONSENT_ACCEPT",
+            "CONTACT_CONSENT_ACCEPT",
+            "LOCATION_CONSENT_ACCEPT",
+        }:
+            return self._observe_platform_consent_over_raw_cdp(cdp_url, command)
         if command.action_type not in {
             "REPLY",
             "LOW_SCORE_DECLINE",
@@ -958,6 +1116,12 @@ class PlaywrightActionExecutor:
             return ExecutionResult(
                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                 error_code="RECONCILIATION_NOT_SUPPORTED",
+            )
+        raw_baseline = command.observation_baseline.get("sent_message_count")
+        if not isinstance(raw_baseline, int) or raw_baseline < 0:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_BASELINE_MISSING",
             )
         platform = Platform(command.platform)
         selectors = self.config.platforms[platform.value]
@@ -971,16 +1135,7 @@ class PlaywrightActionExecutor:
                     continue
                 with RawCdpPageReader(websocket_url) as page:
                     check = extract_current_page(page, platform, selectors, self.config.version)
-                if (
-                    check.status is SessionStatus.SESSION_READY
-                    and check.conversation
-                    and _conversation_key_matches(
-                        check.conversation.external_conversation_id,
-                        command.conversation_key,
-                    )
-                    and command.recruiter in check.conversation.recruiter_name
-                    and command.job_title in (check.conversation.job_title or "")
-                ):
+                if _reply_target_matches(check, command):
                     matches.append(str(websocket_url))
             if len(matches) != 1:
                 return ExecutionResult(
@@ -992,26 +1147,252 @@ class PlaywrightActionExecutor:
                     ),
                 )
             with RawCdpPageReader(matches[0]) as page:
-                observed = bool(
-                    page._evaluate(
-                        "Array.from(document.querySelectorAll("
-                        f"{json.dumps(selectors.sent_message_items)}"
-                        f")).some(item => (item.textContent || '').includes("
-                        f"{json.dumps(command.content)}))"
-                    )
+                observation = page._evaluate(
+                    "(() => { const items = Array.from(document.querySelectorAll("
+                    f"{json.dumps(selectors.sent_message_items)}));"
+                    f"const baseline = {raw_baseline};"
+                    f"const expected = {json.dumps((command.content or '').strip())};"
+                    "return {count: items.length, matched: items.slice(baseline).some("
+                    "item => (item.textContent || '').trim() === expected)}; })()"
                 )
-                if observed:
+                if isinstance(observation, dict) and observation.get("matched"):
                     return ExecutionResult(
                         outcome=ExecutionOutcome.SUCCEEDED,
                         evidence_hash=hashlib.sha256(
                             f"{page.url}:{command.model_dump_json()}".encode()
                         ).hexdigest(),
                         observed_content=command.content,
+                        write_started=True,
+                        observation_baseline=command.observation_baseline,
                     )
+                if isinstance(observation, dict) and observation.get("count") == raw_baseline:
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                        error_code="RESULT_CONFIRMED_NOT_SENT",
+                        observation_baseline=command.observation_baseline,
+                    )
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="RESULT_NOT_OBSERVED_AFTER_BASELINE",
+                    observation_baseline=command.observation_baseline,
+                )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_READ_ERROR",
+            )
+
+    def _observe_resume_over_raw_cdp(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        baseline = command.observation_baseline.get("sent_resume_count")
+        if not isinstance(baseline, int) or baseline < 0 or not command.attachment_name:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_BASELINE_MISSING",
+            )
+        preparation = self._prepare_conversation_target(cdp_url, command)
+        if preparation is not None:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code=preparation.error_code,
+            )
+        selectors = self.config.platforms[command.platform]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches: list[str] = []
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(str(websocket_url)) as page:
+                    check = extract_current_page(
+                        page, Platform(command.platform), selectors, self.config.version
+                    )
+                if _reply_target_matches(check, command):
+                    matches.append(str(websocket_url))
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="APPROVED_TARGET_PAGE_NOT_UNIQUE",
+                )
+            with RawCdpPageReader(matches[0]) as page:
+                result = page._evaluate(
+                    "(() => { const items=[...document.querySelectorAll("
+                    f"{json.dumps(selectors.sent_resume_items)}"
+                    f")]; const expected={json.dumps(command.attachment_name)};"
+                    f"return {{count:items.length,matched:items.slice({baseline}).some("
+                    "item => (item.textContent||'').trim()===expected)}};})()"
+                )
+            if isinstance(result, dict) and result.get("matched"):
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.SUCCEEDED,
+                    observed_content=command.attachment_name,
+                    write_started=True,
+                    observation_baseline=command.observation_baseline,
+                )
+            if isinstance(result, dict) and result.get("count") == baseline:
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_RETRYABLE,
                     error_code="RESULT_CONFIRMED_NOT_SENT",
+                    observation_baseline=command.observation_baseline,
                 )
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RESULT_NOT_OBSERVED_AFTER_BASELINE",
+                observation_baseline=command.observation_baseline,
+            )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_READ_ERROR",
+            )
+
+    def _observe_greeting_over_raw_cdp(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        baseline = command.observation_baseline.get("sent_message_count")
+        if not isinstance(baseline, int) or baseline < 0:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_BASELINE_MISSING",
+            )
+        selectors = self.config.platforms[command.platform]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches: list[str] = []
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(str(websocket_url)) as page:
+                    check = extract_current_page(
+                        page, Platform(command.platform), selectors, self.config.version
+                    )
+                if (
+                    check.job
+                    and check.job.external_job_id == command.external_job_id
+                    and _identity_text_matches(check.job.company_name, command.company)
+                    and _identity_text_matches(check.job.title, command.job_title)
+                    and _identity_text_matches(check.job.recruiter_name or "", command.recruiter)
+                ):
+                    matches.append(str(websocket_url))
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="APPROVED_TARGET_PAGE_NOT_UNIQUE",
+                )
+            with RawCdpPageReader(matches[0]) as page:
+                if command.delivery_mode == "PLATFORM_DEFAULT":
+                    observed = page.text(selectors.platform_greeting_message)
+                    dialog = page.text(selectors.platform_greeting_dialog)
+                    if observed and dialog and "已发送" in dialog and (
+                        not command.expected_platform_content
+                        or observed == command.expected_platform_content
+                    ):
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.SUCCEEDED,
+                            observed_content=observed,
+                            write_started=True,
+                            observation_baseline=command.observation_baseline,
+                        )
+                result = page._evaluate(
+                    "(() => { const items=[...document.querySelectorAll("
+                    f"{json.dumps(selectors.sent_message_items)}"
+                    f")]; const expected={json.dumps((command.content or '').strip())};"
+                    f"return {{count:items.length,matched:items.slice({baseline}).some("
+                    "item => (item.textContent||'').trim()===expected)}};})()"
+                )
+            if isinstance(result, dict) and result.get("matched"):
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.SUCCEEDED,
+                    observed_content=command.content,
+                    write_started=True,
+                    observation_baseline=command.observation_baseline,
+                )
+            if isinstance(result, dict) and result.get("count") == baseline:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="RESULT_CONFIRMED_NOT_SENT",
+                    observation_baseline=command.observation_baseline,
+                )
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RESULT_NOT_OBSERVED_AFTER_BASELINE",
+                observation_baseline=command.observation_baseline,
+            )
+        except (OSError, TimeoutError, ValueError):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_READ_ERROR",
+            )
+
+    def _observe_platform_consent_over_raw_cdp(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+    ) -> ExecutionResult:
+        if command.observation_baseline.get("consent_state") != "PENDING":
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_BASELINE_MISSING",
+            )
+        preparation = self._prepare_conversation_target(cdp_url, command)
+        if preparation is not None:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code=preparation.error_code,
+            )
+        selectors = self.config.platforms[command.platform]
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                targets = json.loads(response.read())
+            matches: list[str] = []
+            for target in targets:
+                websocket_url = target.get("webSocketDebuggerUrl")
+                if target.get("type") != "page" or not websocket_url:
+                    continue
+                with RawCdpPageReader(str(websocket_url)) as page:
+                    check = extract_current_page(
+                        page, Platform(command.platform), selectors, self.config.version
+                    )
+                if _reply_target_matches(check, command):
+                    matches.append(str(websocket_url))
+            if len(matches) != 1:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                    error_code="APPROVED_TARGET_PAGE_NOT_UNIQUE",
+                )
+            with RawCdpPageReader(matches[0]) as page:
+                state = (
+                    self._location_consent_state(page, command.content or "")
+                    if command.action_type == "LOCATION_CONSENT_ACCEPT"
+                    else self._platform_consent_state(page, command.content or "")
+                )
+            if state in {"ACCEPTED", "MISSING"}:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.SUCCEEDED,
+                    observed_content=command.content,
+                    write_started=True,
+                    observation_baseline=command.observation_baseline,
+                )
+            if state == "PENDING":
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                    error_code="RESULT_CONFIRMED_NOT_SENT",
+                    observation_baseline=command.observation_baseline,
+                )
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="CONSENT_RESULT_NOT_OBSERVED",
+                observation_baseline=command.observation_baseline,
+            )
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
@@ -1027,6 +1408,12 @@ class PlaywrightActionExecutor:
             return ExecutionResult(
                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                 error_code="TELEGRAM_TARGET_INVALID",
+            )
+        baseline = command.observation_baseline.get("sent_message_count")
+        if not isinstance(baseline, int) or baseline < 0:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+                error_code="RECONCILIATION_BASELINE_MISSING",
             )
         try:
             with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
@@ -1051,7 +1438,8 @@ class PlaywrightActionExecutor:
                 existing_draft = self._telegram_composer_content(page)
                 observed = bool(
                     page._evaluate(
-                        "[...document.querySelectorAll('.Message.own')].some("
+                        "[...document.querySelectorAll('.Message.own')]"
+                        f".slice({baseline}).some("
                         "item => (item.innerText || '').includes("
                         f"{json.dumps(command.content)}))"
                     )
@@ -1085,7 +1473,8 @@ class PlaywrightActionExecutor:
         command: ApprovedCommand,
     ) -> ExecutionResult:
         selectors = self.config.platforms[command.platform]
-        performed = False
+        write_started = False
+        baseline: dict[str, object] = {}
         try:
             with RawCdpPageReader(websocket_url) as page:
                 if not command.content:
@@ -1093,6 +1482,11 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_FINAL,
                         error_code="EMPTY_CONTENT",
                     )
+                baseline_count = int(page._evaluate(
+                    "document.querySelectorAll("
+                    f"{json.dumps(selectors.sent_message_items)}).length"
+                ) or 0)
+                baseline = {"sent_message_count": baseline_count}
                 clicked = page._evaluate(
                     "(() => { const element = Array.from(document.querySelectorAll("
                     f"{json.dumps(selectors.job_open_marker)}"
@@ -1104,7 +1498,7 @@ class PlaywrightActionExecutor:
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
                         error_code="GREETING_TRIGGER_NOT_VISIBLE",
                     )
-                performed = True
+                write_started = True
                 if command.delivery_mode == "PLATFORM_DEFAULT":
                     expected = command.expected_platform_content
                     for _ in range(30):
@@ -1119,17 +1513,23 @@ class PlaywrightActionExecutor:
                                     outcome=ExecutionOutcome.SUCCEEDED,
                                     evidence_hash=evidence,
                                     observed_content=observed,
+                                    write_started=True,
+                                    observation_baseline=baseline,
                                 )
                             return ExecutionResult(
                                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                                 error_code="PLATFORM_DEFAULT_CONTENT_MISMATCH",
                                 evidence_hash=evidence,
                                 observed_content=observed,
+                                write_started=True,
+                                observation_baseline=baseline,
                             )
                         time.sleep(0.1)
                     return ExecutionResult(
                         outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                         error_code="PLATFORM_DEFAULT_RESULT_NOT_OBSERVED",
+                        write_started=True,
+                        observation_baseline=baseline,
                     )
                 for _ in range(30):
                     if page.exists(selectors.message_composer):
@@ -1139,6 +1539,8 @@ class PlaywrightActionExecutor:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                         error_code="COMPOSER_NOT_OBSERVED_AFTER_GREETING_TRIGGER",
+                        write_started=True,
+                        observation_baseline=baseline,
                     )
                 filled = page._evaluate(
                     "(() => { const element = document.querySelector("
@@ -1158,6 +1560,8 @@ class PlaywrightActionExecutor:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                         error_code="COMPOSER_FILL_NOT_CONFIRMED",
+                        write_started=True,
+                        observation_baseline=baseline,
                     )
                 sent = page._evaluate(
                     "(() => { const element = Array.from(document.querySelectorAll("
@@ -1169,13 +1573,15 @@ class PlaywrightActionExecutor:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                         error_code="SEND_BUTTON_NOT_OBSERVED",
+                        write_started=True,
+                        observation_baseline=baseline,
                     )
                 for _ in range(30):
                     observed = page._evaluate(
                         "Array.from(document.querySelectorAll("
                         f"{json.dumps(selectors.sent_message_items)}"
-                        f")).some(item => (item.textContent || '').includes("
-                        f"{json.dumps(command.content)}))"
+                        f")).slice({baseline_count}).some(item => "
+                        f"(item.textContent || '').trim() === {json.dumps(command.content.strip())})"
                     )
                     if observed:
                         evidence = hashlib.sha256(
@@ -1184,20 +1590,26 @@ class PlaywrightActionExecutor:
                         return ExecutionResult(
                             outcome=ExecutionOutcome.SUCCEEDED,
                             evidence_hash=evidence,
+                            write_started=True,
+                            observation_baseline=baseline,
                         )
                     time.sleep(0.1)
                 return ExecutionResult(
                     outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                     error_code="RESULT_NOT_OBSERVED",
+                    write_started=True,
+                    observation_baseline=baseline,
                 )
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
                 outcome=(
                     ExecutionOutcome.OUTCOME_UNKNOWN
-                    if performed
+                    if write_started
                     else ExecutionOutcome.FAILED_RETRYABLE
                 ),
                 error_code="RAW_CDP_ACTION_ERROR",
+                write_started=write_started,
+                observation_baseline=baseline,
             )
 
     def execute_on_browser(

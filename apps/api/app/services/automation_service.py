@@ -54,6 +54,44 @@ def list_automatic_actions(session: Session) -> list[dict[str, object]]:
 POLICY_VERSION = "automation-policy-v1"
 
 
+def authorize_automatic_action(
+    session: Session,
+    *,
+    action_type: str,
+    platform: str,
+    strategy_id: UUID,
+    context: AutomationContext,
+    draft_id: UUID | None = None,
+    safety_blockers: list[str] | None = None,
+    input_snapshot: dict[str, object] | None = None,
+) -> tuple[AutomationDecision, list[str], db.PolicyDecision]:
+    """统一保存自动动作授权；浏览器写动作不得绕过该入口。"""
+    if context.action_type != action_type:
+        raise ValueError("动作上下文类型不一致")
+    rules = effective_rules(session, platform, strategy_id)
+    decision, reasons = evaluate_automation(context, rules)
+    if safety_blockers:
+        decision = AutomationDecision.DENY
+        reasons = list(dict.fromkeys(safety_blockers))
+    policy = db.PolicyDecision(
+        user_id=DEFAULT_USER_ID,
+        draft_id=draft_id,
+        action_type=action_type,
+        decision=decision.value,
+        reason_codes=reasons,
+        policy_version=POLICY_VERSION,
+        input_snapshot={
+            "rules": rules.model_dump(mode="json"),
+            "context": context.model_dump(mode="json"),
+            **(input_snapshot or {}),
+        },
+    )
+    session.add(policy)
+    session.flush()
+    _audit(session, "AUTOMATION_DECIDED", policy.id, None, decision.value, reasons)
+    return decision, reasons, policy
+
+
 def upsert_setting(session: Session, payload: AutomationSettingPayload) -> dict[str, object]:
     ensure_default_user(session)
     if payload.scope_type == "GLOBAL" and payload.scope_key != "GLOBAL":
@@ -369,7 +407,7 @@ def _proactive_safety_gaps(job: db.Job, recruiter_name: str) -> list[str]:
     return reasons
 
 
-def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> AutomationRules:
+def effective_rules(session: Session, platform: str, strategy_id: UUID) -> AutomationRules:
     rows = session.scalars(select(db.AutomationSetting).where(
         db.AutomationSetting.user_id == DEFAULT_USER_ID,
         ((db.AutomationSetting.scope_type == "GLOBAL") & (db.AutomationSetting.scope_key == "GLOBAL")) |
@@ -413,6 +451,9 @@ def _effective_rules(session: Session, platform: str, strategy_id: UUID) -> Auto
         rules.work_start_hour = max(rules.work_start_hour, row.work_start_hour)
         rules.work_end_hour = min(rules.work_end_hour, row.work_end_hour)
     return rules
+
+
+_effective_rules = effective_rules
 
 
 def _rules(row: db.AutomationSetting) -> AutomationRules:

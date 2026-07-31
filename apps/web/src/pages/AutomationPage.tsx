@@ -13,6 +13,9 @@ interface SettingForm {
   auto_greet_min_score: number; auto_reply_enabled: boolean
   auto_reply_min_confidence: number; auto_resume_enabled: boolean
   auto_resume_min_score: number
+  low_score_decline_enabled: boolean
+  maimai_recommendation_enabled: boolean
+  maimai_recommendation_resume_enabled: boolean
   emergency_stop: boolean; job_scan_enabled: boolean
   company_cooldown_hours: number; recruiter_cooldown_hours: number
   work_start_hour: number; work_end_hour: number
@@ -52,22 +55,25 @@ export function AutomationPage() {
   const [strategyId, setStrategyId] = useState('')
   const [operations, setOperations] = useState<OperationsStatus>()
   const [strategies, setStrategies] = useState<StrategyOption[]>([])
+  const [settings, setSettings] = useState<SettingForm[]>([])
   const currentWorkers = activeWorkers(operations?.workers)
   const showRequestError = (error: unknown) =>
     message.error(error instanceof Error ? error.message : '操作失败，请稍后重试')
 
   const load = async () => {
-    const [llmStatus, runList, actionList, operationStatus, strategyList] = await Promise.all([
+    const [llmStatus, runList, actionList, operationStatus, strategyList, settingList] = await Promise.all([
       api<LlmStatus>('/system/llm-status'),
       api<{ items: AgentRun[] }>('/automation/runs'),
       api<{ items: AutomaticAction[] }>('/automation/actions'),
       api<OperationsStatus>('/automation/operations/status'),
       api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
+      api<{ items: SettingForm[] }>('/automation/settings'),
     ])
     setLlm(llmStatus); setSelectedLlm(`${llmStatus.provider}:${llmStatus.model}`)
     setRuns(runList.items); setActions(actionList.items)
     setOperations(operationStatus)
     setStrategies(strategyList.items)
+    setSettings(settingList.items)
   }
   useEffect(() => {
     Promise.all([
@@ -76,18 +82,39 @@ export function AutomationPage() {
       api<{ items: AutomaticAction[] }>('/automation/actions'),
       api<OperationsStatus>('/automation/operations/status'),
       api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
-    ]).then(([llmStatus, runList, actionList, operationStatus, strategyList]) => {
+      api<{ items: SettingForm[] }>('/automation/settings'),
+    ]).then(([llmStatus, runList, actionList, operationStatus, strategyList, settingList]) => {
       setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
       setSelectedLlm(`${llmStatus.provider}:${llmStatus.model}`)
       setOperations(operationStatus)
       setStrategies(strategyList.items)
+      setSettings(settingList.items)
+      const globalSetting = settingList.items.find(
+        (item) => item.scope_type === 'GLOBAL' && item.scope_key === 'GLOBAL',
+      )
+      if (globalSetting) form.setFieldsValue(globalSetting)
       if (strategyList.items.length === 1) setStrategyId(strategyList.items[0].id)
     })
-  }, [])
+  }, [form])
 
   const save = async (values: SettingForm) => {
-    await api('/automation/settings', { method: 'PUT', body: JSON.stringify(values) })
+    const updated = await api<SettingForm>('/automation/settings', {
+      method: 'PUT', body: JSON.stringify(values),
+    })
+    setSettings((current) => [
+      ...current.filter((item) =>
+        item.scope_type !== updated.scope_type || item.scope_key !== updated.scope_key),
+      updated,
+    ])
     message.success('自动化配置已保存')
+  }
+  const selectScope = (scopeType: SettingForm['scope_type']) => {
+    const scopeKey = scopeType === 'GLOBAL' ? 'GLOBAL'
+      : scopeType === 'PLATFORM' ? platform : strategyId
+    const existing = settings.find(
+      (item) => item.scope_type === scopeType && item.scope_key === scopeKey,
+    )
+    form.setFieldsValue(existing ?? { scope_type: scopeType, scope_key: scopeKey })
   }
   const saveLlm = async () => {
     const option = llm?.options.find(
@@ -221,9 +248,11 @@ export function AutomationPage() {
       initialValues={{ scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
         auto_greet_enabled: false, auto_greet_min_score: 80, auto_reply_enabled: false,
         auto_reply_min_confidence: .9, auto_resume_enabled: false, auto_resume_min_score: 60,
+        low_score_decline_enabled: true, maimai_recommendation_enabled: false,
+        maimai_recommendation_resume_enabled: false,
         emergency_stop: false, job_scan_enabled: false, company_cooldown_hours: 24,
         recruiter_cooldown_hours: 24, work_start_hour: 8, work_end_hour: 22 }}>
-      <Form.Item name="scope_type" label="范围"><Select options={[
+      <Form.Item name="scope_type" label="范围"><Select onChange={selectScope} options={[
         { value: 'GLOBAL', label: '全局' }, { value: 'PLATFORM', label: '平台' },
         { value: 'STRATEGY', label: '策略' },
       ]} /></Form.Item>
@@ -234,6 +263,9 @@ export function AutomationPage() {
         <Form.Item name="auto_greet_enabled" label="自动招呼" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="auto_reply_enabled" label="自动回复" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="auto_resume_enabled" label="自动简历" valuePropName="checked"><Switch /></Form.Item>
+        <Form.Item name="low_score_decline_enabled" label="低分礼貌拒绝" valuePropName="checked"><Switch /></Form.Item>
+        <Form.Item name="maimai_recommendation_enabled" label="脉脉推荐处理" valuePropName="checked"><Switch /></Form.Item>
+        <Form.Item name="maimai_recommendation_resume_enabled" label="脉脉推荐同意简历" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="job_scan_enabled" label="主动扫描职位" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="emergency_stop" label="紧急停止" valuePropName="checked">
           <Switch aria-label="紧急停止" />
