@@ -18,6 +18,8 @@ def parse_invitation(text: str, received_at: datetime, config: SchedulingConfig)
     zone = ZoneInfo(config.timezone)
     local_received = received_at.astimezone(zone)
     event_type = _event_type(text)
+    if event_type is None:
+        raise ValueError("SCHEDULING_INTENT_NOT_EXPLICIT")
     duration = _duration(event_type, config)
     target_date = _date(text, local_received.date())
     target_time = _time(text)
@@ -92,14 +94,18 @@ def suggest_slots(invitation: ParsedInvitation, slots: list[CalendarBusySlot],
     return result
 
 
-def _event_type(text: str) -> EventType:
+def _event_type(text: str) -> EventType | None:
     if "现场" in text or "到公司" in text:
         return EventType.ONSITE_INTERVIEW
-    if "技术" in text:
+    if "技术面" in text or "技术面试" in text:
         return EventType.TECHNICAL_INTERVIEW
-    if "视频" in text:
+    if "视频面" in text or "视频面试" in text:
         return EventType.VIDEO_INTERVIEW
-    return EventType.PHONE_CALL
+    if any(term in text for term in ("电话", "通话", "语音")):
+        return EventType.PHONE_CALL
+    if "面试" in text:
+        return EventType.TECHNICAL_INTERVIEW
+    return None
 
 
 def _duration(event_type: EventType, config: SchedulingConfig) -> int:
@@ -112,10 +118,16 @@ def _duration(event_type: EventType, config: SchedulingConfig) -> int:
 def _date(text: str, base: date) -> date | None:
     matched = re.search(r"(20\d{2})[-年/](\d{1,2})[-月/](\d{1,2})日?", text)
     if matched:
-        return date(*map(int, matched.groups()))
+        try:
+            return date(*map(int, matched.groups()))
+        except ValueError:
+            return None
     matched = re.search(r"(\d{1,2})月(\d{1,2})日", text)
     if matched:
-        return date(base.year, int(matched.group(1)), int(matched.group(2)))
+        try:
+            return date(base.year, int(matched.group(1)), int(matched.group(2)))
+        except ValueError:
+            return None
     if "后天" in text:
         return base + timedelta(days=2)
     if "明天" in text:
@@ -133,7 +145,10 @@ def _date(text: str, base: date) -> date | None:
 def _time(text: str) -> time | None:
     matched = re.search(r"(\d{1,2}):(\d{2})", text)
     if matched:
-        return time(int(matched.group(1)), int(matched.group(2)))
+        try:
+            return time(int(matched.group(1)), int(matched.group(2)))
+        except ValueError:
+            return None
     matched = re.search(r"(上午|下午|晚上)?([一二三四五六七八九十]{1,2})点(?:半|([0-5]?\d)分?)?", text)
     if not matched:
         return None

@@ -29,6 +29,26 @@ def test_explicit_technical_interview_uses_default_duration() -> None:
     assert (parsed.end_at - parsed.start_at).total_seconds() == 5400
 
 
+def test_generic_chat_is_not_treated_as_phone_call() -> None:
+    with pytest.raises(ValueError, match="SCHEDULING_INTENT_NOT_EXPLICIT"):
+        parse_invitation(
+            "你好，看过简历了，希望和你交流一下",
+            datetime.now(UTC),
+            SchedulingConfig(),
+        )
+
+
+def test_invalid_calendar_date_returns_ambiguous_result() -> None:
+    parsed = parse_invitation(
+        "2026-02-30 10:00 电话沟通",
+        datetime.now(UTC),
+        SchedulingConfig(),
+    )
+
+    assert parsed.start_at is None
+    assert "DATE_AMBIGUOUS" in parsed.risk_codes
+
+
 def test_ambiguous_time_never_claims_calendar_available() -> None:
     parsed = parse_invitation("明天方便视频面试吗", datetime(2026, 7, 21, tzinfo=UTC), SchedulingConfig())
     assert check_calendar(parsed, [], SchedulingConfig()) is CalendarStatus.AMBIGUOUS

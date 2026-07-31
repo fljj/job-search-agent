@@ -11,6 +11,7 @@ from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.job_service import (
     get_job_entity,
     get_parsed_entity,
+    llm_parse_fingerprint,
     parse_job,
     to_job_domain,
     to_parsed_domain,
@@ -112,11 +113,13 @@ def create_score(
 
     llm_provider = provider or build_runtime_llm_provider(session)
     if request.parsed_job_detail_id is None:
+        parse_fingerprint = llm_parse_fingerprint(session, job, llm_provider)
         llm_parsed_record = session.scalar(
             select(db.ParsedJobDetail)
             .where(
                 db.ParsedJobDetail.job_id == job.id,
                 db.ParsedJobDetail.parser_type == "LLM",
+                db.ParsedJobDetail.input_fingerprint == parse_fingerprint,
             )
             .order_by(
                 db.ParsedJobDetail.created_at.desc(),

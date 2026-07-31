@@ -169,6 +169,9 @@ def get_job(session: Session, job_id: object) -> JobResponse:
     return _response(job)
 
 
+LLM_PARSE_SCHEMA_VERSION = "job-parse-schema:1.0.0"
+
+
 def parse_job(
     session: Session,
     job_id: object,
@@ -183,6 +186,14 @@ def parse_job(
         parsed = RuleJobParser(get_job_parser_config()).parse(domain_job)
     elif normalized_mode == "LLM":
         llm_provider = provider or build_runtime_llm_provider(session)
+        parse_fingerprint = llm_parse_fingerprint(session, job, llm_provider)
+        existing = session.scalar(
+            select(db.ParsedJobDetail).where(
+                db.ParsedJobDetail.input_fingerprint == parse_fingerprint
+            )
+        )
+        if existing is not None:
+            return _parsed_response(existing)
         try:
             llm_result = llm_provider.parse_job(domain_job)
         except LlmProviderError as exc:
@@ -220,7 +231,7 @@ def parse_job(
                 ),
             }
         )
-        record_llm_invocation(
+        invocation = record_llm_invocation(
             session,
             user_id=DEFAULT_USER_ID,
             purpose="JOB_PARSE",
@@ -232,6 +243,14 @@ def parse_job(
         raise ValueError("解析模式只支持 RULE 或 LLM")
     record = db.ParsedJobDetail(
         job_id=job.id, parser_type=parsed.parser_type, parser_version=parsed.parser_version,
+        input_fingerprint=(parse_fingerprint if normalized_mode == "LLM" else None),
+        provider=(llm_provider.provider_name if normalized_mode == "LLM" else None),
+        model=(llm_provider.model_name if normalized_mode == "LLM" else None),
+        prompt_version=(
+            llm_provider.prompt_version("parse_job") if normalized_mode == "LLM" else None
+        ),
+        schema_version=(LLM_PARSE_SCHEMA_VERSION if normalized_mode == "LLM" else None),
+        llm_invocation_id=(invocation.id if normalized_mode == "LLM" else None),
         required_skills=parsed.required_skills, preferred_skills=parsed.preferred_skills,
         years_required=parsed.years_required, management_required=parsed.management_required,
         architecture_required=parsed.architecture_required,
@@ -249,6 +268,36 @@ def parse_job(
     session.commit()
     session.refresh(record)
     return _parsed_response(record)
+
+
+def llm_parse_fingerprint(
+    session: Session,
+    job: db.Job,
+    provider: LlmProvider,
+) -> str:
+    profile_versions = session.execute(
+        select(db.CandidateProfile.id, db.CandidateProfile.version).where(
+            db.CandidateProfile.user_id == DEFAULT_USER_ID
+        )
+    ).all()
+    strategy_versions = session.execute(
+        select(db.JobStrategy.id, db.JobStrategy.version).where(
+            db.JobStrategy.user_id == DEFAULT_USER_ID,
+            db.JobStrategy.enabled.is_(True),
+        )
+    ).all()
+    payload = {
+        "job_content_hash": job.content_hash,
+        "provider": provider.provider_name,
+        "model": provider.model_name,
+        "prompt_version": provider.prompt_version("parse_job"),
+        "schema_version": LLM_PARSE_SCHEMA_VERSION,
+        "profile_versions": sorted((str(item[0]), item[1]) for item in profile_versions),
+        "strategy_versions": sorted((str(item[0]), item[1]) for item in strategy_versions),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
 
 
 def get_parsed_entity(session: Session, parsed_id: object) -> db.ParsedJobDetail:

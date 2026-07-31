@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -26,7 +27,13 @@ def build_salary_reply(
         and any(term in content for term in EXPECTATION_TERMS)
         and any(term in content for term in QUESTION_TERMS)
     )
-    if not (explicit_question or conversational_question) or not expectations:
+    contextual_question = bool(
+        re.search(
+            r"(?:您|你)?(?:目前|现在)?(?:的)?期望(?:的)?(?:是|大概是|在)?多少",
+            content,
+        )
+    ) and not any(term in content for term in ("岗位期望", "工作期望", "职业期望"))
+    if not (explicit_question or conversational_question or contextual_question) or not expectations:
         return None
     parts = [
         f"{MODE_LABELS.get(item.work_mode, item.work_mode)}岗位期望月薪"

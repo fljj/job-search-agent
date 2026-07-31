@@ -19,7 +19,7 @@ from apps.api.app.services.action_service import (
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
-from apps.api.app.services.llm_circuit_service import open_llm_circuit
+from apps.api.app.services.llm_circuit_service import llm_circuit_is_open, open_llm_circuit
 from apps.api.app.services.llm_config_service import (
     build_runtime_llm_provider,
     runtime_settings,
@@ -47,7 +47,6 @@ def start_run(session: Session, payload: AgentRunStartRequest) -> dict[str, obje
     strategy = session.get(db.JobStrategy, payload.strategy_id)
     if strategy is None or strategy.user_id != DEFAULT_USER_ID or not strategy.enabled:
         raise ResourceNotFoundError("启用的策略不存在")
-    build_runtime_llm_provider(session)
     rules = _effective_rules(session, payload.platform, strategy.id)
     if not rules.enabled or rules.paused:
         raise ValueError("自动化未启用或已暂停")
@@ -187,7 +186,13 @@ def tick_run(
         if platform_session is None or platform_session.status != "SESSION_READY":
             return pause_run(session, run.id, ["PLATFORM_SESSION_NOT_READY"])
 
-    llm_provider = provider or build_runtime_llm_provider(session, settings)
+    llm_provider = provider
+    if llm_provider is None and not llm_circuit_is_open(session):
+        try:
+            llm_provider = build_runtime_llm_provider(session, settings)
+        except LlmProviderError as exc:
+            open_llm_circuit(session, settings, exc.code, now=current)
+            session.commit()
     calendar_gateway = build_calendar_gateway(settings)
     action_executor = executor or FakeActionExecutor()
     processed = 0
@@ -221,7 +226,9 @@ def tick_run(
             db.Message.direction == "INBOUND",
             db.Message.identity_reliable.is_(True),
             or_(
-                db.Message.status == "RECEIVED",
+                db.Message.status.in_(["RECEIVED", "WAITING_FOR_LLM"])
+                if llm_provider is not None
+                else db.Message.status == "RECEIVED",
                 (
                     (db.Message.status == "RETRY_WAIT")
                     & (db.Message.retry_at <= current)
@@ -251,9 +258,12 @@ def tick_run(
             processed += 1
             _event(session, run.id, "DRAFT_CREATED", "draft", draft.id)
             intent_values = [intent.value for intent in draft.intents]
-            if any(
-                intent in intent_values
-                for intent in ("PHONE_CALL", "INTERVIEW_INVITATION", "INTERVIEW_TIME")
+            if (
+                "INTERVIEW_TIME" in intent_values
+                and any(
+                    intent in intent_values
+                    for intent in ("PHONE_CALL", "INTERVIEW_INVITATION")
+                )
             ):
                 schedule = analyze_invitation(
                     session,
@@ -274,12 +284,13 @@ def tick_run(
             _complete_message(session, message)
         except LlmProviderError as exc:
             open_llm_circuit(session, settings, exc.code, now=current)
-            message.status = "RETRY_WAIT"
-            message.retry_at = current + timedelta(seconds=settings.boss_llm_retry_base_seconds)
+            message.status = "WAITING_FOR_LLM"
+            message.retry_at = None
             message.error_code = exc.code
             message.processing_started_at = None
             _record_failure(session, run, exc.code)
-            return _finish_failed_tick(session, run, current, exc.code)
+            session.commit()
+            continue
         except (ValueError, ResourceNotFoundError) as exc:
             message.status = "QUARANTINED"
             message.error_code = type(exc).__name__

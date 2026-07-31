@@ -99,6 +99,8 @@ def analyze_invitation(session: Session, message_id: UUID,
     _supersede_open_requests(session, conversation.id)
     _supersede_generic_time_confirmations(session, message.id)
     slots = _busy_slots(session)
+    query_start, query_end = _calendar_query_range(parsed, message.received_at)
+    calendar_provider = gateway.provider if gateway else "MOCK"
     if gateway:
         try:
             slots.extend(_provider_slots(gateway, parsed, message.received_at))
@@ -119,14 +121,24 @@ def analyze_invitation(session: Session, message_id: UUID,
     )
     session.add(request)
     session.flush()
-    check = db.CalendarCheck(interview_request_id=request.id, status=status.value,
-                             snapshot_version=_snapshot(session, slots), conflicts=[],
-                             checked_at=datetime.now(UTC))
+    check = db.CalendarCheck(
+        interview_request_id=request.id,
+        status=status.value,
+        snapshot_version=_snapshot(session, slots),
+        conflicts=_conflict_summaries(slots),
+        provider=calendar_provider,
+        query_start_at=query_start,
+        query_end_at=query_end,
+        timezone=parsed.timezone,
+        query_evidence={"slot_count": len(slots), "calendar_available": calendar_available},
+        checked_at=datetime.now(UTC),
+    )
     session.add(check)
     session.flush()
     confirmation = db.ScheduleConfirmation(
         interview_request_id=request.id, calendar_check_id=check.id,
         reply_content=_suggested_reply(parsed, status, candidates),
+        reply_source="HUMAN",
         idempotency_key=f"schedule:{message.id}",
         expires_at=datetime.now(UTC) + timedelta(minutes=config.confirmation_ttl_minutes),
     )
@@ -247,9 +259,19 @@ def execute_schedule(
     status, slots = _recheck_selected(
         session, request, confirmation, config, gateway, calendar_available
     )
+    selected_start = confirmation.selected_start_at
+    selected_end = confirmation.selected_end_at
     latest_check = db.CalendarCheck(
-        interview_request_id=request.id, status=status.value,
-        snapshot_version=_snapshot(session, slots), conflicts=[], checked_at=datetime.now(UTC),
+        interview_request_id=request.id,
+        status=status.value,
+        snapshot_version=_snapshot(session, slots),
+        conflicts=_conflict_summaries(slots),
+        provider=gateway.provider if gateway else "MOCK",
+        query_start_at=(selected_start - timedelta(days=1) if selected_start else None),
+        query_end_at=(selected_end + timedelta(days=1) if selected_end else None),
+        timezone=request.timezone,
+        query_evidence={"slot_count": len(slots), "calendar_available": calendar_available},
+        checked_at=datetime.now(UTC),
     )
     session.add(latest_check)
     session.flush()
@@ -274,7 +296,19 @@ def execute_schedule(
         if conversation:
             conversation.state = "SCHEDULE_CONFIRMED"
         if confirmation.create_calendar_event:
-            _create_confirmed_event(session, request, confirmation, gateway)
+            try:
+                _create_confirmed_event(session, request, confirmation, gateway)
+            except (CalendarProviderUnavailable, OSError, TimeoutError):
+                confirmation.status = "CALENDAR_OUTCOME_UNKNOWN"
+                request.status = "CALENDAR_OUTCOME_UNKNOWN"
+                _audit(
+                    session,
+                    "CALENDAR_CREATE_OUTCOME_UNKNOWN",
+                    confirmation.id,
+                    "SUCCEEDED",
+                    "CALENDAR_OUTCOME_UNKNOWN",
+                    ["CALENDAR_RESULT_NOT_OBSERVED"],
+                )
     session.commit()
     return _request_response(session, request)
 
@@ -485,6 +519,29 @@ def _provider_slots(
         end + timedelta(days=1),
         parsed.timezone,
     )
+
+
+def _calendar_query_range(
+    parsed: ParsedInvitation,
+    received_at: datetime,
+) -> tuple[datetime, datetime]:
+    start = parsed.start_at or received_at
+    end = parsed.end_at or start + timedelta(days=14)
+    return start - timedelta(days=1), end + timedelta(days=1)
+
+
+def _conflict_summaries(
+    slots: list[CalendarBusySlot],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "start_at": slot.start_at.isoformat(),
+            "end_at": slot.end_at.isoformat(),
+            "availability": slot.availability,
+        }
+        for slot in slots
+        if slot.availability in {"BUSY", "TENTATIVE", "OUT_OF_OFFICE"}
+    ]
 
 
 def _suggested_reply(parsed: ParsedInvitation, status: CalendarStatus,

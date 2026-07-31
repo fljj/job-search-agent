@@ -104,11 +104,11 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         "apps.api.app.services.agent_service.build_calendar_gateway", lambda _: None
     )
     monkeypatch.setattr(
-        "apps.api.app.services.score_service.build_llm_provider",
+        "apps.api.app.services.score_service.build_runtime_llm_provider",
         lambda _: FakeLlmProvider(),
     )
     monkeypatch.setattr(
-        "apps.api.app.services.conversation_service.build_llm_provider",
+        "apps.api.app.services.conversation_service.build_runtime_llm_provider",
         lambda _: FakeLlmProvider(),
     )
     profile_response = client.put("/api/v1/profile", json={
@@ -501,8 +501,8 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     assert rejected_result.json()["data"]["status"] == "CANCELLED"
 
     monkeypatch.setattr(
-        "apps.api.app.services.agent_service.build_llm_provider",
-        lambda _: FakeLlmProvider(),
+        "apps.api.app.services.agent_service.build_runtime_llm_provider",
+        lambda *_: FakeLlmProvider(),
     )
     started_run = client.post("/api/v1/automation/runs", json={
         "platform": "MOCK", "strategy_id": strategy_id,
@@ -816,9 +816,20 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
                 provider=FailingLlmProvider(),
                 executor=FakeActionExecutor(),
             )
-    assert failed_tick["status"] == "PAUSED"
-    assert failed_tick["pause_reason_codes"] == ["CONSECUTIVE_LLM_FAILURES"]
-    assert client.post(f"/api/v1/automation/runs/{run_id}/resume").status_code == 200
+    assert failed_tick["status"] == "RUNNING"
+    with Session(lease_engine) as waiting_session:
+        waiting_message = waiting_session.scalar(
+            select(entities.Message).where(
+                entities.Message.external_message_id == "agent-llm-failure"
+            )
+        )
+        assert waiting_message is not None
+        assert waiting_message.status == "WAITING_FOR_LLM"
+        assert waiting_session.scalar(
+            select(entities.GeneratedDraft.id).where(
+                entities.GeneratedDraft.message_id == waiting_message.id
+            )
+        ) is None
 
     safety_conversation = client.post("/api/v1/conversations", json={
         "job_id": job_id,

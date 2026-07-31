@@ -30,6 +30,7 @@ from adapters.browser.message_discovery import (
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from adapters.browser.telegram_jobs import TelegramJobDiscoveryAdapter
+from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings, reload_settings
 from apps.api.app.core.database import SessionLocal
@@ -48,6 +49,7 @@ from apps.api.app.services.job_discovery_service import (
 )
 from apps.api.app.services.llm_circuit_service import (
     llm_circuit_is_open,
+    open_llm_circuit,
     probe_llm_circuit,
 )
 from apps.api.app.services.llm_config_service import (
@@ -247,15 +249,18 @@ def _discover_messages(
         if executor is not None
         else []
     )
-    inbound_score_status = (
-        process_next_inbound_job_score(
-            session,
-            run,
-            build_runtime_llm_provider(session),
-        )
-        if executor is not None
-        else "SKIPPED"
-    )
+    inbound_score_status = "SKIPPED"
+    if executor is not None and not llm_circuit_is_open(session):
+        try:
+            inbound_score_status = process_next_inbound_job_score(
+                session,
+                run,
+                build_runtime_llm_provider(session),
+            )
+        except LlmProviderError as exc:
+            open_llm_circuit(session, get_settings(), exc.code)
+            session.commit()
+            inbound_score_status = "WAITING_FOR_LLM"
     runtime_event(
         logger,
         "MESSAGE_SCAN_COMPLETED",
@@ -619,9 +624,6 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
             select(db.AgentRun.id).where(db.AgentRun.status == "RUNNING")
         ).all()
     for run_id in run_ids:
-        with SessionLocal() as circuit_session:
-            if llm_circuit_is_open(circuit_session):
-                break
         runtime_event(logger, "CYCLE_STARTED", worker_id=worker_id, run_id=run_id)
         try:
             with SessionLocal() as session:

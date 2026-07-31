@@ -75,6 +75,20 @@ def test_conversational_salary_question_uses_rule_reply() -> None:
     )
 
 
+def test_salary_followup_without_salary_word_uses_rule_reply() -> None:
+    routed = route_reply("您目前期望的是多少哇？", _context())
+
+    assert routed.source is ReplySource.RULE_TEMPLATE
+    assert routed.result is not None
+    assert "远程岗位期望月薪25K" in routed.result.content
+
+
+def test_non_salary_expectation_does_not_use_salary_rule() -> None:
+    routed = route_reply("你对这个岗位的期望是什么？", _context())
+
+    assert routed.source is ReplySource.LLM
+
+
 def test_salary_statement_without_question_does_not_trigger_rule_reply() -> None:
     routed = route_reply("这个岗位薪资是10-14K", _context())
 

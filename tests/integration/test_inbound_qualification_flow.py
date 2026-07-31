@@ -183,14 +183,17 @@ def test_explicit_inbound_resume_request_does_not_require_score(
         )
     )
     session.commit()
-    with pytest.raises(ValueError, match="草稿策略决策不匹配"):
+    mismatched_resume_id = (
+        other_resume.id if draft.resume_id != other_resume.id else primary_resume.id
+    )
+    with pytest.raises(ValueError, match="简历附件与草稿策略决策不匹配"):
         dispatch(
             session,
             AutomationDispatchRequest(
                 action_type="RESUME",
                 conversation_id=conversation.id,
                 draft_id=draft.id,
-                resume_id=other_resume.id,
+                resume_id=mismatched_resume_id,
             ),
             executor=FakeActionExecutor(),
         )
@@ -276,7 +279,7 @@ def test_unbound_inbound_message_gets_safe_clarification(
         raise LlmConfigurationError("测试模型未配置")
 
     monkeypatch.setattr(
-        "apps.api.app.services.conversation_service.build_llm_provider",
+        "apps.api.app.services.conversation_service.build_runtime_llm_provider",
         unavailable_provider,
     )
     session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
@@ -324,8 +327,8 @@ def test_unbound_inbound_message_gets_safe_clarification(
 
     assert conversation.qualification_status == "UNKNOWN"
     assert draft.decision.value == "ALLOW_AUTO"
-    assert draft.reason_codes == ["SAFE_JOB_CLARIFICATION"]
-    assert "岗位方向" in draft.content
+    assert draft.reason_codes == ["SAFE_JOB_DETAIL_CLARIFICATION"]
+    assert "岗位职责和技术重点" in draft.content
 
     time_message = import_message(
         session,
@@ -348,10 +351,14 @@ def test_unbound_inbound_message_gets_safe_clarification(
             received_at=datetime.now(UTC),
         ),
     )
-    related_draft = create_reply_draft(session, related_message.id)
+    with pytest.raises(LlmConfigurationError):
+        create_reply_draft(session, related_message.id)
     assert conversation.qualification_status == "ROUGH_MATCH"
-    assert related_draft.decision.value == "ALLOW_AUTO"
-    assert related_draft.reason_codes == ["SAFE_JOB_DETAIL_CLARIFICATION"]
+    assert session.scalar(
+        select(db.GeneratedDraft.id).where(
+            db.GeneratedDraft.message_id == related_message.id
+        )
+    ) is None
 
 
 @pytest.mark.parametrize(

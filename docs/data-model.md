@@ -416,3 +416,12 @@ R2 处理状态补充：`PROCESSING` 表示已取得处理权，`RETRY_WAIT` 保
 - `correlation_id`、`request_id`。
 
 不得在审计元数据中保存密码、Cookie、Token 或无必要的完整敏感内容。页面证据保存受控引用和哈希，不在普通日志中复制敏感页面全文。
+
+## 11. R3 模型与日历证据
+
+- `messages.status=WAITING_FOR_LLM` 表示规则和知识库均未命中、等待模型恢复；该状态没有
+  草稿和外部动作。
+- LLM 类型的 `parsed_job_details` 保存输入指纹、provider、model、prompt/schema 版本和
+  `llm_invocation_id`，只有全部版本一致才允许复用。
+- `calendar_checks` 保存 provider、查询区间、时区和脱敏查询证据；
+  `schedule_confirmations.reply_source` 记录人工来源。

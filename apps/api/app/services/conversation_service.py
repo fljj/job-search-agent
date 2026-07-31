@@ -7,7 +7,7 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from adapters.llm.errors import LlmProviderError
+from adapters.llm.errors import LlmConfigurationError, LlmProviderError
 from apps.api.app.core.conversation_config import get_conversation_policy
 from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
@@ -484,22 +484,17 @@ def create_reply_draft(
     )
     if existing:
         return _draft_response(session, existing)
-    reply_source = ReplySource.LLM
-    if score is not None and llm_provider is not None:
-        try:
-            result = _build_scored_reply(
-                session,
-                conversation,
-                message,
-                score,
-                llm_provider,
-            )
-        except LlmProviderError as exc:
-            result = _llm_failure_handoff(exc.code)
-            reply_source = ReplySource.HUMAN
-    else:
-        result = _llm_failure_handoff("LLM_UNAVAILABLE")
-        reply_source = ReplySource.HUMAN
+    if llm_provider is None:
+        raise LlmConfigurationError("当前消息需要大模型，但模型暂不可用")
+    if score is None:
+        raise LlmConfigurationError("当前消息缺少可用于大模型回复的职位评分")
+    result = _build_scored_reply(
+        session,
+        conversation,
+        message,
+        score,
+        llm_provider,
+    )
     return _persist_draft(
         session,
         result,
@@ -508,7 +503,7 @@ def create_reply_draft(
         conversation.id,
         message.id,
         score.id if score else None,
-        reply_source=reply_source,
+        reply_source=ReplySource.LLM,
     )
 
 
@@ -1180,17 +1175,6 @@ def _safe_job_detail_clarification(
     )
 
 
-def _llm_failure_handoff(failure_code: str) -> DraftResult:
-    return DraftResult(
-        content="这条消息需要人工确认后回复。",
-        intents=[Intent.UNCLEAR],
-        confidence=0,
-        risk_codes=[failure_code],
-        decision=Decision.REQUIRE_CONFIRMATION,
-        reason_codes=["LLM_FAILURE_REQUIRES_HUMAN"],
-    )
-
-
 def _build_scored_reply(
     session: Session,
     conversation: db.Conversation,
@@ -1295,7 +1279,10 @@ def _recent_conversation_context(
     history = list(
         session.scalars(
             select(db.Message)
-            .where(db.Message.conversation_id == conversation.id)
+            .where(
+                db.Message.conversation_id == conversation.id,
+                db.Message.episode_number == conversation.episode_number,
+            )
             .order_by(db.Message.received_at.desc())
             .limit(200)
         ).all()

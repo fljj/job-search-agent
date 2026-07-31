@@ -420,40 +420,40 @@ def effective_rules(session: Session, platform: str, strategy_id: UUID) -> Autom
     global_row = next((row for row in rows if row.scope_type == "GLOBAL"), None)
     if global_row is None:
         return AutomationRules()
-    rules = _rules(global_row)
+    merged = _rules(global_row).model_dump()
     for row in rows:
         if row is global_row:
             continue
-        rules.enabled = rules.enabled and row.enabled
-        rules.paused = rules.paused or row.paused
-        rules.auto_greet_enabled = rules.auto_greet_enabled and row.auto_greet_enabled
-        rules.auto_reply_enabled = rules.auto_reply_enabled and row.auto_reply_enabled
-        rules.low_score_decline_enabled = (
-            rules.low_score_decline_enabled and row.low_score_decline_enabled
+        merged["enabled"] = bool(merged["enabled"]) and row.enabled
+        merged["paused"] = bool(merged["paused"]) or row.paused
+        merged["auto_greet_enabled"] = bool(merged["auto_greet_enabled"]) and row.auto_greet_enabled
+        merged["auto_reply_enabled"] = bool(merged["auto_reply_enabled"]) and row.auto_reply_enabled
+        merged["low_score_decline_enabled"] = (
+            bool(merged["low_score_decline_enabled"]) and row.low_score_decline_enabled
         )
-        rules.auto_resume_enabled = rules.auto_resume_enabled and row.auto_resume_enabled
-        rules.maimai_recommendation_enabled = (
-            rules.maimai_recommendation_enabled
+        merged["auto_resume_enabled"] = bool(merged["auto_resume_enabled"]) and row.auto_resume_enabled
+        merged["maimai_recommendation_enabled"] = (
+            bool(merged["maimai_recommendation_enabled"])
             and row.maimai_recommendation_enabled
         )
-        rules.maimai_recommendation_resume_enabled = (
-            rules.maimai_recommendation_resume_enabled
+        merged["maimai_recommendation_resume_enabled"] = (
+            bool(merged["maimai_recommendation_resume_enabled"])
             and row.maimai_recommendation_resume_enabled
         )
-        rules.auto_greet_min_score = max(rules.auto_greet_min_score, row.auto_greet_min_score)
-        rules.auto_reply_min_confidence = max(rules.auto_reply_min_confidence, float(row.auto_reply_min_confidence))
-        rules.auto_resume_min_score = max(rules.auto_resume_min_score, row.auto_resume_min_score)
-        rules.emergency_stop = rules.emergency_stop or row.emergency_stop
-        rules.job_scan_enabled = rules.job_scan_enabled and row.job_scan_enabled
-        rules.company_cooldown_hours = max(
-            rules.company_cooldown_hours, row.company_cooldown_hours
+        merged["auto_greet_min_score"] = max(int(merged["auto_greet_min_score"]), row.auto_greet_min_score)
+        merged["auto_reply_min_confidence"] = max(float(merged["auto_reply_min_confidence"]), float(row.auto_reply_min_confidence))
+        merged["auto_resume_min_score"] = max(int(merged["auto_resume_min_score"]), row.auto_resume_min_score)
+        merged["emergency_stop"] = bool(merged["emergency_stop"]) or row.emergency_stop
+        merged["job_scan_enabled"] = bool(merged["job_scan_enabled"]) and row.job_scan_enabled
+        merged["company_cooldown_hours"] = max(
+            int(merged["company_cooldown_hours"]), row.company_cooldown_hours
         )
-        rules.recruiter_cooldown_hours = max(
-            rules.recruiter_cooldown_hours, row.recruiter_cooldown_hours
+        merged["recruiter_cooldown_hours"] = max(
+            int(merged["recruiter_cooldown_hours"]), row.recruiter_cooldown_hours
         )
-        rules.work_start_hour = max(rules.work_start_hour, row.work_start_hour)
-        rules.work_end_hour = min(rules.work_end_hour, row.work_end_hour)
-    return rules
+        merged["work_start_hour"] = max(int(merged["work_start_hour"]), row.work_start_hour)
+        merged["work_end_hour"] = min(int(merged["work_end_hour"]), row.work_end_hour)
+    return AutomationRules.model_validate(merged)
 
 
 _effective_rules = effective_rules

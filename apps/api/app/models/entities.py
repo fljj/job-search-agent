@@ -237,11 +237,26 @@ class JobObservation(Base):
 
 class ParsedJobDetail(Base):
     __tablename__ = "parsed_job_details"
-    __table_args__ = (Index("ix_parsed_job_created", "job_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_parsed_job_created", "job_id", "created_at"),
+        Index(
+            "ix_parsed_job_details_input_fingerprint",
+            "input_fingerprint",
+            unique=True,
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
     parser_type: Mapped[str] = mapped_column(String(30))
     parser_version: Mapped[str] = mapped_column(String(50))
+    input_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    schema_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_invocation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("llm_invocations.id", ondelete="SET NULL"), nullable=True
+    )
     required_skills: Mapped[list[str]] = mapped_column(JSONB)
     preferred_skills: Mapped[list[str]] = mapped_column(JSONB)
     years_required: Mapped[Decimal | None] = mapped_column(Numeric(4, 1), nullable=True)
@@ -1001,6 +1016,11 @@ class CalendarCheck(Base):
     status: Mapped[str] = mapped_column(String(30))
     snapshot_version: Mapped[str] = mapped_column(String(64))
     conflicts: Mapped[list[dict[str, object]]] = mapped_column(JSONB, default=list)
+    provider: Mapped[str] = mapped_column(String(30), default="MOCK")
+    query_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    query_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    timezone: Mapped[str] = mapped_column(String(80), default="Asia/Shanghai")
+    query_evidence: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -1014,6 +1034,7 @@ class ScheduleConfirmation(TimestampMixin, Base):
     selected_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     selected_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reply_content: Mapped[str] = mapped_column(Text)
+    reply_source: Mapped[str] = mapped_column(String(30), default="HUMAN")
     create_calendar_event: Mapped[bool] = mapped_column(Boolean, default=False)
     idempotency_key: Mapped[str] = mapped_column(String(200))
     action_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("action_queue.id"), nullable=True)
