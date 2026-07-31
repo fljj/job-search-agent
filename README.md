@@ -1,5 +1,10 @@
 # job-search-agent
 
+> **R0 安全冻结**：代码审查发现真实写动作的授权和对账仍有 P0 风险。R1 完成并验证前，
+> BOSS、脉脉和 Telegram Run 必须保持暂停，全局自动化必须保持“暂停 + 紧急停止”。
+> 当前不要启动无人值守 Worker，也不要恢复任何平台 Run。API、前端、离线夹具、数据库
+> 备份和只读人工检查仍可使用。
+
 面向 BOSS 直聘、脉脉和白名单 Telegram 招聘频道的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
 消息，并按规则发送网站内已有简历；电话和面试的具体时间、登录验证、验证码及安全异常
 仍由用户处理。
@@ -22,8 +27,9 @@
   其余消息才调用 LLM；消息中心展示每条最新草稿的回复来源
 - 职位分析：先执行不消耗 Token 的硬性规则；命中后直接记录排除原因，只有通过的职位
   才进入完整 JD 解析和 AI 评分
-- LLM 熔断：限流、余额/认证、网络或服务异常时暂停全部 Agent 业务，只保留单飞健康
-  探测；总览可查看原因、下次重试时间并手动点击“立即重试 LLM”
+- LLM 熔断目标：只暂停依赖 LLM 的解析、评分、主动招呼和开放式回复，规则/知识库回复、
+  符合条件的入站简历卡片和只读维护继续运行。当前代码仍会暂停整轮业务，整改完成前按
+  上述 R0 安全冻结执行。
 
 API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
 状态的平台任务，不需要为 BOSS、脉脉和 Telegram 分别启动 Worker。
@@ -219,6 +225,9 @@ curl http://127.0.0.1:9222/json/version
 ```
 
 ## 6. 配置并启动 Agent Run
+
+本节保留正式运行配置说明，但 R0 冻结期间不得按本节恢复 Run 或启动 Worker。恢复条件见
+[`docs/code-review-remediation-plan.md`](docs/code-review-remediation-plan.md) 第 11 节。
 
 Worker 进程和平台 Run 是两回事：
 
@@ -425,12 +434,26 @@ npm run build
 DATABASE_URL='postgresql+psycopg://...' scripts/backup_database.sh
 ```
 
+如果宿主机未安装 PostgreSQL 客户端，使用 Docker 容器内工具：
+
+```bash
+docker compose exec -T postgres pg_dump \
+  --format=custom --no-owner --no-acl \
+  --username=job_agent --dbname=job_agent \
+  > backups/job-search-agent-YYYYMMDD-HHMMSS.dump
+chmod 600 backups/job-search-agent-YYYYMMDD-HHMMSS.dump
+```
+
 恢复演练只允许数据库名称包含 `_restore_test`：
 
 ```bash
 RESTORE_DATABASE_URL='postgresql+psycopg://.../job_agent_restore_test' \
   scripts/restore_rehearsal.sh backups/job-search-agent-YYYYMMDD-HHMMSS.dump
 ```
+
+迁移前备份、恢复演练和回滚流程见
+[`docs/database-operations.md`](docs/database-operations.md)。生产/真实数据迁移只向前执行；
+失败时从已验证备份恢复到独立数据库并切换连接，不在原库盲目执行 `alembic downgrade`。
 
 清理运行历史会删除职位、评分、会话、动作、审计和排期数据。先预览，确认目标后才执行：
 
@@ -445,8 +468,10 @@ python scripts/reset_runtime_data.py --confirm-database job_agent --execute
 
 - 不破解验证码、不绕过登录验证、不进行反检测或无限批量投递。
 - 简历只从招聘网站中已经存在的附件选择，不自动上传本地文件。
-- 主动招呼必须通过硬性规则、80 分门槛、模型建议、职位开放状态、自动化开关和限额。
-- 招聘方主动索要简历时不受主动职位评分门槛限制，但仍受资格、重复发送和安全规则约束。
+- 主动招呼必须通过硬性规则、80 分门槛、模型建议、职位开放状态和自动化开关。
+- 招聘方当前消息明确、肯定地索要简历时不受主动职位评分门槛限制；职位信息不足保持
+  `UNKNOWN`，但已证实的完全无关岗位、黑名单、欺诈、重复发送、错误目标和附件不可用
+  仍会阻断。
 - 电话和面试具体时间必须由用户确认，日历空闲不等于自动接受。
 - BOSS 支持职位发现和消息处理；脉脉支持普通消息及系统推荐，暂不支持脉脉职位列表主动发现。
 - 页面身份不一致、登录失效、选择器变化或结果无法确认时，系统会暂停或进入安全对账。
@@ -458,6 +483,7 @@ python scripts/reset_runtime_data.py --confirm-database job_agent --execute
 - [沟通策略](docs/conversation-policy.md)
 - [排期策略](docs/scheduling-policy.md)
 - [架构设计](docs/architecture.md)
+- [数据库运维](docs/database-operations.md)
 - [数据模型](docs/data-model.md)
 - [API 设计](docs/api-design.md)
 - [开发计划](docs/development-plan.md)
