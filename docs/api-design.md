@@ -335,6 +335,8 @@ LLM Provider 创建。普通重复请求按输入指纹返回已有评分。
 - `POST /api/v1/automation/runs`：启动指定平台和策略的 Agent 运行；服务端校验模型配置和自动化开关。
 - `POST /api/v1/automation/runs/{id}/pause`：暂停发现、招呼和自动回复。
 - `POST /api/v1/automation/runs/{id}/resume`：自动化配置恢复安全状态后恢复运行。
+  `RESULT_NOT_OBSERVED` 导致的平台暂停只有在该平台不存在 `OUTCOME_UNKNOWN` 动作时
+  才能恢复；恢复时清除系统设置的对应平台暂停标记，但不绕过全局、策略或紧急停止开关。
 - `POST /api/v1/automation/runs/{id}/tick`：由短周期工作进程携带 `worker_id` 执行一次受租约保护的轮询。
 - `GET /api/v1/automation/runs/{id}`：返回运行状态、最近心跳、动作计数和暂停原因。
 

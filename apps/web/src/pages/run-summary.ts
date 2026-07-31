@@ -12,6 +12,7 @@ const reconnectablePauseReasons = new Set([
   'JOB_DISCOVERY_UNAVAILABLE',
   'RECOMMENDATION_DISCOVERY_UNAVAILABLE',
   'TELEGRAM_DISCOVERY_UNAVAILABLE',
+  'RESULT_NOT_OBSERVED',
 ])
 
 export function activeRuns<T extends RunSummaryItem>(runs: T[]) {

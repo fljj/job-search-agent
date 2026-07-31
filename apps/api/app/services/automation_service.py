@@ -525,8 +525,23 @@ def _pause_platform(session: Session, platform: str, reason: str) -> None:
         db.AutomationSetting.scope_key == platform,
     ))
     if setting is None:
-        setting = db.AutomationSetting(user_id=DEFAULT_USER_ID, scope_type="PLATFORM",
-                                       scope_key=platform, paused=True)
+        global_setting = session.scalar(select(db.AutomationSetting).where(
+            db.AutomationSetting.user_id == DEFAULT_USER_ID,
+            db.AutomationSetting.scope_type == "GLOBAL",
+            db.AutomationSetting.scope_key == "GLOBAL",
+        ))
+        values = (
+            _rules(global_setting).model_dump()
+            if global_setting is not None
+            else AutomationRules().model_dump()
+        )
+        values["paused"] = True
+        setting = db.AutomationSetting(
+            user_id=DEFAULT_USER_ID,
+            scope_type="PLATFORM",
+            scope_key=platform,
+            **values,
+        )
         session.add(setting)
     else:
         setting.paused = True

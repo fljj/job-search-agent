@@ -367,6 +367,7 @@ API 和前端用于控制及观察；Worker 才负责持续读取招聘平台和
 | `PAUSED (MESSAGE_DISCOVERY_UNAVAILABLE)` | 消息页关闭或暂时无法识别 | 重新打开唯一消息页，点击“重新连接” |
 | `PAUSED (JOB_DISCOVERY_UNAVAILABLE)` | BOSS 职位页关闭或无法识别 | 重新打开唯一职位页，点击“重新连接” |
 | `PAUSED (TELEGRAM_DISCOVERY_UNAVAILABLE)` | Telegram Web A 页面或白名单频道暂时无法识别 | 保留唯一 Telegram Web A 页面，点击“重新连接” |
+| `PAUSED (RESULT_NOT_OBSERVED)` | 写操作结果未能即时回读，平台已安全暂停 | 先执行对账；未知动作清零后点击“重新连接” |
 | `STALE` | Worker 心跳超时 | 检查 Worker 终端，确认旧进程停止后重新启动 |
 | `OUTCOME_UNKNOWN` | 无法确认一次写操作是否成功 | 不要直接重试，先在系统设置执行对账 |
 

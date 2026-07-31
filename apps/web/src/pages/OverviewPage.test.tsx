@@ -50,11 +50,15 @@ describe('OverviewPage 重新连接', () => {
     mockOverviewApi()
   })
 
-  it('只允许发现页面不可用的暂停状态快捷重连', () => {
+  it('允许页面不可用或结果已对账的暂停状态快捷重连', () => {
     expect(canReconnectRun(pausedRun)).toBe(true)
     expect(canReconnectRun({
       status: 'PAUSED',
       pause_reason_codes: ['TELEGRAM_DISCOVERY_UNAVAILABLE'],
+    })).toBe(true)
+    expect(canReconnectRun({
+      status: 'PAUSED',
+      pause_reason_codes: ['RESULT_NOT_OBSERVED'],
     })).toBe(true)
     expect(canReconnectRun({
       status: 'PAUSED',

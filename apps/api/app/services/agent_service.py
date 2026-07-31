@@ -120,6 +120,25 @@ def resume_run(session: Session, run_id: UUID) -> dict[str, object]:
         return _response(run)
     if run.status != "PAUSED":
         raise ValueError("只有已暂停的 Agent 可以恢复")
+    if "RESULT_NOT_OBSERVED" in run.pause_reason_codes:
+        unknown_action = session.scalar(
+            select(db.ActionQueue.id).where(
+                db.ActionQueue.platform == run.platform,
+                db.ActionQueue.status == "OUTCOME_UNKNOWN",
+            ).limit(1)
+        )
+        if unknown_action is not None:
+            raise ValueError("仍有发送结果待对账，不能重新连接")
+        platform_setting = session.scalar(
+            select(db.AutomationSetting).where(
+                db.AutomationSetting.user_id == DEFAULT_USER_ID,
+                db.AutomationSetting.scope_type == "PLATFORM",
+                db.AutomationSetting.scope_key == run.platform,
+            )
+        )
+        if platform_setting is not None and platform_setting.paused:
+            platform_setting.paused = False
+            session.flush()
     rules = _effective_rules(session, run.platform, run.strategy_id)
     if not rules.enabled or rules.paused:
         raise ValueError("自动化配置仍处于关闭或暂停状态")
