@@ -42,12 +42,15 @@ class ConversationPayload(BaseModel):
     external_conversation_id: str = Field(min_length=1, max_length=200)
     recruiter_name: str = Field(min_length=1, max_length=100)
     platform: str = "MOCK"
+    recruiter_role: str = "UNKNOWN"
+    identity_reliable: bool = True
 
 
 class MessagePayload(BaseModel):
     external_message_id: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=1, max_length=10000)
     received_at: datetime
+    identity_reliable: bool = True
 
 
 class MessageResponse(BaseModel):

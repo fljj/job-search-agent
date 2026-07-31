@@ -86,13 +86,13 @@ def test_normalizes_boss_company_accessibility_prefix() -> None:
     assert result.job and result.job.company_name == "示例科技"
 
 
-def test_boss_job_with_location_defaults_to_onsite_when_mode_is_absent() -> None:
+def test_boss_job_with_location_keeps_unknown_when_mode_is_absent() -> None:
     page, selectors = job_page(Platform.BOSS)
     page.texts.pop(selectors.work_mode)
 
     result = extract_current_page(page, Platform.BOSS, selectors, "v1")
 
-    assert result.job and result.job.work_mode == "ONSITE"
+    assert result.job and result.job.work_mode == "UNKNOWN"
 
 
 def test_boss_job_title_can_identify_remote_work_mode() -> None:
@@ -240,7 +240,8 @@ def test_maimai_conversation_list_requires_stable_last_message_identity() -> Non
     result = extract_current_page(page, Platform.MAIMAI, selectors, "v1")
 
     assert result.status is SessionStatus.SESSION_PAGE_CHANGED
-    assert result.reason_codes == ["REQUIRED_LAST_MESSAGE_ID_MISSING"]
+    assert result.reason_codes == ["NO_RECOGNIZABLE_CONVERSATION_LIST_ITEM"]
+    assert result.conversations == []
 
 
 def test_extracts_real_boss_conversation_dom_shape() -> None:
@@ -281,7 +282,7 @@ def test_extracts_real_boss_conversation_dom_shape() -> None:
     assert result.conversation.messages[1].direction.value == "OUTBOUND"
 
 
-def test_job_list_missing_required_field_stops_discovery() -> None:
+def test_job_list_pauses_when_no_item_is_recognizable() -> None:
     config = get_browser_selectors()
     selectors = config.platforms["BOSS"]
     page = FakePage(url="https://www.zhipin.com/web/geek/job")
@@ -298,7 +299,8 @@ def test_job_list_missing_required_field_stops_discovery() -> None:
     }
     result = extract_current_page(page, Platform.BOSS, selectors, "v1")
     assert result.status is SessionStatus.SESSION_PAGE_CHANGED
-    assert result.reason_codes == ["REQUIRED_JOB_LIST_FIELD_MISSING"]
+    assert result.reason_codes == ["NO_RECOGNIZABLE_JOB_LIST_ITEM"]
+    assert result.jobs == []
 
 
 def test_job_list_uses_detail_url_when_real_card_has_no_job_id_attribute() -> None:
@@ -329,7 +331,7 @@ def test_job_list_uses_detail_url_when_real_card_has_no_job_id_attribute() -> No
     assert result.jobs[0].external_job_id == "e29439525cc4e0810nd92d64FlBS"
 
 
-def test_invalid_message_time_stops_conversation_read() -> None:
+def test_invalid_message_time_skips_only_invalid_message() -> None:
     config = get_browser_selectors()
     selectors = config.platforms["BOSS"]
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")
@@ -348,8 +350,9 @@ def test_invalid_message_time_stops_conversation_read() -> None:
         ]
     }
     result = extract_current_page(page, Platform.BOSS, selectors, "v1")
-    assert result.status is SessionStatus.SESSION_PAGE_CHANGED
+    assert result.status is SessionStatus.SESSION_READY
     assert result.reason_codes == ["INVALID_MESSAGE_TIME"]
+    assert result.conversation and result.conversation.messages == []
 
 
 @pytest.mark.parametrize(

@@ -114,11 +114,7 @@ def test_boss_message_page_is_reopened_when_missing(
     opened: list[object] = []
     response = MagicMock()
     response.__enter__.return_value = response
-    monkeypatch.setattr(
-        adapter,
-        "_find_list_target",
-        MagicMock(side_effect=ValueError("消息页缺失")),
-    )
+    monkeypatch.setattr(adapter, "_matching_list_targets", MagicMock(return_value=[]))
     monkeypatch.setattr(
         "adapters.browser.message_discovery.urlopen",
         lambda request, timeout: opened.append(request) or response,
@@ -534,14 +530,18 @@ def test_explicit_rejection_terminates_conversation_by_direction() -> None:
         direction=MessageDirection.INBOUND,
     )
 
-    assert _terminal_state_from_messages([outbound]) == (
+    outbound_result = _terminal_state_from_messages([outbound])
+    inbound_result = _terminal_state_from_messages([inbound])
+    assert outbound_result and outbound_result[:2] == (
         "DECLINED",
         "CANDIDATE_EXPLICITLY_DECLINED",
     )
-    assert _terminal_state_from_messages([inbound]) == (
+    assert outbound_result[2] is outbound
+    assert inbound_result and inbound_result[:2] == (
         "ENDED",
         "RECRUITER_EXPLICITLY_DECLINED",
     )
+    assert inbound_result[2] is inbound
 
 
 def test_rejection_question_does_not_terminate_conversation() -> None:

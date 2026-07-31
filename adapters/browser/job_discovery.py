@@ -2,6 +2,7 @@ import json
 import re
 import time
 from datetime import UTC, datetime
+from enum import StrEnum
 from urllib.parse import quote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
@@ -39,6 +40,12 @@ class JobDiscoveryBatch(BaseModel):
     exhausted: bool = False
     next_search_key: str | None = None
     refresh_before_next_scan: bool = False
+
+
+class JobPrefilterState(StrEnum):
+    RELEVANT = "RELEVANT"
+    IRRELEVANT = "IRRELEVANT"
+    UNKNOWN = "UNKNOWN"
 
 
 class BossJobDiscoveryAdapter:
@@ -107,28 +114,17 @@ class BossJobDiscoveryAdapter:
             )
             items = []
             for summary in candidates:
-                if (
-                    direction_title_keywords is not None
-                    and not is_potentially_relevant_title(
-                        summary.title,
-                        direction_title_keywords,
-                    )
-                ):
-                    items.append(
-                        DiscoveredJob(
-                            summary=summary,
-                            reason_codes=["TITLE_DIRECTION_NOT_RELEVANT"],
-                        )
-                    )
-                elif is_obviously_irrelevant_title(
+                prefilter = classify_job_title(
                     summary.title,
-                    irrelevant_title_keywords or [],
-                    relevant_title_keywords or [],
-                ):
+                    direction_keywords=direction_title_keywords or [],
+                    irrelevant_keywords=irrelevant_title_keywords or [],
+                    relevant_keywords=relevant_title_keywords or [],
+                )
+                if prefilter is JobPrefilterState.IRRELEVANT:
                     items.append(
                         DiscoveredJob(
                             summary=summary,
-                            reason_codes=["TITLE_OBVIOUSLY_IRRELEVANT"],
+                            reason_codes=["TITLE_STRONGLY_IRRELEVANT"],
                         )
                     )
                 else:
@@ -413,6 +409,21 @@ def is_potentially_relevant_title(
         for keyword in direction_keywords
         if (normalized_keyword := "".join(keyword.casefold().split()))
     )
+
+
+def classify_job_title(
+    title: str,
+    *,
+    direction_keywords: list[str],
+    irrelevant_keywords: list[str],
+    relevant_keywords: list[str],
+) -> JobPrefilterState:
+    """标题只做强证据预筛；未命中正向词不等于无关。"""
+    if is_obviously_irrelevant_title(title, irrelevant_keywords, relevant_keywords):
+        return JobPrefilterState.IRRELEVANT
+    if is_potentially_relevant_title(title, direction_keywords):
+        return JobPrefilterState.RELEVANT
+    return JobPrefilterState.UNKNOWN
 
 
 def next_job_search(

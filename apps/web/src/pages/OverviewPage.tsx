@@ -2,7 +2,7 @@ import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag, mes
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
-import { activeRuns, agentStatusText, canReconnectRun, runStatusText } from './run-summary'
+import { activeRuns, agentStatusText, canReconnectRun } from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
 
 interface Run {
@@ -15,6 +15,9 @@ interface Operations {
   database_ready: boolean; llm_configured: boolean; unknown_action_count: number
   pending_confirmation_count: number; workers: Array<{ worker_id: string; status: string }>
   discrepancies: unknown[]
+  desired_runs?: Array<{ platform: string; desired_state: string }>
+  platform_readiness?: Array<{ platform: string; status: string; reason_codes: string[] }>
+  capabilities?: { llm: string; calendar: string; executor: string }
   llm_circuit: {
     status: 'CLOSED' | 'OPEN' | 'PROBING'; provider: string; model: string
     failure_code?: string; probe_attempt_count: number; next_probe_at?: string
@@ -118,11 +121,11 @@ export function OverviewPage() {
     </Row>
     <Card title="运行状态" extra={<Button onClick={() => void load()}>刷新</Button>}>
       <Descriptions column={{ xs: 1, md: 2 }} items={[
-        { key: 'run', label: '运行', children: currentRuns.length > 0
+        { key: 'run', label: '期望状态', children: currentRuns.length > 0
           ? <Space size={[4, 4]} wrap>{currentRuns.map((run) =>
             <Space key={run.id} size={4}>
               <Tag color={statusColor(run.status)}>
-                {run.platform}:{runStatusText(run, workerRunning)}
+                {run.platform}:{run.status}
                 {run.status === 'PAUSED' && run.pause_reason_codes.length > 0
                   ? `（${run.pause_reason_codes.join('、')}）` : ''}
               </Tag>
@@ -131,12 +134,19 @@ export function OverviewPage() {
             </Space>)}</Space>
           : <Tag>STOPPED</Tag> },
         { key: 'platform', label: '平台', children:
-          currentRuns.map((item) => item.platform).join('、') || '-' },
+          <Space wrap>{(operations?.platform_readiness ?? []).map((item) =>
+            <Tag key={item.platform} color={item.status === 'SESSION_READY' ? 'green' : 'orange'}>
+              {item.platform}:{item.status}{item.reason_codes.length
+                ? `（${item.reason_codes.join('、')}）` : ''}
+            </Tag>)}</Space> },
         { key: 'worker', label: 'Worker', children: <Tag color={
           currentWorkers.length > 1 ? 'red'
             : currentWorkers[0]?.status === 'STALE' ? 'orange'
               : currentWorkers.length === 1 ? 'green' : 'default'
         }>{workerStatusText(operations?.workers)}</Tag> },
+        { key: 'capabilities', label: '能力', children: operations?.capabilities
+          ? `LLM:${operations.capabilities.llm} / 日历:${operations.capabilities.calendar} / 执行器:${operations.capabilities.executor}`
+          : '-' },
         { key: 'unknown', label: '未知结果', children: operations?.unknown_action_count ?? 0 },
         { key: 'discrepancies', label: '审计差异', children: operations?.discrepancies.length ?? 0 },
         { key: 'conversations', label: '活跃会话', children:

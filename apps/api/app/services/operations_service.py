@@ -300,6 +300,15 @@ def operations_status(session: Session) -> dict[str, object]:
     workers = session.scalars(
         select(db.WorkerInstance).order_by(db.WorkerInstance.started_at.desc()).limit(20)
     ).all()
+    runs = session.scalars(
+        select(db.AgentRun).where(
+            db.AgentRun.user_id == DEFAULT_USER_ID,
+            db.AgentRun.status.in_(["RUNNING", "PAUSED"]),
+        )
+    ).all()
+    platform_sessions = session.scalars(
+        select(db.PlatformSession).where(db.PlatformSession.user_id == DEFAULT_USER_ID)
+    ).all()
     return {
         "database_ready": database_ready,
         "migration_revision": revision,
@@ -326,6 +335,26 @@ def operations_status(session: Session) -> dict[str, object]:
             }
             for item in workers
         ],
+        "desired_runs": [
+            {"platform": item.platform, "desired_state": item.status}
+            for item in runs
+        ],
+        "platform_readiness": [
+            {
+                "platform": item.platform,
+                "status": item.status,
+                "reason_codes": item.last_reason_codes,
+                "last_checked_at": (
+                    item.last_checked_at.isoformat() if item.last_checked_at else None
+                ),
+            }
+            for item in platform_sessions
+        ],
+        "capabilities": {
+            "llm": llm_circuit_status(session, settings)["status"],
+            "calendar": "CONFIGURED" if settings.calendar_provider else "UNAVAILABLE",
+            "executor": "CONFIGURED" if settings.agent_executor_mode in {"REAL", "FAKE"} else "UNAVAILABLE",
+        },
         "unknown_action_count": _count_actions(session, "OUTCOME_UNKNOWN"),
         "pending_confirmation_count": session.scalar(
             select(func.count())

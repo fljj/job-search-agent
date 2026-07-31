@@ -12,7 +12,10 @@ from apps.api.app.core.calendar import build_calendar_gateway
 from apps.api.app.core.config import get_settings
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AgentRunStartRequest, AutomationDispatchRequest
-from apps.api.app.services.action_service import PREWRITE_RETRYABLE_FAILURES
+from apps.api.app.services.action_service import (
+    PREWRITE_PAUSE_FAILURES,
+    PREWRITE_RETRYABLE_FAILURES,
+)
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
@@ -189,6 +192,20 @@ def tick_run(
     action_executor = executor or FakeActionExecutor()
     processed = 0
     failure_count_before = run.failure_count
+    session.execute(
+        update(db.Message)
+        .where(
+            db.Message.status == "PROCESSING",
+            db.Message.processing_started_at < current - timedelta(minutes=5),
+        )
+        .values(
+            status="RETRY_WAIT",
+            retry_at=current,
+            error_code="STALE_MESSAGE_PROCESSING",
+            processing_started_at=None,
+        )
+    )
+    session.commit()
     messages = session.scalars(
         select(db.Message)
         .join(db.Conversation, db.Conversation.id == db.Message.conversation_id)
@@ -202,7 +219,14 @@ def tick_run(
                 ["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]
             ),
             db.Message.direction == "INBOUND",
-            db.Message.status == "RECEIVED",
+            db.Message.identity_reliable.is_(True),
+            or_(
+                db.Message.status == "RECEIVED",
+                (
+                    (db.Message.status == "RETRY_WAIT")
+                    & (db.Message.retry_at <= current)
+                ),
+            ),
             ~select(db.GeneratedDraft.id)
             .where(db.GeneratedDraft.message_id == db.Message.id)
             .exists(),
@@ -211,11 +235,17 @@ def tick_run(
         .limit(settings.agent_tick_batch_size)
     ).all()
     for message in messages:
+        message.status = "PROCESSING"
+        message.attempt_count += 1
+        message.processing_started_at = current
+        message.error_code = None
+        session.commit()
         try:
             if "RESUME_REQUEST" in message.intents:
                 resume = create_resume_draft(session, message.id, llm_provider)
                 processed += 1
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
+                _complete_message(session, message)
                 continue
             draft = create_reply_draft(session, message.id, llm_provider)
             processed += 1
@@ -241,12 +271,30 @@ def tick_run(
             else:
                 resume = create_resume_draft(session, message.id, llm_provider)
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
+            _complete_message(session, message)
         except LlmProviderError as exc:
             open_llm_circuit(session, settings, exc.code, now=current)
+            message.status = "RETRY_WAIT"
+            message.retry_at = current + timedelta(seconds=settings.boss_llm_retry_base_seconds)
+            message.error_code = exc.code
+            message.processing_started_at = None
             _record_failure(session, run, exc.code)
             return _finish_failed_tick(session, run, current, exc.code)
         except (ValueError, ResourceNotFoundError) as exc:
+            message.status = "QUARANTINED"
+            message.error_code = type(exc).__name__
+            message.quarantined_at = current
+            message.processing_started_at = None
             _record_failure(session, run, type(exc).__name__)
+            _event(
+                session,
+                run.id,
+                "MESSAGE_QUARANTINED",
+                "message",
+                message.id,
+                [type(exc).__name__],
+            )
+            session.commit()
 
     drafts = _pending_drafts(session, run, settings.agent_tick_batch_size)
     for generated_draft, conversation, resume_id in drafts:
@@ -314,6 +362,13 @@ def tick_run(
             run.failure_count += 1
             reasons = [code] if code in SAFETY_FAILURE_CODES else [str(result["action_status"])]
             return _pause_after_failure(session, run, reasons)
+        if (
+            result.get("action_status") == "FAILED_RETRYABLE"
+            and result.get("failure_code") in PREWRITE_PAUSE_FAILURES
+        ):
+            return _pause_after_failure(
+                session, run, [str(result.get("failure_code"))]
+            )
 
     run.processed_count += processed
     if run.failure_count == failure_count_before:
@@ -478,6 +533,12 @@ def _isolate_dispatch_error(
         str(exc),
     )
     if action is None:
+        decision = session.scalar(
+            select(db.PolicyDecision).where(db.PolicyDecision.draft_id == draft.id)
+        )
+        if decision is not None:
+            decision.decision = "DENY"
+            decision.reason_codes = ["DISPATCH_DATA_ERROR"]
         _event(
             session,
             run.id,
@@ -508,8 +569,9 @@ def _isolate_dispatch_error(
         session.flush()
         return True
     if action.status == "APPROVED":
-        action.status = "FAILED_RETRYABLE"
-        action.failure_code = "DISPATCH_PREWRITE_ERROR"
+        action.status = "FAILED_FINAL"
+        action.failure_code = "DISPATCH_DATA_ERROR"
+        action.finished_at = current
     if action.status == "FAILED_RETRYABLE":
         # 推迟当前失败动作，使下一轮可以选择队列中的下一条到期动作。
         action.updated_at = current
@@ -566,6 +628,14 @@ def _record_failure(session: Session, run: db.AgentRun, code: str) -> None:
     run.consecutive_failure_count += 1
     _event(session, run.id, "TICK_FAILURE", reason_codes=[code])
     session.flush()
+
+
+def _complete_message(session: Session, message: db.Message) -> None:
+    message.status = "COMPLETED"
+    message.retry_at = None
+    message.error_code = None
+    message.processing_started_at = None
+    session.commit()
 
 
 def _pause_after_failure(

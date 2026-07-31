@@ -9,6 +9,8 @@ from adapters.browser.job_discovery import (
     BossJobDiscoveryAdapter,
     DiscoveredJob,
     JobDiscoveryBatch,
+    JobPrefilterState,
+    classify_job_title,
     is_job_list_exhausted,
     is_obviously_irrelevant_title,
     is_potentially_relevant_title,
@@ -249,6 +251,25 @@ def test_ambiguous_business_titles_are_not_in_default_irrelevant_config(
             "Mod",
         ],
     )
+
+
+def test_title_prefilter_keeps_unknown_direction_for_one_detail_read() -> None:
+    assert classify_job_title(
+        "银行系统研发",
+        direction_keywords=["Java"],
+        irrelevant_keywords=["施工", "园林", "纯客服"],
+        relevant_keywords=[],
+    ) is JobPrefilterState.UNKNOWN
+
+
+@pytest.mark.parametrize("title", ["结构专业总工", "园林养护经理", "纯客服"])
+def test_title_prefilter_rejects_only_strong_irrelevant_evidence(title: str) -> None:
+    assert classify_job_title(
+        title,
+        direction_keywords=["Java", "研发"],
+        irrelevant_keywords=["结构专业", "园林", "纯客服"],
+        relevant_keywords=[],
+    ) is JobPrefilterState.IRRELEVANT
 
 
 def test_virtual_list_exhausts_when_cursor_stops_and_no_new_job_is_visible() -> None:
@@ -495,7 +516,6 @@ def test_target_close_closes_the_exact_worker_job(
         ({"source_status": "CLOSED"}, "JOB_NOT_OPEN"),
         ({"external_job_id": None}, "EXTERNAL_JOB_ID_MISSING"),
         ({"company_name": "匿名公司"}, "ANONYMOUS_COMPANY"),
-        ({"work_mode": "UNKNOWN"}, "WORK_MODE_UNKNOWN"),
         ({"recruiter_name": None}, "RECRUITER_UNKNOWN"),
     ],
 )
@@ -507,6 +527,13 @@ def test_proactive_contact_requires_complete_safe_job(
     for field, value in changes.items():
         setattr(job, field, value)
     assert reason in _job_safety_reasons(job)
+
+
+def test_unknown_work_mode_does_not_skip_scoring_preflight() -> None:
+    job = detail(summary(1)).job
+    assert job is not None
+    job.work_mode = "UNKNOWN"
+    assert "WORK_MODE_UNKNOWN" not in _job_safety_reasons(job)
 
 
 def test_proactive_contact_allows_salary_to_be_confirmed_later() -> None:

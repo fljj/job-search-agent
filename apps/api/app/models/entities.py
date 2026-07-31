@@ -220,6 +220,21 @@ class Job(TimestampMixin, Base):
     raw_data: Mapped[dict[str, object]] = mapped_column(JSONB)
 
 
+class JobObservation(Base):
+    __tablename__ = "job_observations"
+    __table_args__ = (
+        UniqueConstraint("job_id", "content_hash"),
+        Index("ix_job_observations_job_observed", "job_id", "observed_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict[str, object]] = mapped_column(JSONB)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ParsedJobDetail(Base):
     __tablename__ = "parsed_job_details"
     __table_args__ = (Index("ix_parsed_job_created", "job_id", "created_at"),)
@@ -384,6 +399,15 @@ class Conversation(TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(30), default="MOCK")
     external_conversation_id: Mapped[str] = mapped_column(String(200))
     recruiter_name: Mapped[str] = mapped_column(String(100))
+    recruiter_role: Mapped[str] = mapped_column(
+        String(30), default="UNKNOWN", server_default="UNKNOWN"
+    )
+    identity_reliable: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    episode_number: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    terminal_message_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     observed_company_name: Mapped[str | None] = mapped_column(
         String(200), nullable=True
     )
@@ -424,6 +448,19 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     intents: Mapped[list[str]] = mapped_column(JSONB, default=list)
     status: Mapped[str] = mapped_column(String(30), default="RECEIVED")
+    identity_reliable: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
+    episode_number: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    quarantined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -796,6 +833,10 @@ class JobDiscoveryRecord(Base):
         ForeignKey("action_queue.id", ondelete="SET NULL"), nullable=True
     )
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    prefilter_state: Mapped[str] = mapped_column(
+        String(20), default="UNKNOWN", server_default="UNKNOWN"
+    )
+    prefilter_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
     retry_count: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0"
     )
@@ -829,6 +870,18 @@ class WorkerInstance(Base):
         DateTime(timezone=True), nullable=True
     )
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+
+
+class BrowserPageRegistration(TimestampMixin, Base):
+    __tablename__ = "browser_page_registrations"
+    __table_args__ = (UniqueConstraint("platform", "page_role"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    platform: Mapped[str] = mapped_column(String(30))
+    page_role: Mapped[str] = mapped_column(String(40))
+    target_id: Mapped[str] = mapped_column(String(200))
+    agent_owned: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(30), default="READY")
+    last_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class LlmCircuitBreaker(TimestampMixin, Base):

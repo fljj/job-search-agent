@@ -347,6 +347,10 @@ SESSION_PAUSED
 
 消息状态：`RECEIVED/SUPERSEDED/ANALYZING/DRAFT/PENDING_APPROVAL/APPROVED/SENDING/SENT/DECLINED/FAILED/OUTCOME_UNKNOWN`。同一会话中尚未生成草稿的连续旧入站消息标为 `SUPERSEDED`，仅最新消息触发一次草稿；旧消息仍保留作为模型上下文和审计证据。
 
+R2 处理状态补充：`PROCESSING` 表示已取得处理权，`RETRY_WAIT` 保存类型化错误、尝试次数
+和下次重试时间，`QUARANTINED` 表示确定性坏数据或身份不可靠且只能经人工重放接口恢复。
+消息与会话均保存 `identity_reliable` 和 `episode_number`；会话另保存终态消息与时间证据。
+
 对话状态不能替代单条消息或动作状态。
 
 ### 8.6 第十二阶段运行治理
@@ -356,6 +360,11 @@ SESSION_PAUSED
 - `reconciliation_tasks`：每个动作唯一，保存 `PENDING/IN_PROGRESS/RESOLVED/
   MANUAL_REQUIRED`、尝试次数、下次尝试、截止时间和最后错误码。
 - 对账任务只能只读回查平台，不能授权或重发 `OUTCOME_UNKNOWN` 动作。
+- `job_observations`：按 `job_id + content_hash` 唯一保存职位详情版本快照；职位正文变化时
+  更新当前职位并追加新观察，历史观察不覆盖。
+- `job_discovery_records.prefilter_state/prefilter_reason`：保存三态标题预筛及原因。
+- `browser_page_registrations`：按 `platform + page_role` 唯一保存常驻页目标、所有权、状态和
+  最近核验时间；多个同角色页面记为歧义，不能任意选择。
 
 ### 8.7 正式自动化控制
 

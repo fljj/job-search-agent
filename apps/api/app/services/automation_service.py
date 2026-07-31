@@ -211,6 +211,9 @@ def dispatch(
         qualification_status=conversation.qualification_status,
     )
     decision, reasons = evaluate_automation(context, rules)
+    if inbound_action and not conversation.identity_reliable:
+        decision = AutomationDecision.DENY
+        reasons = ["CONVERSATION_IDENTITY_UNRELIABLE"]
     policy = db.PolicyDecision(
         user_id=DEFAULT_USER_ID, draft_id=draft.id, action_type=payload.action_type,
         decision=decision.value, reason_codes=reasons, policy_version=POLICY_VERSION,

@@ -70,6 +70,9 @@ def process_job_discovery_batch(
         _state_event(session, run, item, "VERIFYING_JOB")
         if item.detail is None or item.detail.job is None or item.reason_codes:
             reasons = item.reason_codes or ["JOB_DETAIL_MISSING"]
+            if "TITLE_STRONGLY_IRRELEVANT" in reasons:
+                record.prefilter_state = "IRRELEVANT"
+                record.prefilter_reason = "TITLE_STRONGLY_IRRELEVANT"
             retryable_reason = next(
                 (
                     reason
@@ -90,6 +93,8 @@ def process_job_discovery_batch(
                 break
             continue
         source = item.detail.job
+        record.prefilter_state = "RELEVANT"
+        record.prefilter_reason = "DETAIL_OBSERVED"
         safety = _job_safety_reasons(source)
         if safety:
             _finish(record, "SKIPPED", safety)
@@ -338,8 +343,6 @@ def _job_safety_reasons(job: object) -> list[str]:
         reasons.append("EXTERNAL_JOB_ID_MISSING")
     if not job.company_name or job.company_name in {"匿名公司", "某公司", "保密"}:
         reasons.append("ANONYMOUS_COMPANY")
-    if job.work_mode == "UNKNOWN":
-        reasons.append("WORK_MODE_UNKNOWN")
     if not job.recruiter_name:
         reasons.append("RECRUITER_UNKNOWN")
     return reasons

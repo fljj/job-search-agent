@@ -1,8 +1,7 @@
 import hashlib
 import json
-from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
@@ -27,15 +26,45 @@ from packages.llm.ports import LlmProvider
 def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse:
     ensure_default_user(session)
     content_hash = _content_hash(payload)
-    filters: list[Any] = [db.Job.content_hash == content_hash]
+    existing_by_external = None
     if payload.external_job_id:
-        filters.append(db.Job.external_job_id == payload.external_job_id)
-    existing = session.scalar(select(db.Job).where(
+        existing_by_external = session.scalar(select(db.Job).where(
+            db.Job.user_id == DEFAULT_USER_ID,
+            db.Job.source == payload.source,
+            db.Job.external_job_id == payload.external_job_id,
+        ))
+    existing_by_content = session.scalar(select(db.Job).where(
         db.Job.user_id == DEFAULT_USER_ID,
         db.Job.source == payload.source,
-        or_(*filters),
+        db.Job.content_hash == content_hash,
     ))
+    if (
+        existing_by_external is not None
+        and existing_by_content is not None
+        and existing_by_external.id != existing_by_content.id
+    ):
+        _record_job_observation(session, existing_by_content)
+        session.commit()
+        return JobImportResponse(result="DUPLICATE", job=_response(existing_by_content))
+    existing = existing_by_external or existing_by_content
     if existing:
+        if existing.content_hash != content_hash and existing_by_external is not None:
+            _record_job_observation(session, existing)
+            values = payload.model_dump(exclude={"published_at", "work_mode", "source_status"})
+            for key, value in values.items():
+                if key != "external_job_id":
+                    setattr(existing, key, value)
+            existing.content_hash = content_hash
+            existing.published_at = payload.published_at
+            existing.work_mode = payload.work_mode.value
+            existing.source_status = payload.source_status.value
+            existing.raw_data = payload.model_dump(mode="json")
+            _record_job_observation(session, existing)
+            session.commit()
+            session.refresh(existing)
+            return JobImportResponse(result="UPDATED", job=_response(existing))
+        _record_job_observation(session, existing)
+        session.commit()
         return JobImportResponse(result="DUPLICATE", job=_response(existing))
     job = db.Job(
         user_id=DEFAULT_USER_ID, content_hash=content_hash,
@@ -45,9 +74,34 @@ def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse
         source_status=payload.source_status.value,
     )
     session.add(job)
+    session.flush()
+    _record_job_observation(session, job)
     session.commit()
     session.refresh(job)
     return JobImportResponse(result="CREATED", job=_response(job))
+
+
+def _record_job_observation(session: Session, job: db.Job) -> None:
+    if session.scalar(select(db.JobObservation.id).where(
+        db.JobObservation.job_id == job.id,
+        db.JobObservation.content_hash == job.content_hash,
+    )):
+        return
+    session.add(db.JobObservation(
+        job_id=job.id,
+        content_hash=job.content_hash,
+        snapshot={
+            "title": job.title,
+            "company_name": job.company_name,
+            "industry": job.industry,
+            "location": job.location,
+            "work_mode": job.work_mode,
+            "salary_text": job.salary_text,
+            "description": job.description,
+            "source_status": job.source_status,
+            "raw_data": job.raw_data,
+        },
+    ))
 
 
 def list_jobs(

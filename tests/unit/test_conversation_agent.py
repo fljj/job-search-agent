@@ -9,7 +9,11 @@ from apps.api.app.services.conversation_service import (
     _safe_job_detail_clarification,
 )
 from packages.conversation_agent.generator import generate_greeting, generate_reply
-from packages.conversation_agent.intents import classify_intents, normalize_intents
+from packages.conversation_agent.intents import (
+    classify_intents,
+    is_explicit_resume_request,
+    normalize_intents,
+)
 from packages.conversation_agent.models import ConversationPolicyConfig, Decision, Intent
 from packages.knowledge_base.models import KnowledgeFact
 from packages.llm.models import ConversationMemory
@@ -51,6 +55,25 @@ def test_arrival_date_is_not_misclassified_as_interview_time() -> None:
         "最快到岗时间是多久？",
         [Intent.ARRIVAL_DATE, Intent.INTERVIEW_TIME],
     ) == [Intent.ARRIVAL_DATE]
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("麻烦发送一份简历", True),
+        ("方便发简历吗", True),
+        ("我已经看过简历了", False),
+        ("简历不太合适", False),
+        ("简历里没看到项目经验", False),
+        ("不用发简历", False),
+    ],
+)
+def test_explicit_resume_request_requires_current_positive_request(
+    content: str,
+    expected: bool,
+) -> None:
+    assert is_explicit_resume_request(content) is expected
+    assert (Intent.RESUME_REQUEST in classify_intents(content)) is expected
 
 
 def test_generic_conversation_cannot_be_upgraded_to_phone_or_interview() -> None:

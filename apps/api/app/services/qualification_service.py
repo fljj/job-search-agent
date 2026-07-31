@@ -60,6 +60,7 @@ def refresh_qualification(
     if (
         conversation.qualification_status == QualificationStatus.MISMATCH.value
         and status is QualificationStatus.UNKNOWN
+        and not (conversation.recruiter_role == "HEADHUNTER" and job is None)
     ):
         status = QualificationStatus.MISMATCH
         evidence = conversation.qualification_evidence
@@ -84,7 +85,15 @@ def _context(
         company_name=(
             job.company_name if job else conversation.observed_company_name
         ),
-        job_title=job.title if job else conversation.observed_job_title,
+        job_title=(
+            job.title
+            if job
+            else (
+                None
+                if conversation.recruiter_role == "HEADHUNTER"
+                else conversation.observed_job_title
+            )
+        ),
         industry=job.industry if job else None,
         location=job.location if job else None,
         work_mode=work_mode,

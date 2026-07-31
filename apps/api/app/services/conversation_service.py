@@ -82,6 +82,11 @@ def create_conversation(session: Session, payload: ConversationPayload) -> dict[
         )
     )
     if existing:
+        if not payload.identity_reliable:
+            existing.identity_reliable = False
+        if payload.recruiter_role != "UNKNOWN":
+            existing.recruiter_role = payload.recruiter_role
+        session.commit()
         return _conversation_response(existing)
     conversation = db.Conversation(user_id=DEFAULT_USER_ID, **payload.model_dump())
     session.add(conversation)
@@ -100,6 +105,9 @@ def reopen_conversation(
         return _conversation_response(conversation)
     before_state = conversation.state
     conversation.state = "ACTIVE"
+    conversation.episode_number += 1
+    conversation.terminal_message_id = None
+    conversation.terminal_at = None
     conversation.processing_lease_owner = None
     conversation.processing_lease_expires_at = None
     session.add(
@@ -119,6 +127,40 @@ def reopen_conversation(
     session.commit()
     session.refresh(conversation)
     return _conversation_response(conversation)
+
+
+def replay_message(session: Session, message_id: object) -> MessageResponse:
+    """人工修复数据后重新投放一条已隔离消息，不绕过身份约束。"""
+    message = session.get(db.Message, message_id)
+    if message is None:
+        raise ResourceNotFoundError("消息不存在")
+    if message.status != "QUARANTINED":
+        raise ValueError("只有已隔离消息可以人工重放")
+    if not message.identity_reliable:
+        raise ValueError("消息身份不可靠，不能自动重放")
+    if session.scalar(select(db.GeneratedDraft.id).where(
+        db.GeneratedDraft.message_id == message.id
+    )):
+        raise ValueError("消息已经生成草稿，不能重复重放")
+    message.status = "RECEIVED"
+    message.retry_at = None
+    message.error_code = None
+    message.processing_started_at = None
+    message.quarantined_at = None
+    session.add(db.AuditEvent(
+        user_id=DEFAULT_USER_ID,
+        actor_type="USER",
+        event_type="MESSAGE_REPLAY_REQUESTED",
+        entity_type="message",
+        entity_id=message.id,
+        before_state="QUARANTINED",
+        after_state="RECEIVED",
+        reason_codes=["USER_REPLAY_AFTER_DATA_FIX"],
+        metadata_json={"attempt_count": message.attempt_count},
+        correlation_id=f"message-replay:{message.id}",
+    ))
+    session.commit()
+    return _message_response(message)
 
 
 IGNORED_PLATFORM_EVENTS = {
@@ -172,6 +214,8 @@ def import_message(
         conversation_id=conversation.id,
         direction="INBOUND",
         intents=[intent.value for intent in intents],
+        episode_number=conversation.episode_number,
+        status=("RECEIVED" if payload.identity_reliable else "AWAITING_IDENTITY"),
         **payload.model_dump(),
     )
     session.add(message)

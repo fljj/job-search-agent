@@ -1,6 +1,8 @@
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
@@ -205,14 +207,16 @@ def persist_discovery_batch(
                 external_conversation_id=item.summary.external_conversation_id,
                 recruiter_name=item.summary.recruiter_name,
                 platform=batch.platform.value,
+                recruiter_role=_recruiter_role(item),
+                identity_reliable=(
+                    item.summary.identity_reliable
+                    and bool(item.detail.conversation and item.detail.conversation.identity_reliable)
+                ),
             ),
         )
         conversation = session.get(db.Conversation, conversation_data["id"])
         if conversation is None:
             raise RuntimeError("消息发现创建对话失败")
-        if conversation.state in TERMINAL_CONVERSATION_STATES:
-            counts["skipped"] += 1
-            continue
         if not _acquire_conversation_lease(session, conversation.id, worker_id, current):
             counts["skipped"] += 1
             continue
@@ -225,10 +229,39 @@ def persist_discovery_batch(
         conversation.latest_job_score_id = score.id if score else None
         conversation.observed_company_name = detail.company_name or item.summary.company_name
         conversation.observed_job_title = detail.job_title or item.summary.job_title
+        previous_external_job_id = conversation.observed_external_job_id
         conversation.observed_external_job_id = (
             detail.external_job_id or item.summary.external_job_id
         )
-        conversation.state = "ACTIVE"
+        known_message_ids = set(
+            session.scalars(
+                select(db.Message.external_message_id).where(
+                    db.Message.conversation_id == conversation.id
+                )
+            ).all()
+        )
+        new_messages = [
+            message for message in detail.messages
+            if message.external_message_id not in known_message_ids
+        ]
+        if conversation.state in TERMINAL_CONVERSATION_STATES:
+            if not new_messages:
+                conversation.processing_lease_owner = None
+                conversation.processing_lease_expires_at = None
+                counts["skipped"] += 1
+                continue
+            if _starts_new_episode(previous_external_job_id, item, new_messages):
+                conversation.episode_number += 1
+                conversation.state = "ACTIVE"
+                conversation.terminal_message_id = None
+                conversation.terminal_at = None
+            else:
+                conversation.processing_lease_owner = None
+                conversation.processing_lease_expires_at = None
+                counts["skipped"] += 1
+                continue
+        else:
+            conversation.state = "ACTIVE"
         _record_state_sequence(session, run, item, ["DECIDING"])
         for message in detail.messages:
             if message.direction is not MessageDirection.INBOUND:
@@ -246,15 +279,18 @@ def persist_discovery_batch(
                     external_message_id=message.external_message_id,
                     content=message.content,
                     received_at=message.received_at,
+                    identity_reliable=message.identity_reliable,
                 ),
             )
             if before is None:
                 counts["imported"] += 1
-        terminal_state = _terminal_state_from_messages(detail.messages)
+        terminal_state = _terminal_state_from_messages(new_messages)
         if terminal_state is not None:
-            state, reason_code = terminal_state
+            state, reason_code, terminal_message = terminal_state
             before_state = conversation.state
             conversation.state = state
+            conversation.terminal_message_id = terminal_message.external_message_id
+            conversation.terminal_at = terminal_message.received_at
             conversation.processing_lease_owner = None
             conversation.processing_lease_expires_at = None
             session.add(
@@ -388,6 +424,8 @@ def _queue_platform_consents(
         if not consent.pending:
             continue
         safety_blockers: list[str] = []
+        if not conversation.identity_reliable:
+            safety_blockers.append("CONVERSATION_IDENTITY_UNRELIABLE")
         if score is not None and score.hard_rejected:
             safety_blockers.append("JOB_HARD_REJECTED")
         if consent.consent_type.value == "LOCATION":
@@ -523,7 +561,7 @@ def _location_consent_allowed(
 
 def _terminal_state_from_messages(
     messages: list[BrowserMessage],
-) -> tuple[str, str] | None:
+) -> tuple[str, str, BrowserMessage] | None:
     for message in reversed(messages):
         content = message.content
         normalized = "".join(content.split())
@@ -536,10 +574,34 @@ def _terminal_state_from_messages(
         if not any(marker in normalized for marker in TERMINAL_REJECTION_MARKERS):
             continue
         if message.direction is MessageDirection.OUTBOUND:
-            return "DECLINED", "CANDIDATE_EXPLICITLY_DECLINED"
+            return "DECLINED", "CANDIDATE_EXPLICITLY_DECLINED", message
         if message.direction is MessageDirection.INBOUND:
-            return "ENDED", "RECRUITER_EXPLICITLY_DECLINED"
+            return "ENDED", "RECRUITER_EXPLICITLY_DECLINED", message
     return None
+
+
+def _starts_new_episode(
+    previous_external_job_id: str | None,
+    item: DiscoveredConversation,
+    messages: list[BrowserMessage],
+) -> bool:
+    observed_job_id = (
+        item.detail.conversation.external_job_id
+        if item.detail and item.detail.conversation
+        else item.summary.external_job_id
+    )
+    if observed_job_id and observed_job_id != previous_external_job_id:
+        return True
+    return any(
+        any(marker in "".join(message.content.split()) for marker in CONVERSATION_REOPEN_MARKERS)
+        for message in messages
+    )
+
+
+def _recruiter_role(item: DiscoveredConversation) -> str:
+    title = "".join((item.summary.job_title or "").split())
+    has_actual_job = bool(item.job_detail and item.job_detail.job)
+    return "HEADHUNTER" if "猎头" in title and not has_actual_job else "DIRECT_EMPLOYER"
 
 
 def _next_seen_message_keys(
@@ -588,7 +650,77 @@ def record_ready_platform_session(
     record.status = "SESSION_READY"
     record.last_reason_codes = []
     record.last_checked_at = datetime.now(UTC)
+    try:
+        with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+            targets = json.loads(response.read())
+        role_targets: dict[str, list[str]] = {}
+        for target in targets:
+            target_id = str(target.get("id") or "")
+            role = _page_role(run.platform, str(target.get("url") or ""))
+            if not target_id or role is None:
+                continue
+            role_targets.setdefault(role, []).append(target_id)
+        for role, target_ids in role_targets.items():
+            registration = session.scalar(
+                select(db.BrowserPageRegistration).where(
+                    db.BrowserPageRegistration.platform == run.platform,
+                    db.BrowserPageRegistration.page_role == role,
+                )
+            )
+            if registration is None:
+                registration = db.BrowserPageRegistration(
+                    platform=run.platform,
+                    page_role=role,
+                    target_id=target_ids[0],
+                    agent_owned=False,
+                    status="READY" if len(target_ids) == 1 else "AMBIGUOUS",
+                    last_verified_at=datetime.now(UTC),
+                )
+                session.add(registration)
+            else:
+                registration.target_id = target_ids[0]
+                registration.status = "READY" if len(target_ids) == 1 else "AMBIGUOUS"
+                registration.last_verified_at = datetime.now(UTC)
+    except (OSError, TimeoutError, ValueError):
+        pass
     session.flush()
+
+
+def record_platform_session_failure(
+    session: Session,
+    run: db.AgentRun,
+    reason_code: str,
+) -> None:
+    record = session.scalar(select(db.PlatformSession).where(
+        db.PlatformSession.user_id == DEFAULT_USER_ID,
+        db.PlatformSession.platform == run.platform,
+    ))
+    if record is None:
+        record = db.PlatformSession(
+            user_id=DEFAULT_USER_ID,
+            platform=run.platform,
+            cdp_endpoint="http://127.0.0.1:9222",
+            status="SESSION_UNAVAILABLE",
+        )
+        session.add(record)
+    record.status = "SESSION_UNAVAILABLE"
+    record.last_reason_codes = [reason_code]
+    record.last_checked_at = datetime.now(UTC)
+    session.flush()
+
+
+def _page_role(platform: str, url: str) -> str | None:
+    path = urlparse(url).path
+    if platform == "BOSS":
+        if path == "/web/geek/chat":
+            return "MESSAGE_LIST"
+        if path in {"/web/geek/jobs", "/web/geek/job"}:
+            return "JOB_LIST"
+    if platform == "MAIMAI" and "feed_im" in path:
+        return "MESSAGE_LIST"
+    if platform == "TELEGRAM" and url.startswith("https://web.telegram.org/"):
+        return "CHANNEL_LIST"
+    return None
 
 
 def _resolve_job(

@@ -99,7 +99,9 @@ def _extract_job_list(
     version: str,
 ) -> ReadResult:
     jobs: list[BrowserJobSummary] = []
-    for element in page.elements(selectors.job_list_items):
+    diagnostics: list[str] = []
+    elements = page.elements(selectors.job_list_items)
+    for element in elements:
         detail_url = element.attribute(selectors.job_list_item_link, "href")
         external_id = element.attribute(
             "", selectors.job_list_item_id_attribute
@@ -107,15 +109,11 @@ def _extract_job_list(
         title = element.text(selectors.job_list_item_title)
         company = _normalize_company_name(element.text(selectors.job_list_item_company))
         if not external_id:
+            diagnostics.append("JOB_LIST_ITEM_ID_MISSING")
             continue
         if not title or not company:
-            return _failure(
-                page,
-                platform,
-                version,
-                SessionStatus.SESSION_PAGE_CHANGED,
-                "REQUIRED_JOB_LIST_FIELD_MISSING",
-            )
+            diagnostics.append("REQUIRED_JOB_LIST_FIELD_MISSING")
+            continue
         jobs.append(
             BrowserJobSummary(
                 external_job_id=external_id,
@@ -124,12 +122,19 @@ def _extract_job_list(
                 detail_url=detail_url,
             )
         )
-    if not jobs:
+    if elements and not jobs:
         return _failure(
-            page, platform, version, SessionStatus.SESSION_PAGE_CHANGED, "JOB_LIST_EMPTY"
+            page,
+            platform,
+            version,
+            SessionStatus.SESSION_PAGE_CHANGED,
+            "NO_RECOGNIZABLE_JOB_LIST_ITEM",
         )
     cursor = page.attribute(selectors.job_list_root, selectors.next_cursor_attribute)
-    return _success(page, platform, version, PageType.JOB_LIST, jobs=jobs, cursor=cursor)
+    return _success(
+        page, platform, version, PageType.JOB_LIST, jobs=jobs, cursor=cursor,
+        reason_codes=list(dict.fromkeys(diagnostics)),
+    )
 
 
 def _extract_job(
@@ -166,8 +171,6 @@ def _extract_job(
     work_mode = _normalize_work_mode(page.text(selectors.work_mode))
     if work_mode == "UNKNOWN":
         work_mode = _normalize_work_mode(title)
-    if platform is Platform.BOSS and work_mode == "UNKNOWN" and location:
-        work_mode = "ONSITE"
     job = BrowserJob(
         external_job_id=(
             page.attribute(selectors.job_id, "data-job-id") or _job_id_from_url(page.url)
@@ -192,33 +195,28 @@ def _extract_conversation_list(
     version: str,
 ) -> ReadResult:
     conversations: list[BrowserConversationSummary] = []
-    for element in page.elements(selectors.conversation_list_items):
-        external_id = _stable_id(
+    diagnostics: list[str] = []
+    elements = page.elements(selectors.conversation_list_items)
+    for element in elements:
+        raw_external_id = (
             element.attribute("", selectors.conversation_list_item_id_attribute)
-            or element.attribute("", "d-c"),
+            or element.attribute("", "d-c")
+        )
+        external_id = _stable_id(
+            raw_external_id,
             selectors.conversation_list_item_id_json_key,
         )
         recruiter = element.text(selectors.conversation_list_item_recruiter)
         if not external_id or not recruiter:
-            return _failure(
-                page,
-                platform,
-                version,
-                SessionStatus.SESSION_PAGE_CHANGED,
-                "REQUIRED_CONVERSATION_LIST_FIELD_MISSING",
-            )
+            diagnostics.append("REQUIRED_CONVERSATION_LIST_FIELD_MISSING")
+            continue
         unread = element.attribute("", selectors.conversation_list_item_unread_attribute)
         if not unread and selectors.conversation_list_item_unread_selector:
             unread = element.text(selectors.conversation_list_item_unread_selector)
         unread_count = _unread_count(unread)
         if unread_count is None:
-            return _failure(
-                page,
-                platform,
-                version,
-                SessionStatus.SESSION_PAGE_CHANGED,
-                "INVALID_UNREAD_COUNT",
-            )
+            diagnostics.append("INVALID_UNREAD_COUNT")
+            continue
         last_message_text = (
             element.text(selectors.conversation_list_item_last_message)
             if selectors.conversation_list_item_last_message
@@ -237,13 +235,8 @@ def _extract_conversation_list(
                 f"{external_id}:{last_message_time_text or ''}:{last_message_text or ''}"
             )
         if selectors.conversation_list_requires_last_message_id and not last_message_id:
-            return _failure(
-                page,
-                platform,
-                version,
-                SessionStatus.SESSION_PAGE_CHANGED,
-                "REQUIRED_LAST_MESSAGE_ID_MISSING",
-            )
+            diagnostics.append("REQUIRED_LAST_MESSAGE_ID_MISSING")
+            continue
         conversations.append(
             BrowserConversationSummary(
                 external_conversation_id=external_id,
@@ -263,11 +256,16 @@ def _extract_conversation_list(
                     or "ALL"
                 ),
                 unread_count=unread_count,
+                identity_reliable=bool(raw_external_id),
             )
         )
-    if not conversations:
+    if elements and not conversations:
         return _failure(
-            page, platform, version, SessionStatus.SESSION_PAGE_CHANGED, "CONVERSATION_LIST_EMPTY"
+            page,
+            platform,
+            version,
+            SessionStatus.SESSION_PAGE_CHANGED,
+            "NO_RECOGNIZABLE_CONVERSATION_LIST_ITEM",
         )
     cursor = page.attribute(selectors.conversation_list_root, selectors.next_cursor_attribute)
     return _success(
@@ -277,6 +275,7 @@ def _extract_conversation_list(
         PageType.CONVERSATION_LIST,
         conversations=conversations,
         cursor=cursor,
+        reason_codes=list(dict.fromkeys(diagnostics)),
     )
 
 
@@ -287,8 +286,11 @@ def _extract_conversation(
     version: str,
     expected_recruiter: str | None,
 ) -> ReadResult:
+    raw_conversation_id = page.attribute(
+        selectors.conversation_id, selectors.conversation_id_attribute
+    )
     conversation_id = _stable_id(
-        page.attribute(selectors.conversation_id, selectors.conversation_id_attribute),
+        raw_conversation_id,
         selectors.conversation_id_json_key,
     )
     recruiter = page.text(selectors.recruiter)
@@ -309,20 +311,17 @@ def _extract_conversation(
             "RECRUITER_TARGET_MISMATCH",
         )
     messages: list[BrowserMessage] = []
-    for index, element in enumerate(page.elements(selectors.message_items)):
+    message_diagnostics: list[str] = []
+    for element in page.elements(selectors.message_items):
         content = element.text(selectors.message_content)
         if not content:
             continue
-        external_id = element.attribute("", selectors.message_id_attribute) or _hash(
-            f"{conversation_id}:{index}:{content}"
-        )
         raw_time = element.attribute("", selectors.message_time_attribute)
         try:
             received_at = datetime.fromisoformat(raw_time) if raw_time else datetime.now(UTC)
         except ValueError:
-            return _failure(
-                page, platform, version, SessionStatus.SESSION_PAGE_CHANGED, "INVALID_MESSAGE_TIME"
-            )
+            message_diagnostics.append("INVALID_MESSAGE_TIME")
+            continue
         direction_value = element.attribute("", selectors.message_direction_attribute)
         style_value = element.attribute("", "style")
         class_names = (element.attribute("", "class") or "").split()
@@ -335,12 +334,18 @@ def _extract_conversation(
             )
             else MessageDirection.INBOUND
         )
+        platform_message_id = element.attribute("", selectors.message_id_attribute)
+        normalized_content = " ".join(content.split())
+        external_id = platform_message_id or _hash(
+            f"{conversation_id}:{direction.value}:{raw_time or 'UNKNOWN'}:{normalized_content}"
+        )
         messages.append(
             BrowserMessage(
                 external_message_id=external_id,
                 content=content,
                 received_at=received_at,
                 direction=direction,
+                identity_reliable=bool(platform_message_id or raw_time),
             )
         )
     company = page.text(selectors.conversation_company or selectors.company)
@@ -417,8 +422,13 @@ def _extract_conversation(
         external_job_id=page.attribute(selectors.conversation_root, "data-job-id"),
         messages=messages,
         platform_consents=platform_consents,
+        identity_reliable=bool(raw_conversation_id),
     )
-    return _success(page, platform, version, PageType.CONVERSATION, conversation=conversation)
+    return _success(
+        page, platform, version, PageType.CONVERSATION,
+        conversation=conversation,
+        reason_codes=list(dict.fromkeys(message_diagnostics)),
+    )
 
 
 def _success(
@@ -431,6 +441,7 @@ def _success(
     jobs: list[BrowserJobSummary] | None = None,
     conversations: list[BrowserConversationSummary] | None = None,
     cursor: str | None = None,
+    reason_codes: list[str] | None = None,
 ) -> ReadResult:
     return ReadResult(
         platform=platform,
@@ -445,6 +456,7 @@ def _success(
         jobs=jobs or [],
         conversations=conversations or [],
         cursor=cursor,
+        reason_codes=reason_codes or [],
     )
 
 

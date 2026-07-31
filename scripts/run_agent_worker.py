@@ -20,8 +20,8 @@ from adapters.browser.job_discovery import (
     BossJobDiscoveryAdapter,
     DiscoveredJob,
     JobDiscoveryBatch,
-    is_obviously_irrelevant_title,
-    is_potentially_relevant_title,
+    JobPrefilterState,
+    classify_job_title,
 )
 from adapters.browser.message_discovery import (
     BossMessageDiscoveryAdapter,
@@ -58,6 +58,7 @@ from apps.api.app.services.message_discovery_service import (
     execute_pending_platform_consents,
     persist_discovery_batch,
     process_next_inbound_job_score,
+    record_platform_session_failure,
     record_ready_platform_session,
 )
 from apps.api.app.services.operations_service import (
@@ -145,14 +146,27 @@ def _discover_messages(
     cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
     raw_position = cursor.get("scroll_position")
     raw_seen = cursor.get("seen_message_keys")
-    terminal_conversation_ids = list(
+    blocked_conversation_ids = list(
         session.scalars(
             select(db.Conversation.external_conversation_id).where(
                 db.Conversation.platform == run.platform,
-                db.Conversation.state.in_(["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]),
+                db.Conversation.state.in_(["PAUSED", "OUTCOME_UNKNOWN"]),
             )
         ).all()
     )
+    terminal_message_ids = {
+        str(conversation_id): str(message_id)
+        for conversation_id, message_id in session.execute(
+            select(
+                db.Conversation.external_conversation_id,
+                db.Conversation.terminal_message_id,
+            ).where(
+                db.Conversation.platform == run.platform,
+                db.Conversation.state.in_(["ENDED", "DECLINED"]),
+                db.Conversation.terminal_message_id.is_not(None),
+            )
+        ).all()
+    }
     known_linked_job_ids = {
         str(conversation_id): str(external_job_id)
         for conversation_id, external_job_id in session.execute(
@@ -174,11 +188,15 @@ def _discover_messages(
             seen_message_keys=[
                 str(item) for item in (raw_seen if isinstance(raw_seen, list) else [])
             ],
-            excluded_conversation_ids=terminal_conversation_ids,
+            excluded_conversation_ids=blocked_conversation_ids,
+            terminal_message_ids=terminal_message_ids,
             known_linked_job_ids=known_linked_job_ids,
             limit=get_settings().agent_tick_batch_size,
         )
     except (OSError, TimeoutError, ValueError) as exc:
+        record_platform_session_failure(
+            session, run, "MESSAGE_DISCOVERY_UNAVAILABLE"
+        )
         if isinstance(adapter, BossMessageDiscoveryAdapter):
             try:
                 reopened = adapter.ensure_list_page(cdp_url)
@@ -392,10 +410,11 @@ def _run_boss_job_discovery(
                 *parser_config.relevant_title_keywords,
                 *relevant_title_keywords,
             ],
-            limit=1 if retry_job_id else get_settings().boss_job_batch_size,
+            limit=1,
             interval_seconds=get_settings().boss_job_scan_interval_seconds,
         )
     except (OSError, TimeoutError, ValueError) as exc:
+        record_platform_session_failure(session, run, "JOB_DISCOVERY_UNAVAILABLE")
         runtime_event(
             logger,
             "JOB_SCAN_FAILED",
@@ -411,19 +430,18 @@ def _run_boss_job_discovery(
         )
         pause_run(session, run.id, ["JOB_DISCOVERY_UNAVAILABLE"])
         return
-    try:
-        process_job_discovery_batch(
-            session,
-            run,
-            job_batch,
-            provider=build_runtime_llm_provider(session),
-            executor=executor,
-            cdp_url=cdp_url,
-        )
-        if retry_record is not None and not job_batch.items:
-            mark_retry_target_not_visible(session, retry_record)
-    finally:
-        adapter.close_details(cdp_url, job_batch)
+    # 详情已经完整快照到内存；在 LLM 等慢操作前立即释放 Agent 自建标签页。
+    adapter.close_details(cdp_url, job_batch)
+    process_job_discovery_batch(
+        session,
+        run,
+        job_batch,
+        provider=build_runtime_llm_provider(session),
+        executor=executor,
+        cdp_url=cdp_url,
+    )
+    if retry_record is not None and not job_batch.items:
+        mark_retry_target_not_visible(session, retry_record)
     runtime_event(
         logger,
         "JOB_SCAN_COMPLETED",
@@ -463,6 +481,9 @@ def _run_telegram_job_discovery(
             seen_post_ids=[item for item in seen_post_ids if item not in retryable_ids],
         )
     except (OSError, TimeoutError, ValueError) as exc:
+        record_platform_session_failure(
+            session, run, "TELEGRAM_DISCOVERY_UNAVAILABLE"
+        )
         runtime_event(
             logger,
             "TELEGRAM_DISCOVERY_FAILED",
@@ -488,19 +509,17 @@ def _run_telegram_job_discovery(
     )
     items: list[DiscoveredJob] = []
     for post in discovered.posts:
-        if not is_potentially_relevant_title(
+        prefilter = classify_job_title(
             post.job.title,
-            [*parser_config.relevant_title_keywords, *relevant],
-        ):
-            reasons = ["TITLE_DIRECTION_NOT_RELEVANT"]
-        elif is_obviously_irrelevant_title(
-            post.job.title,
-            irrelevant,
-            relevant,
-        ):
-            reasons = ["TITLE_OBVIOUSLY_IRRELEVANT"]
-        else:
-            reasons = []
+            direction_keywords=[*parser_config.relevant_title_keywords, *relevant],
+            irrelevant_keywords=irrelevant,
+            relevant_keywords=relevant,
+        )
+        reasons = (
+            ["TITLE_STRONGLY_IRRELEVANT"]
+            if prefilter is JobPrefilterState.IRRELEVANT
+            else []
+        )
         items.append(
             DiscoveredJob(
                 summary={

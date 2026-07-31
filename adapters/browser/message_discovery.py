@@ -60,6 +60,7 @@ class MessageDiscoveryAdapter:
         scroll_position: int = 0,
         seen_message_keys: list[str] | None = None,
         excluded_conversation_ids: list[str] | None = None,
+        terminal_message_ids: dict[str, str] | None = None,
         known_linked_job_ids: dict[str, str] | None = None,
         limit: int = 20,
     ) -> MessageDiscoveryBatch:
@@ -84,6 +85,11 @@ class MessageDiscoveryAdapter:
                 if _matches_partition(item, partition)
                 and self._include_summary(item)
                 and item.external_conversation_id not in excluded
+                and not (
+                    item.external_conversation_id in (terminal_message_ids or {})
+                    and item.last_message_id
+                    == (terminal_message_ids or {}).get(item.external_conversation_id)
+                )
             ]
             candidates = select_discovery_candidates(
                 eligible,
@@ -130,6 +136,16 @@ class MessageDiscoveryAdapter:
             )
 
     def _find_list_target(self, cdp_url: str) -> str:
+        matches = self._matching_list_targets(cdp_url)
+        if len(matches) != 1:
+            raise ValueError(
+                f"未找到唯一 {self.platform.value} 消息列表页"
+                if not matches
+                else f"检测到多个 {self.platform.value} 消息列表页"
+            )
+        return matches[0]
+
+    def _matching_list_targets(self, cdp_url: str) -> list[str]:
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
             targets = json.loads(response.read())
         matches: list[str] = []
@@ -147,13 +163,7 @@ class MessageDiscoveryAdapter:
                         matches.append(str(websocket_url))
             except (OSError, TimeoutError, ValueError):
                 continue
-        if len(matches) != 1:
-            raise ValueError(
-                f"未找到唯一 {self.platform.value} 消息列表页"
-                if not matches
-                else f"检测到多个 {self.platform.value} 消息列表页"
-            )
-        return matches[0]
+        return matches
 
     def _include_summary(self, _summary: BrowserConversationSummary) -> bool:
         return True
@@ -379,17 +389,18 @@ class BossMessageDiscoveryAdapter(MessageDiscoveryAdapter):
     def ensure_list_page(self, cdp_url: str) -> bool:
         """消息页缺失时重新创建；返回是否执行了恢复。"""
         validate_local_cdp_url(cdp_url)
-        try:
-            self._find_list_target(cdp_url)
+        matches = self._matching_list_targets(cdp_url)
+        if len(matches) == 1:
             return False
-        except ValueError:
-            request = Request(
-                f"{cdp_url.rstrip('/')}/json/new?"
-                f"{quote(self.list_page_url, safe=':/?=&%')}",
-                method="PUT",
-            )
-            with urlopen(request, timeout=3):
-                return True
+        if len(matches) > 1:
+            raise ValueError("检测到多个 BOSS 消息列表页，禁止继续自动创建")
+        request = Request(
+            f"{cdp_url.rstrip('/')}/json/new?"
+            f"{quote(self.list_page_url, safe=':/?=&%')}",
+            method="PUT",
+        )
+        with urlopen(request, timeout=3):
+            return True
 
 
 class MaimaiMessageDiscoveryAdapter(MessageDiscoveryAdapter):
@@ -478,6 +489,7 @@ def _normalize_duplicate_conversation_ids(
         item.external_conversation_id = (
             f"derived:{hashlib.sha256(identity.encode()).hexdigest()}"
         )
+        item.identity_reliable = False
 
 
 def select_discovery_candidates(

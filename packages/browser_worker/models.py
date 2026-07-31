@@ -69,6 +69,7 @@ class BrowserMessage(BaseModel):
     content: str
     received_at: datetime
     direction: MessageDirection = MessageDirection.INBOUND
+    identity_reliable: bool = True
 
 
 class BrowserConversationSummary(BaseModel):
@@ -82,6 +83,7 @@ class BrowserConversationSummary(BaseModel):
     last_message_time_text: str | None = None
     category: str = "ALL"
     unread_count: int = 0
+    identity_reliable: bool = True
 
 
 class BrowserConversation(BaseModel):
@@ -92,6 +94,7 @@ class BrowserConversation(BaseModel):
     external_job_id: str | None = None
     messages: list[BrowserMessage] = Field(default_factory=list)
     platform_consents: list[BrowserPlatformConsent] = Field(default_factory=list)
+    identity_reliable: bool = True
 
 
 class ReadResult(BaseModel):

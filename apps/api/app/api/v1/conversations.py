@@ -22,6 +22,7 @@ from apps.api.app.services.conversation_service import (
     import_message,
     list_conversations,
     reopen_conversation,
+    replay_message,
 )
 from apps.api.app.services.qualification_service import (
     evaluate_conversation_qualification,
@@ -68,6 +69,14 @@ def reopen(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     return response(reopen_conversation(session, conversation_id))
+
+
+@router.post("/messages/{message_id}/replay")
+def replay(
+    message_id: UUID,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    return response(replay_message(session, message_id))
 
 
 @router.get("/conversations/{conversation_id}/qualification")
