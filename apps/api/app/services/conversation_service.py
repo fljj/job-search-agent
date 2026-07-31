@@ -1284,31 +1284,56 @@ def _full_time_education_reply(
     session: Session,
     message: db.Message,
 ) -> DraftResult | None:
-    inquiry_terms = ("全日制", "统招", "学历性质")
-    if not any(term in message.content for term in inquiry_terms):
-        return None
-    profile = session.scalar(
-        select(db.CandidateProfile).where(db.CandidateProfile.user_id == DEFAULT_USER_ID)
+    explicit_inquiry_terms = ("全日制", "统招", "学历性质", "在职", "学信网", "学历可查")
+    general_inquiry = "学历" in message.content and any(
+        term in message.content for term in ("吗", "么", "呢", "是否", "什么", "哪", "?", "？")
     )
-    if profile is None or profile.bachelor_full_time is not False:
+    if not any(term in message.content for term in explicit_inquiry_terms) and not general_inquiry:
         return None
-    fact = session.scalar(
-        select(db.KnowledgeItem).where(
-            db.KnowledgeItem.user_id == DEFAULT_USER_ID,
-            db.KnowledgeItem.category == "EDUCATION",
-            db.KnowledgeItem.normalized_key == "本科学习形式",
-            db.KnowledgeItem.allowed_for_auto_reply.is_(True),
-            db.KnowledgeItem.sensitivity == "NORMAL",
-        )
+
+    facts = list(
+        session.scalars(
+            select(db.KnowledgeItem).where(
+                db.KnowledgeItem.user_id == DEFAULT_USER_ID,
+                db.KnowledgeItem.category == "EDUCATION",
+                db.KnowledgeItem.normalized_key.in_(
+                    ["专科学习形式", "本科学习形式", "硕士研究生学习形式"]
+                ),
+                db.KnowledgeItem.allowed_for_auto_reply.is_(True),
+                db.KnowledgeItem.sensitivity == "NORMAL",
+            )
+        ).all()
     )
+    facts_by_key = {fact.normalized_key: fact for fact in facts}
+    if not facts_by_key:
+        return None
+
+    content = "我的专科和硕士研究生属于统招，本科不是统招；硕士研究生是在职就读。以上学历均可在学信网查询。"
+    selected_keys = ["专科学习形式", "本科学习形式", "硕士研究生学习形式"]
+    if "本科" in message.content and not any(
+        term in message.content for term in ("专科", "硕士", "研究生")
+    ):
+        content = "我的本科不是统招、不是全日制，学历可在学信网查询。"
+        selected_keys = ["本科学习形式"]
+    elif "专科" in message.content and not any(
+        term in message.content for term in ("本科", "硕士", "研究生")
+    ):
+        content = "我的专科属于统招，学历可在学信网查询。"
+        selected_keys = ["专科学习形式"]
+    elif any(term in message.content for term in ("硕士", "研究生")) and not any(
+        term in message.content for term in ("专科", "本科")
+    ):
+        content = "我的硕士研究生属于统招，为在职就读，学历可在学信网查询。"
+        selected_keys = ["硕士研究生学习形式"]
+
     return DraftResult(
-        content="我的本科不是全日制，供您确认是否符合岗位要求。",
+        content=content,
         intents=[Intent.EDUCATION],
-        fact_ids=[fact.id] if fact else [],
+        fact_ids=[facts_by_key[key].id for key in selected_keys if key in facts_by_key],
         confidence=1,
         risk_codes=[],
         decision=Decision.ALLOW_AUTO,
-        reason_codes=["FULL_TIME_EDUCATION_QUESTION_ANSWERED"],
+        reason_codes=["VERIFIED_EDUCATION_QUESTION_ANSWERED"],
     )
 
 

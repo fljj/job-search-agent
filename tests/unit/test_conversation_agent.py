@@ -125,35 +125,45 @@ def test_greetings_differ_by_job_and_use_verified_fact() -> None:
 
 
 class _EducationSession:
-    def __init__(self, bachelor_full_time: bool | None) -> None:
-        self.bachelor_full_time = bachelor_full_time
-        self.fact_id = uuid4()
+    def __init__(self) -> None:
+        self.fact_ids = {
+            key: uuid4() for key in ("专科学习形式", "本科学习形式", "硕士研究生学习形式")
+        }
         self.calls = 0
 
-    def scalar(self, _query: object) -> object:
+    def scalars(self, _query: object) -> object:
         self.calls += 1
-        if self.calls == 1:
-            return type(
-                "Profile",
-                (),
-                {"bachelor_full_time": self.bachelor_full_time},
-            )()
-        return type("Fact", (), {"id": self.fact_id})()
+        facts = [
+            type("Fact", (), {"id": fact_id, "normalized_key": key})()
+            for key, fact_id in self.fact_ids.items()
+        ]
+        return type("ScalarResult", (), {"all": lambda _self: facts})()
 
 
 def test_full_time_education_is_disclosed_only_when_explicitly_asked() -> None:
-    session = _EducationSession(False)
+    session = _EducationSession()
     asked = type("Message", (), {"content": "请问你的本科是全日制吗？"})()
 
     result = _full_time_education_reply(session, asked)  # type: ignore[arg-type]
 
     assert result is not None
-    assert result.content == "我的本科不是全日制，供您确认是否符合岗位要求。"
-    assert result.fact_ids == [session.fact_id]
+    assert result.content == "我的本科不是统招、不是全日制，学历可在学信网查询。"
+    assert result.fact_ids == [session.fact_ids["本科学习形式"]]
+
+
+def test_postgraduate_education_reply_uses_verified_knowledge() -> None:
+    session = _EducationSession()
+    asked = type("Message", (), {"content": "研究生是统招还是在职？学信网可查吗？"})()
+
+    result = _full_time_education_reply(session, asked)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.content == "我的硕士研究生属于统招，为在职就读，学历可在学信网查询。"
+    assert result.fact_ids == [session.fact_ids["硕士研究生学习形式"]]
 
 
 def test_full_time_education_is_not_proactively_disclosed() -> None:
-    session = _EducationSession(False)
+    session = _EducationSession()
     ordinary = type("Message", (), {"content": "请介绍一下你的项目经验"})()
 
     assert (
