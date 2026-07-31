@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
 
+from packages.policy_engine.state_machine import ActionType
+
 
 class AutomationDecision(StrEnum):
     ALLOW_AUTO = "ALLOW_AUTO"
@@ -15,10 +17,7 @@ class AutomationRules(BaseModel):
     auto_greet_enabled: bool = False
     auto_greet_min_score: int = Field(default=80, ge=80, le=100)
     auto_reply_enabled: bool = False
-    low_score_decline_enabled: bool = True
-    auto_reply_min_confidence: float = Field(default=0.90, ge=0.75, le=1)
     auto_resume_enabled: bool = False
-    auto_resume_min_score: int = Field(default=60, ge=60, le=100)
     maimai_recommendation_enabled: bool = False
     maimai_recommendation_resume_enabled: bool = False
     emergency_stop: bool = False
@@ -59,7 +58,7 @@ def evaluate_automation(
         return AutomationDecision.DENY, ["EMERGENCY_STOP_ACTIVE"]
     if not rules.enabled or rules.paused:
         return AutomationDecision.DENY, ["AUTOMATION_DISABLED_OR_PAUSED"]
-    if context.action_type == "GREETING":
+    if context.action_type == ActionType.GREETING.value:
         if not context.eligible or not context.job_open:
             return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
         if context.grade == "C":
@@ -70,7 +69,7 @@ def evaluate_automation(
             return AutomationDecision.DENY, ["GREETING_SCORE_BELOW_THRESHOLD"]
         return AutomationDecision.ALLOW_AUTO, ["GREETING_POLICY_MATCHED"]
 
-    if context.action_type in {"REPLY", "MISMATCH_DECLINE"}:
+    if context.action_type in {ActionType.REPLY.value, ActionType.MISMATCH_DECLINE.value}:
         if "INTERVIEW_TIME" in context.intents:
             return AutomationDecision.REQUIRE_CONFIRMATION, ["SPECIFIC_TIME_REQUIRES_CONFIRMATION"]
         if context.original_decision != "ALLOW_AUTO":
@@ -78,12 +77,12 @@ def evaluate_automation(
         if not rules.auto_reply_enabled:
             return AutomationDecision.DENY, ["AUTO_REPLY_DISABLED"]
         if (
-            context.action_type == "REPLY"
+            context.action_type == ActionType.REPLY.value
             and context.qualification_status == "MISMATCH"
         ):
             return AutomationDecision.DENY, ["QUALIFICATION_MISMATCH"]
         if (
-            context.action_type == "MISMATCH_DECLINE"
+            context.action_type == ActionType.MISMATCH_DECLINE.value
             and context.qualification_status != "MISMATCH"
         ):
             return AutomationDecision.DENY, ["MISMATCH_NOT_ESTABLISHED"]
@@ -91,7 +90,7 @@ def evaluate_automation(
             f"{context.action_type}_POLICY_MATCHED"
         ]
 
-    if context.action_type == "RESUME":
+    if context.action_type == ActionType.RESUME.value:
         if context.resume_already_sent:
             return AutomationDecision.DENY, ["RESUME_ALREADY_SENT"]
         if not context.explicit_resume_request:
@@ -103,7 +102,7 @@ def evaluate_automation(
         if not rules.auto_resume_enabled:
             return AutomationDecision.DENY, ["AUTO_RESUME_DISABLED"]
         return AutomationDecision.ALLOW_AUTO, ["INBOUND_RESUME_POLICY_MATCHED"]
-    if context.action_type == "RESUME_CONSENT_ACCEPT":
+    if context.action_type == ActionType.RESUME_CONSENT_ACCEPT.value:
         if context.qualification_status == "MISMATCH":
             return AutomationDecision.DENY, ["QUALIFICATION_MISMATCH"]
         if not context.explicit_resume_request:
@@ -111,7 +110,10 @@ def evaluate_automation(
         if not rules.auto_resume_enabled:
             return AutomationDecision.DENY, ["AUTO_RESUME_DISABLED"]
         return AutomationDecision.ALLOW_AUTO, ["INBOUND_RESUME_CONSENT_POLICY_MATCHED"]
-    if context.action_type in {"CONTACT_CONSENT_ACCEPT", "LOCATION_CONSENT_ACCEPT"}:
+    if context.action_type in {
+        ActionType.CONTACT_CONSENT_ACCEPT.value,
+        ActionType.LOCATION_CONSENT_ACCEPT.value,
+    }:
         if context.qualification_status not in {"ROUGH_MATCH", "FULL_MATCH"}:
             return AutomationDecision.DENY, ["QUALIFICATION_NOT_READY_FOR_CONSENT"]
         if context.original_decision != "ALLOW_AUTO":
@@ -120,13 +122,13 @@ def evaluate_automation(
             return AutomationDecision.DENY, ["AUTO_REPLY_DISABLED"]
         return AutomationDecision.ALLOW_AUTO, [f"{context.action_type}_POLICY_MATCHED"]
     if context.action_type in {
-        "PLATFORM_RECOMMENDATION_ACCEPT",
-        "PLATFORM_RECOMMENDATION_REJECT",
+        ActionType.PLATFORM_RECOMMENDATION_ACCEPT.value,
+        ActionType.PLATFORM_RECOMMENDATION_REJECT.value,
     }:
         if not rules.maimai_recommendation_enabled:
             return AutomationDecision.DENY, ["MAIMAI_RECOMMENDATION_DISABLED"]
         if (
-            context.action_type == "PLATFORM_RECOMMENDATION_ACCEPT"
+            context.action_type == ActionType.PLATFORM_RECOMMENDATION_ACCEPT.value
             and not rules.maimai_recommendation_resume_enabled
         ):
             return AutomationDecision.DENY, ["MAIMAI_RECOMMENDATION_RESUME_DISABLED"]

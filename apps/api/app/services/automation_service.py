@@ -21,7 +21,7 @@ from packages.policy_engine.automation import (
     AutomationRules,
     evaluate_automation,
 )
-from packages.policy_engine.state_machine import ActionStatus
+from packages.policy_engine.state_machine import ActionStatus, ActionType
 
 
 def list_automatic_actions(
@@ -184,7 +184,7 @@ def dispatch(
         raise ValueError("草稿缺少原始策略决策")
     if original.action_type != payload.action_type:
         raise ValueError("动作类型与原始策略决策不匹配")
-    if payload.action_type == "RESUME":
+    if payload.action_type == ActionType.RESUME.value:
         expected_resume_id = original.input_snapshot.get("resume_id")
         if expected_resume_id != str(payload.resume_id):
             raise ValueError("简历附件与草稿策略决策不匹配")
@@ -197,13 +197,13 @@ def dispatch(
         grade=score.grade if score else "UNKNOWN",
         eligible=(
             conversation.qualification_status != "MISMATCH"
-            or payload.action_type == "MISMATCH_DECLINE"
+            or payload.action_type == ActionType.MISMATCH_DECLINE.value
         ) if inbound_action else (
             score is not None
             and not score.hard_rejected
             and score.eligibility == "ELIGIBLE"
             and (
-                payload.action_type != "GREETING"
+                payload.action_type != ActionType.GREETING.value
                 or score.automation_eligible
             )
         ),
@@ -261,7 +261,7 @@ def dispatch(
     result = execute_action(session, action.id, payload.cdp_url, executor)
     if (
         result.status == ActionStatus.SUCCEEDED.value
-        and payload.action_type == "MISMATCH_DECLINE"
+        and payload.action_type == ActionType.MISMATCH_DECLINE.value
     ):
         conversation.state = "DECLINED"
         _audit(
@@ -307,7 +307,7 @@ def dispatch_proactive_greeting(
     if original is None:
         raise ValueError("招呼草稿缺少原始策略决策")
     context = AutomationContext(
-        action_type="GREETING",
+        action_type=ActionType.GREETING.value,
         score=score.total_score,
         grade=score.grade,
         eligible=(
@@ -328,7 +328,7 @@ def dispatch_proactive_greeting(
     policy = db.PolicyDecision(
         user_id=DEFAULT_USER_ID,
         draft_id=draft.id,
-        action_type="GREETING",
+        action_type=ActionType.GREETING.value,
         decision=decision.value,
         reason_codes=reasons,
         policy_version=POLICY_VERSION,
@@ -344,7 +344,7 @@ def dispatch_proactive_greeting(
         session.commit()
         return {"decision": decision.value, "reason_codes": reasons}
     fingerprint = hashlib.sha256(
-        f"{platform}:GREETING:{job.external_job_id or job.id}".encode()
+        f"{platform}:{ActionType.GREETING.value}:{job.external_job_id or job.id}".encode()
     ).hexdigest()
     existing = session.scalar(
         select(db.ActionQueue).where(db.ActionQueue.send_fingerprint == fingerprint)
@@ -377,7 +377,7 @@ def dispatch_proactive_greeting(
         agent_run_id=agent_run_id,
         job_id=job.id,
         draft_id=draft.id,
-        action_type="GREETING",
+        action_type=ActionType.GREETING.value,
         status=ActionStatus.APPROVED.value,
         content=draft.content,
         delivery_mode=(
@@ -438,9 +438,6 @@ def effective_rules(session: Session, platform: str, strategy_id: UUID) -> Autom
         merged["paused"] = bool(merged["paused"]) or row.paused
         merged["auto_greet_enabled"] = bool(merged["auto_greet_enabled"]) and row.auto_greet_enabled
         merged["auto_reply_enabled"] = bool(merged["auto_reply_enabled"]) and row.auto_reply_enabled
-        merged["low_score_decline_enabled"] = (
-            bool(merged["low_score_decline_enabled"]) and row.low_score_decline_enabled
-        )
         merged["auto_resume_enabled"] = bool(merged["auto_resume_enabled"]) and row.auto_resume_enabled
         merged["maimai_recommendation_enabled"] = (
             bool(merged["maimai_recommendation_enabled"])
@@ -451,8 +448,6 @@ def effective_rules(session: Session, platform: str, strategy_id: UUID) -> Autom
             and row.maimai_recommendation_resume_enabled
         )
         merged["auto_greet_min_score"] = max(int(merged["auto_greet_min_score"]), row.auto_greet_min_score)
-        merged["auto_reply_min_confidence"] = max(float(merged["auto_reply_min_confidence"]), float(row.auto_reply_min_confidence))
-        merged["auto_resume_min_score"] = max(int(merged["auto_resume_min_score"]), row.auto_resume_min_score)
         merged["emergency_stop"] = bool(merged["emergency_stop"]) or row.emergency_stop
         merged["job_scan_enabled"] = bool(merged["job_scan_enabled"]) and row.job_scan_enabled
         merged["company_cooldown_hours"] = max(
@@ -474,9 +469,7 @@ def _rules(row: db.AutomationSetting) -> AutomationRules:
         enabled=row.enabled, paused=row.paused,
         auto_greet_enabled=row.auto_greet_enabled, auto_greet_min_score=row.auto_greet_min_score,
         auto_reply_enabled=row.auto_reply_enabled,
-        low_score_decline_enabled=row.low_score_decline_enabled,
-        auto_reply_min_confidence=float(row.auto_reply_min_confidence),
-        auto_resume_enabled=row.auto_resume_enabled, auto_resume_min_score=row.auto_resume_min_score,
+        auto_resume_enabled=row.auto_resume_enabled,
         maimai_recommendation_enabled=row.maimai_recommendation_enabled,
         maimai_recommendation_resume_enabled=row.maimai_recommendation_resume_enabled,
         emergency_stop=row.emergency_stop,
@@ -538,7 +531,7 @@ def _create_auto_action(session: Session, conversation: db.Conversation, job: db
             original.input_snapshot.get("authorization_basis")
             or (
                 "QUALIFICATION_MISMATCH"
-                if policy.action_type == "MISMATCH_DECLINE"
+                if policy.action_type == ActionType.MISMATCH_DECLINE.value
                 else "AUTOMATION_POLICY"
             )
         ),

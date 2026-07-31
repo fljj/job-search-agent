@@ -21,6 +21,7 @@ from packages.job_parser.models import JobInput, ParsedJob
 from packages.job_parser.rule_parser import RuleJobParser
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
+from packages.policy_engine.state_machine import ActionType
 
 
 def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse:
@@ -434,7 +435,7 @@ def _communication_summary(
         select(db.ActionQueue)
         .where(
             db.ActionQueue.job_id == job.id,
-            db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.action_type == ActionType.GREETING.value,
         )
         .order_by(db.ActionQueue.created_at.desc())
         .limit(1)
@@ -472,7 +473,8 @@ def _communication_rows(
     ).all()))
     actions = latest_by_job(list(session.scalars(
         select(db.ActionQueue).where(
-            db.ActionQueue.job_id.in_(job_ids), db.ActionQueue.action_type == "GREETING"
+            db.ActionQueue.job_id.in_(job_ids),
+            db.ActionQueue.action_type == ActionType.GREETING.value,
         ).order_by(db.ActionQueue.created_at.desc(), db.ActionQueue.id.desc())
     ).all()))
     records = latest_by_job(list(session.scalars(

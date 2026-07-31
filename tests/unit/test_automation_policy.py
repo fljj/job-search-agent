@@ -1,5 +1,7 @@
 import pytest
+from pydantic import ValidationError
 
+from apps.api.app.schemas.automation import AutomationSettingPayload
 from packages.policy_engine.automation import (
     AutomationContext,
     AutomationDecision,
@@ -103,6 +105,9 @@ def test_automation_rules_have_no_hourly_or_daily_quotas() -> None:
         "daily_limit",
         "hourly_scan_limit",
         "daily_scan_limit",
+        "low_score_decline_enabled",
+        "auto_reply_min_confidence",
+        "auto_resume_min_score",
     }
     assert removed_fields.isdisjoint(AutomationRules.model_fields)
 
@@ -133,6 +138,15 @@ def test_normal_reply_is_denied_after_qualification_becomes_mismatch() -> None:
     decision, reasons = evaluate_automation(reply, rules())
     assert decision is AutomationDecision.DENY
     assert reasons == ["QUALIFICATION_MISMATCH"]
+
+
+def test_removed_automation_fields_are_rejected_by_new_api_payload() -> None:
+    with pytest.raises(ValidationError):
+        AutomationSettingPayload.model_validate({
+            "scope_type": "GLOBAL",
+            "scope_key": "GLOBAL",
+            "auto_resume_min_score": 60,
+        })
 
 
 def test_invalid_work_hours_are_rejected() -> None:

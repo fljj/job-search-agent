@@ -1,12 +1,14 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from packages.policy_engine.automation import AutomationRules
 
 
 class AutomationSettingPayload(AutomationRules):
+    model_config = ConfigDict(extra="forbid")
+
     scope_type: Literal["GLOBAL", "PLATFORM", "STRATEGY"]
     scope_key: str = Field(min_length=1, max_length=100)
 

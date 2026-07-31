@@ -41,6 +41,7 @@ from packages.browser_worker.models import (
 from packages.job_parser.normalizers import normalize_location
 from packages.llm.ports import LlmProvider
 from packages.policy_engine.automation import AutomationContext, AutomationDecision
+from packages.policy_engine.state_machine import ActionType
 from packages.scoring.llm_engine import LlmScoreValidationError
 
 TERMINAL_CONVERSATION_STATES = {
@@ -395,7 +396,10 @@ def execute_pending_platform_consents(
     ).all()
     statuses = []
     for action in actions:
-        if action.action_type == "RESUME_CONSENT_ACCEPT" and not rules.auto_resume_enabled:
+        if (
+            action.action_type == ActionType.RESUME_CONSENT_ACCEPT.value
+            and not rules.auto_resume_enabled
+        ):
             continue
         if action.action_type in {
             "CONTACT_CONSENT_ACCEPT",
@@ -429,7 +433,7 @@ def _queue_platform_consents(
         if score is not None and score.hard_rejected:
             safety_blockers.append("JOB_HARD_REJECTED")
         if consent.consent_type.value == "LOCATION":
-            action_type = "LOCATION_CONSENT_ACCEPT"
+            action_type = ActionType.LOCATION_CONSENT_ACCEPT.value
             location_allowed = bool(
                 consent.detail
                 and _location_consent_allowed(session, run, consent.detail)
@@ -437,9 +441,9 @@ def _queue_platform_consents(
             if not location_allowed:
                 safety_blockers.append("LOCATION_CONSENT_NOT_ALLOWED")
         elif consent.consent_type.value == "RESUME":
-            action_type = "RESUME_CONSENT_ACCEPT"
+            action_type = ActionType.RESUME_CONSENT_ACCEPT.value
         else:
-            action_type = "CONTACT_CONSENT_ACCEPT"
+            action_type = ActionType.CONTACT_CONSENT_ACCEPT.value
         external_id = consent.external_consent_id
         fingerprint = hashlib.sha256(
             f"{conversation.id}:{action_type}:{external_id}".encode()

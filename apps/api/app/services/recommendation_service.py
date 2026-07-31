@@ -31,7 +31,7 @@ from packages.policy_engine.recommendation import (
     RecommendationRules,
     decide_recommendation,
 )
-from packages.policy_engine.state_machine import ActionStatus
+from packages.policy_engine.state_machine import ActionStatus, ActionType
 
 POLICY_VERSION = "platform-recommendation-v1"
 
@@ -287,7 +287,7 @@ def _create_action(
         eligible=True,
         job_open=True,
         original_decision="ALLOW_AUTO",
-        resume_available=action_type == "PLATFORM_RECOMMENDATION_ACCEPT",
+        resume_available=action_type == ActionType.PLATFORM_RECOMMENDATION_ACCEPT.value,
         qualification_status="UNKNOWN",
     )
     decision, reasons, policy = authorize_automatic_action(

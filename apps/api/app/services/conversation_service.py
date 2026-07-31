@@ -64,6 +64,7 @@ from packages.llm.models import (
 )
 from packages.llm.ports import LlmProvider
 from packages.policy_engine.content_check import validate_edited_content
+from packages.policy_engine.state_machine import ActionType
 from packages.resume_selector.selector import ResumeCandidate, select_default_resume
 
 POLICY_VERSION = "conversation-policy-v1"
@@ -292,7 +293,7 @@ def list_conversations(
             select(db.ActionQueue)
             .where(
                 db.ActionQueue.conversation_id == conversation.id,
-                db.ActionQueue.action_type == "RESUME",
+                db.ActionQueue.action_type == ActionType.RESUME.value,
             )
             .order_by(db.ActionQueue.created_at.desc(), db.ActionQueue.id.desc())
             .limit(1)

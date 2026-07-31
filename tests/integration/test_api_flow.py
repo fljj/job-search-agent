@@ -332,8 +332,7 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     automation_setting = {
         "scope_type": "GLOBAL", "scope_key": "GLOBAL", "enabled": False,
         "paused": False, "auto_greet_enabled": True, "auto_greet_min_score": 80,
-        "auto_reply_enabled": True, "auto_reply_min_confidence": 0.9,
-        "auto_resume_enabled": True, "auto_resume_min_score": 60,
+        "auto_reply_enabled": True, "auto_resume_enabled": True,
             "job_scan_enabled": True, "company_cooldown_hours": 24,
         "recruiter_cooldown_hours": 24, "work_start_hour": 8,
         "work_end_hour": 22, "emergency_stop": False,

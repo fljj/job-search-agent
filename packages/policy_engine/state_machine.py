@@ -5,6 +5,7 @@ class ActionType(StrEnum):
     GREETING = "GREETING"
     REPLY = "REPLY"
     RESUME = "RESUME"
+    # 仅用于读取和对账历史动作；自动化策略不允许创建该类型。
     LOW_SCORE_DECLINE = "LOW_SCORE_DECLINE"
     MISMATCH_DECLINE = "MISMATCH_DECLINE"
     SCHEDULE_REPLY = "SCHEDULE_REPLY"

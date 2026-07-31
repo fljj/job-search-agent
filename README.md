@@ -1,10 +1,5 @@
 # job-search-agent
 
-> **R0 安全冻结**：代码审查发现真实写动作的授权和对账仍有 P0 风险。R1 完成并验证前，
-> BOSS、脉脉和 Telegram Run 必须保持暂停，全局自动化必须保持“暂停 + 紧急停止”。
-> 当前不要启动无人值守 Worker，也不要恢复任何平台 Run。API、前端、离线夹具、数据库
-> 备份和只读人工检查仍可使用。
-
 面向 BOSS 直聘、脉脉和白名单 Telegram 招聘频道的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
 消息，并按规则发送网站内已有简历；电话和面试的具体时间、登录验证、验证码及安全异常
 仍由用户处理。
@@ -27,9 +22,8 @@
   其余消息才调用 LLM；消息中心展示每条最新草稿的回复来源
 - 职位分析：先执行不消耗 Token 的硬性规则；命中后直接记录排除原因，只有通过的职位
   才进入完整 JD 解析和 AI 评分
-- LLM 熔断目标：只暂停依赖 LLM 的解析、评分、主动招呼和开放式回复，规则/知识库回复、
-  符合条件的入站简历卡片和只读维护继续运行。当前代码仍会暂停整轮业务，整改完成前按
-  上述 R0 安全冻结执行。
+- LLM 熔断：只暂停依赖 LLM 的解析、评分、主动招呼和开放式回复；规则/知识库回复、
+  符合条件的入站简历卡片和只读维护继续运行。
 
 API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
 状态的平台任务，不需要为 BOSS、脉脉和 Telegram 分别启动 Worker。
@@ -229,9 +223,6 @@ curl http://127.0.0.1:9222/json/version
 
 ## 6. 配置并启动 Agent Run
 
-本节保留正式运行配置说明，但 R0 冻结期间不得按本节恢复 Run 或启动 Worker。恢复条件见
-[`docs/code-review-remediation-plan.md`](docs/code-review-remediation-plan.md) 第 11 节。
-
 Worker 进程和平台 Run 是两回事：
 
 - Run：保存在数据库中，表示 BOSS 或脉脉是否应该运行。
@@ -264,10 +255,7 @@ curl -X PUT http://127.0.0.1:8000/api/v1/automation/settings \
     "auto_greet_enabled": true,
     "auto_greet_min_score": 80,
     "auto_reply_enabled": true,
-    "low_score_decline_enabled": true,
-    "auto_reply_min_confidence": 0.9,
     "auto_resume_enabled": true,
-    "auto_resume_min_score": 60,
     "maimai_recommendation_enabled": true,
     "maimai_recommendation_resume_enabled": true,
     "emergency_stop": false,

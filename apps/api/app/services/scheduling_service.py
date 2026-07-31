@@ -19,7 +19,7 @@ from apps.api.app.services.errors import ResourceNotFoundError, VersionConflictE
 from apps.api.app.services.qualification_service import refresh_qualification
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.policy_engine.content_check import validate_edited_content
-from packages.policy_engine.state_machine import ActionStatus
+from packages.policy_engine.state_machine import ActionStatus, ActionType
 from packages.scheduling.calendar import CalendarGateway, CalendarProviderUnavailable
 from packages.scheduling.engine import check_calendar, parse_invitation, suggest_slots
 from packages.scheduling.models import (
@@ -344,7 +344,10 @@ def _schedule_action(session: Session, request: db.InterviewRequest,
     session.add(draft)
     session.flush()
     decision = db.PolicyDecision(
-        user_id=DEFAULT_USER_ID, draft_id=draft.id, action_type="REPLY", decision="REQUIRE_CONFIRMATION",
+        user_id=DEFAULT_USER_ID,
+        draft_id=draft.id,
+        action_type=ActionType.REPLY.value,
+        decision="REQUIRE_CONFIRMATION",
         reason_codes=["SPECIFIC_TIME_USER_APPROVED"], policy_version="scheduling-policy-v1",
         input_snapshot={"schedule_confirmation_id": str(confirmation.id)},
     )
@@ -357,7 +360,8 @@ def _schedule_action(session: Session, request: db.InterviewRequest,
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID, confirmation_task_id=task.id, policy_decision_id=decision.id,
         authorization_source="MANUAL", conversation_id=conversation.id, draft_id=draft.id,
-        action_type="REPLY", status=ActionStatus.APPROVED.value,
+        action_type=ActionType.REPLY.value,
+        status=ActionStatus.APPROVED.value,
         content=confirmation.reply_content, platform=conversation.platform,
         target_company=company_name, target_job_title=job_title,
         target_recruiter=conversation.recruiter_name,

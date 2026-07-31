@@ -19,7 +19,7 @@ from packages.browser_worker.actions import (
     ExecutionResult,
 )
 from packages.policy_engine.content_check import validate_edited_content
-from packages.policy_engine.state_machine import ActionStatus, require_transition
+from packages.policy_engine.state_machine import ActionStatus, ActionType, require_transition
 
 PREWRITE_RETRYABLE_FAILURES = {
     "APPROVED_TARGET_PAGE_NOT_FOUND",
@@ -62,7 +62,7 @@ def approve_task(
     require_transition(task.status, ActionStatus.APPROVED)
     conversation = None
     score = None
-    if decision.action_type == "GREETING":
+    if decision.action_type == ActionType.GREETING.value:
         if draft.job_score_id is None:
             raise ValueError("招呼语草稿缺少评分")
         score, job = _require_greeting_score(session, draft.job_score_id)
@@ -75,7 +75,7 @@ def approve_task(
         if draft.conversation_id and draft.conversation_id != conversation.id:
             raise ValueError("草稿与对话不匹配")
     resume = None
-    if decision.action_type == "RESUME":
+    if decision.action_type == ActionType.RESUME.value:
         resume_id = UUID(str(decision.input_snapshot["resume_id"]))
         resume = session.get(db.Resume, resume_id)
         if resume is None or not resume.is_available:
@@ -94,10 +94,12 @@ def approve_task(
         raise ValueError("相同对话中已存在相同发送动作")
     platform_default_content = (
         get_conversation_policy().platform_default_greetings.get(job.source)
-        if decision.action_type == "GREETING"
+        if decision.action_type == ActionType.GREETING.value
         else None
     )
-    uses_platform_default = decision.action_type == "GREETING" and job.source == "BOSS"
+    uses_platform_default = (
+        decision.action_type == ActionType.GREETING.value and job.source == "BOSS"
+    )
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID,
         confirmation_task_id=task.id,
@@ -465,7 +467,7 @@ def _finish(
         action.observed_content = result.observed_content
     if (
         target is ActionStatus.SUCCEEDED
-        and action.action_type == "RESUME"
+        and action.action_type == ActionType.RESUME.value
         and action.resume_id
         and action.conversation_id
     ):

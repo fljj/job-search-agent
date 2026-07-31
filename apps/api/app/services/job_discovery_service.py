@@ -24,6 +24,7 @@ from apps.api.app.services.llm_config_service import runtime_settings
 from apps.api.app.services.score_service import create_score
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
+from packages.policy_engine.state_machine import ActionType
 from packages.scoring.llm_engine import LlmScoreValidationError
 
 RETRYABLE_LLM_CODES = {
@@ -351,7 +352,7 @@ def _job_safety_reasons(job: object) -> list[str]:
 def _duplicate_reason(session: Session, job: db.Job) -> str | None:
     existing_action = session.scalar(
         select(db.ActionQueue).where(
-            db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.action_type == ActionType.GREETING.value,
             db.ActionQueue.job_id == job.id,
         )
     )
@@ -365,7 +366,7 @@ def _duplicate_reason(session: Session, job: db.Job) -> str | None:
         select(db.Job)
         .join(db.ActionQueue, db.ActionQueue.job_id == db.Job.id)
         .where(
-            db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.action_type == ActionType.GREETING.value,
             db.ActionQueue.status.in_(
                 ["APPROVED", "EXECUTING", "SUCCEEDED", "OUTCOME_UNKNOWN"]
             ),
@@ -400,7 +401,7 @@ def _cooldown_reason(
     assert isinstance(rules, AutomationRules)
     if rules.company_cooldown_hours and session.scalar(
         select(db.ActionQueue.id).where(
-            db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.action_type == ActionType.GREETING.value,
             db.ActionQueue.status.in_(
                 ["APPROVED", "EXECUTING", "SUCCEEDED", "OUTCOME_UNKNOWN"]
             ),
@@ -413,7 +414,7 @@ def _cooldown_reason(
         return "COMPANY_COOLDOWN_ACTIVE"
     if recruiter and rules.recruiter_cooldown_hours and session.scalar(
         select(db.ActionQueue.id).where(
-            db.ActionQueue.action_type == "GREETING",
+            db.ActionQueue.action_type == ActionType.GREETING.value,
             db.ActionQueue.status.in_(
                 ["APPROVED", "EXECUTING", "SUCCEEDED", "OUTCOME_UNKNOWN"]
             ),

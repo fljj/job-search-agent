@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Descriptions, Drawer, List, Progress, Select, Space, Table, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { businessLabel } from './business-labels'
 
 interface Job { id: string; title: string; company_name: string; work_mode: string; location?: string;
   salary_text?: string; source: string; latest_score?: { id: string; total_score: number; grade: string;
@@ -28,26 +29,6 @@ const dimensionLabels: Record<string, string> = {
   salary: '薪资',
   industry: '行业',
   management: '管理经验或岗位级别',
-}
-
-const communicationLabels: Record<string, string> = {
-  CONVERSATION_ACTIVE: '已有会话',
-  GREETING_SENT_PENDING_SYNC: '已打招呼，等待消息同步',
-  GREETING_RETRY_PENDING: '发送失败，等待重试',
-  GREETING_OUTCOME_UNKNOWN: '发送结果待确认',
-  GREETING_IN_PROGRESS: '正在发起沟通',
-  GREETING_FAILED: '发送失败',
-  READY_TO_CONTACT: '满足条件，尚未发起',
-  NOT_CONTACTED: '未发起沟通',
-}
-
-const communicationReasonLabels: Record<string, string> = {
-  APPROVED_TARGET_PAGE_NOT_FOUND: '发送时没有找到对应职位页',
-  APPROVED_TARGET_PAGE_AMBIGUOUS: '检测到多个相同职位页',
-  SUPPORTED_PAGE_ROOT_NOT_FOUND: '职位页面结构发生变化',
-  GREETING_ALREADY_EXISTS: '已有招呼动作',
-  AUTO_GREET_DISABLED: '主动沟通开关未开启',
-  SCORE_BELOW_AUTO_GREET_THRESHOLD: '评分未达到主动沟通门槛',
 }
 
 function linkedJobId() {
@@ -177,9 +158,9 @@ export function JobPage() {
           <Tag color={communication?.status === 'CONVERSATION_ACTIVE' ? 'green'
             : communication?.status === 'GREETING_RETRY_PENDING'
               || communication?.status === 'GREETING_FAILED' ? 'red' : 'blue'}>
-            {communicationLabels[communication?.status ?? 'NOT_CONTACTED'] ?? '状态待确认'}
+            {businessLabel(communication?.status ?? 'NOT_CONTACTED')}
           </Tag>
-          {reason && <span>{communicationReasonLabels[reason] ?? reason}</span>}
+          {reason && <span>{businessLabel(reason)}</span>}
           {communication?.conversation_id && <Button type="link" size="small"
             onClick={() => { window.location.hash = `messages?job_id=${job.id}` }}>
             查看对应消息
