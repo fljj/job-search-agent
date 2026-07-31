@@ -689,6 +689,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                 worker_id=worker_id,
                 run_id=run_id,
                 reason=type(exc).__name__,
+                error_message=str(exc)[:300],
             )
         except Exception:
             runtime_event(

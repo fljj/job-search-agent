@@ -137,7 +137,7 @@ class PlaywrightActionExecutor:
                         continue
                     if not page.exists(selectors.conversation_list_root):
                         continue
-                    if not self._open_approved_conversation(
+                    if not self._find_and_open_approved_conversation(
                         page,
                         selectors,
                         command,
@@ -473,7 +473,9 @@ class PlaywrightActionExecutor:
                     if not _reply_target_matches(check, command):
                         if not page.exists(selectors.conversation_list_root):
                             continue
-                        if not self._open_approved_conversation(page, selectors, command):
+                        if not self._find_and_open_approved_conversation(
+                            page, selectors, command
+                        ):
                             continue
                         for _ in range(30):
                             check = extract_current_page(
@@ -713,7 +715,9 @@ class PlaywrightActionExecutor:
                         continue
                     if not page.exists(selectors.conversation_list_root):
                         continue
-                    if not self._open_approved_conversation(page, selectors, command):
+                    if not self._find_and_open_approved_conversation(
+                        page, selectors, command
+                    ):
                         continue
                     for _ in range(30):
                         check = extract_current_page(page, platform, selectors, self.config.version)
@@ -737,6 +741,47 @@ class PlaywrightActionExecutor:
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
                 error_code="RAW_CDP_PREFLIGHT_ERROR",
             )
+
+    @staticmethod
+    def _find_and_open_approved_conversation(
+        page: RawCdpPageReader,
+        selectors: PlatformSelectors,
+        command: ApprovedCommand,
+    ) -> bool:
+        """在虚拟消息列表内滚动查找唯一目标，不刷新常驻页面。"""
+        if PlaywrightActionExecutor._open_approved_conversation(
+            page, selectors, command
+        ):
+            return True
+        reset = page._evaluate(
+            "(() => { const element = document.querySelector("
+            f"{json.dumps(selectors.conversation_list_root)});"
+            "if (!element) return false; element.scrollTop = 0;"
+            "element.dispatchEvent(new Event('scroll', {bubbles: true})); return true; })()"
+        )
+        if not reset:
+            return False
+        for _ in range(80):
+            time.sleep(0.15)
+            if PlaywrightActionExecutor._open_approved_conversation(
+                page, selectors, command
+            ):
+                return True
+            position = page._evaluate(
+                "(() => { const element = document.querySelector("
+                f"{json.dumps(selectors.conversation_list_root)});"
+                "if (!element) return null; const before = element.scrollTop;"
+                "element.scrollTop = Math.min(element.scrollHeight, before + "
+                "Math.max(element.clientHeight * 0.8, 200));"
+                "element.dispatchEvent(new Event('scroll', {bubbles: true}));"
+                "return {before, after: element.scrollTop, done: "
+                "element.scrollTop + element.clientHeight >= element.scrollHeight}; })()"
+            )
+            if not isinstance(position, dict):
+                return False
+            if position.get("done") and position.get("after") == position.get("before"):
+                break
+        return False
 
     @staticmethod
     def _open_approved_conversation(

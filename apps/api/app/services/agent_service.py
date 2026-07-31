@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -24,6 +25,8 @@ from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
+
+logger = logging.getLogger(__name__)
 
 SAFETY_FAILURE_CODES = {
     "CAPTCHA_REQUIRED",
@@ -264,13 +267,38 @@ def tick_run(
             draft_id=generated_draft.id,
             resume_id=resume_id,
         )
-        result = dispatch(
-            session,
-            payload,
-            executor=action_executor,
-            agent_run_id=run.id,
-        )
+        try:
+            result = dispatch(
+                session,
+                payload,
+                executor=action_executor,
+                agent_run_id=run.id,
+            )
+        except (ValueError, ResourceNotFoundError) as exc:
+            processed += 1
+            run.failure_count += 1
+            if _isolate_dispatch_error(
+                session,
+                run,
+                generated_draft,
+                current,
+                exc,
+            ):
+                return _pause_after_failure(
+                    session,
+                    run,
+                    ["DISPATCH_RESULT_UNKNOWN"],
+                )
+            continue
         processed += 1
+        if not result.get("action_id") and result.get("decision") != "ALLOW_AUTO":
+            _finish_retry_denied(
+                session,
+                run,
+                generated_draft,
+                current,
+                result,
+            )
         if result.get("action_id"):
             run.action_count += 1
             _event(
@@ -403,6 +431,19 @@ def _pending_drafts(
             continue
         raw_resume_id = decision.input_snapshot.get("resume_id")
         resume_id = UUID(str(raw_resume_id)) if raw_resume_id else None
+        equivalent_action_id = session.scalar(
+            select(db.ActionQueue.id).where(
+                db.ActionQueue.conversation_id == conversation.id,
+                db.ActionQueue.action_type == draft.draft_type,
+                db.ActionQueue.content == (None if resume_id else draft.content),
+                db.ActionQueue.resume_id == resume_id,
+            )
+        )
+        if (
+            equivalent_action_id is not None
+            and equivalent_action_id != selected_retry_id
+        ):
+            continue
         result.append((draft, conversation, resume_id))
     return result
 
@@ -416,6 +457,108 @@ def _has_unknown_outcome(session: Session, conversation_id: UUID) -> bool:
             )
         )
     )
+
+
+def _isolate_dispatch_error(
+    session: Session,
+    run: db.AgentRun,
+    draft: db.GeneratedDraft,
+    current: datetime,
+    exc: ValueError | ResourceNotFoundError,
+) -> bool:
+    """隔离单条发送异常；返回 True 表示结果不明，必须暂停平台。"""
+    action = session.scalar(
+        select(db.ActionQueue).where(db.ActionQueue.draft_id == draft.id)
+    )
+    action_id = action.id if action is not None else None
+    logger.exception(
+        "ACTION_DISPATCH_FAILED action_id=%s draft_id=%s error=%s",
+        action_id,
+        draft.id,
+        str(exc),
+    )
+    if action is None:
+        _event(
+            session,
+            run.id,
+            "ACTION_DISPATCH_FAILED",
+            "draft",
+            draft.id,
+            [type(exc).__name__],
+            {"error_message": str(exc)[:300]},
+        )
+        session.flush()
+        return False
+    if action.status == "EXECUTING":
+        action.status = "OUTCOME_UNKNOWN"
+        action.failure_code = "DISPATCH_RESULT_UNKNOWN"
+        action.finished_at = current
+        conversation = session.get(db.Conversation, action.conversation_id)
+        if conversation is not None:
+            conversation.state = "OUTCOME_UNKNOWN"
+        _event(
+            session,
+            run.id,
+            "ACTION_DISPATCH_OUTCOME_UNKNOWN",
+            "action",
+            action.id,
+            ["DISPATCH_RESULT_UNKNOWN"],
+            {"error_message": str(exc)[:300]},
+        )
+        session.flush()
+        return True
+    if action.status == "APPROVED":
+        action.status = "FAILED_RETRYABLE"
+        action.failure_code = "DISPATCH_PREWRITE_ERROR"
+    if action.status == "FAILED_RETRYABLE":
+        # 推迟当前失败动作，使下一轮可以选择队列中的下一条到期动作。
+        action.updated_at = current
+    _event(
+        session,
+        run.id,
+        "ACTION_RETRY_DEFERRED",
+        "action",
+        action.id,
+        [type(exc).__name__],
+        {"error_message": str(exc)[:300]},
+    )
+    session.flush()
+    return False
+
+
+def _finish_retry_denied(
+    session: Session,
+    run: db.AgentRun,
+    draft: db.GeneratedDraft,
+    current: datetime,
+    result: dict[str, object],
+) -> None:
+    action = session.scalar(
+        select(db.ActionQueue).where(
+            db.ActionQueue.draft_id == draft.id,
+            db.ActionQueue.status == "FAILED_RETRYABLE",
+        )
+    )
+    if action is None:
+        return
+    raw_reasons = result.get("reason_codes")
+    reasons = (
+        [str(reason) for reason in raw_reasons]
+        if isinstance(raw_reasons, list)
+        else []
+    )
+    action.status = "FAILED_FINAL"
+    action.failure_code = "RETRY_POLICY_DENIED"
+    action.finished_at = current
+    _event(
+        session,
+        run.id,
+        "ACTION_RETRY_DENIED",
+        "action",
+        action.id,
+        reasons or ["RETRY_POLICY_DENIED"],
+    )
+    session.flush()
 
 
 def _record_failure(session: Session, run: db.AgentRun, code: str) -> None:

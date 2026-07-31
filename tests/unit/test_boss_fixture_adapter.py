@@ -133,6 +133,35 @@ def test_reply_executor_can_open_unique_approved_conversation_from_list() -> Non
     assert page._command.call_count == 2
 
 
+def test_reply_executor_scrolls_virtual_list_without_refreshing(
+    monkeypatch,
+) -> None:
+    executor = PlaywrightActionExecutor(get_browser_selectors())
+    page = MagicMock()
+    page._evaluate.side_effect = [
+        True,
+        {"before": 0, "after": 200, "done": False},
+    ]
+    open_target = MagicMock(side_effect=[False, False, True])
+    monkeypatch.setattr(
+        PlaywrightActionExecutor,
+        "_open_approved_conversation",
+        open_target,
+    )
+    monkeypatch.setattr("adapters.browser.playwright_actions.time.sleep", lambda _: None)
+
+    opened = executor._find_and_open_approved_conversation(
+        page,
+        get_browser_selectors().platforms["BOSS"],
+        approved_command("RESUME", attachment_name="后端开发简历"),
+    )
+
+    assert opened
+    assert open_target.call_count == 3
+    expressions = [call.args[0] for call in page._evaluate.call_args_list]
+    assert all("location.reload" not in expression for expression in expressions)
+
+
 def test_reply_target_is_reverified_after_opening_conversation() -> None:
     with fixture_page("conversation-detail.html") as page:
         result = read_fixture(page)
