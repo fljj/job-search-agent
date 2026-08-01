@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
@@ -76,6 +77,84 @@ def test_maimai_ordinary_message_filter_excludes_recommendations_and_official() 
     ]
 
     assert included == ["maimai-chat-1"]
+
+
+def test_maimai_ordinary_message_filter_excludes_unanswered_recommendation() -> None:
+    with fixture_page("conversation-detail.html") as page:
+        result = read_fixture(page)
+    assert result.conversation is not None
+    inbound = result.conversation.messages[0].model_copy(
+        update={
+            "content": (
+                "职位描述：负责后端系统开发。"
+                "我们正在招后端高级工程师人才，可以要一份你的简历吗？"
+            )
+        }
+    )
+    result = result.model_copy(
+        update={
+            "conversation": result.conversation.model_copy(
+                update={"messages": [inbound]}
+            )
+        }
+    )
+    adapter = MaimaiMessageDiscoveryAdapter(
+        get_browser_selectors(), get_recommendation_rules()
+    )
+
+    assert (
+        adapter._detail_exclusion_reason(result)
+        == "PLATFORM_RECOMMENDATION_EXCLUDED"
+    )
+
+
+def test_maimai_recommendation_with_conversation_is_an_ordinary_message() -> None:
+    with fixture_page("conversation-detail.html") as page:
+        result = read_fixture(page)
+    assert result.conversation is not None
+    received_at = result.conversation.messages[0].received_at
+    job_description = result.conversation.messages[0].model_copy(
+        update={"content": "职位描述：负责后端系统开发。"}
+    )
+    recommendation = result.conversation.messages[0].model_copy(
+        update={
+            "external_message_id": "recommendation",
+            "content": "我们正在招后端人才，可以要一份你的简历吗？",
+            "received_at": received_at + timedelta(milliseconds=10),
+        }
+    )
+    follow_up = result.conversation.messages[0].model_copy(
+        update={
+            "external_message_id": "follow-up",
+            "content": "您好，请问近期方便沟通吗？",
+            "received_at": received_at + timedelta(minutes=1),
+        }
+    )
+    adapter = MaimaiMessageDiscoveryAdapter(
+        get_browser_selectors(), get_recommendation_rules()
+    )
+
+    unanswered = result.model_copy(
+        update={
+            "conversation": result.conversation.model_copy(
+                update={"messages": [job_description, recommendation]}
+            )
+        }
+    )
+    followed_up = result.model_copy(
+        update={
+            "conversation": result.conversation.model_copy(
+                update={"messages": [job_description, recommendation, follow_up]}
+            )
+        }
+    )
+
+    assert (
+        adapter._detail_exclusion_reason(unanswered)
+        == "PLATFORM_RECOMMENDATION_EXCLUDED"
+    )
+    assert adapter._detail_exclusion_reason(followed_up) is None
+    assert adapter._detail_exclusion_reason(result) is None
 
 
 def test_reads_maimai_conversation_detail_and_message_directions() -> None:

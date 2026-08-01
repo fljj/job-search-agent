@@ -190,6 +190,9 @@ def persist_discovery_batch(
                 "BINDING_JOB",
             ],
         )
+        if "PLATFORM_RECOMMENDATION_EXCLUDED" in item.reason_codes:
+            counts["skipped"] += 1
+            continue
         if item.detail is None or item.reason_codes:
             _discovery_event(
                 session,

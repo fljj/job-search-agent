@@ -26,6 +26,7 @@ from apps.api.app.services.message_discovery_service import (
     _location_consent_allowed,
     _next_seen_message_keys,
     _terminal_state_from_messages,
+    persist_discovery_batch,
     process_next_inbound_job_score,
     record_ready_platform_session,
 )
@@ -170,6 +171,26 @@ def test_target_verification_checks_stable_identity_not_recruiter_name_only() ->
     assert changed.conversation is not None
     changed.conversation.job_title = "产品经理"
     assert _verify_target(selected, changed) == ["CONVERSATION_JOB_CHANGED"]
+
+
+def test_platform_recommendation_detail_is_skipped_without_failure() -> None:
+    session = MagicMock(spec=Session)
+    run = db.AgentRun(id=uuid4(), platform="MAIMAI")
+    item = DiscoveredConversation(
+        summary=summary(1),
+        reason_codes=["PLATFORM_RECOMMENDATION_EXCLUDED"],
+    )
+    batch = MessageDiscoveryBatch(
+        platform=Platform.MAIMAI,
+        partition="UNREAD",
+        scroll_position=1,
+        scanned_at=datetime.now(UTC),
+        items=[item],
+    )
+
+    counts = persist_discovery_batch(session, run, "worker-1", batch)
+
+    assert counts == {"discovered": 1, "imported": 0, "paused": 0, "skipped": 1}
 
 
 def test_derived_boss_identity_uses_recruiter_when_list_role_is_not_job_title() -> None:

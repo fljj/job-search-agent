@@ -23,6 +23,8 @@ from packages.browser_worker.models import (
 )
 from packages.policy_engine.recommendation import RecommendationRules
 
+RECOMMENDATION_BUNDLE_WINDOW_SECONDS = 5
+
 
 class DiscoveredConversation(BaseModel):
     summary: BrowserConversationSummary
@@ -168,6 +170,9 @@ class MessageDiscoveryAdapter:
     def _include_summary(self, _summary: BrowserConversationSummary) -> bool:
         return True
 
+    def _detail_exclusion_reason(self, _detail: ReadResult) -> str | None:
+        return None
+
     def _open_and_read(
         self,
         page: RawCdpPageReader,
@@ -218,6 +223,13 @@ class MessageDiscoveryAdapter:
                 and detail.conversation.messages
             ):
                 reasons = _verify_target(summary, detail)
+                if not reasons:
+                    exclusion_reason = self._detail_exclusion_reason(detail)
+                    if exclusion_reason:
+                        return DiscoveredConversation(
+                            summary=summary,
+                            reason_codes=[exclusion_reason],
+                        )
                 if not reasons and summary.external_conversation_id.startswith(
                     "derived:"
                 ):
@@ -429,6 +441,44 @@ class MaimaiMessageDiscoveryAdapter(MessageDiscoveryAdapter):
             marker in preview
             for marker in self.recommendation_rules.recommendation_markers
         )
+
+    def _detail_exclusion_reason(self, detail: ReadResult) -> str | None:
+        conversation = detail.conversation
+        if conversation is None:
+            return None
+        messages = conversation.messages
+        if any(message.direction.value != "INBOUND" for message in messages):
+            return None
+        marker_indexes = [
+            index
+            for index, message in enumerate(messages)
+            if any(
+                marker in message.content
+                for marker in self.recommendation_rules.recommendation_markers
+            )
+        ]
+        if not marker_indexes or marker_indexes[-1] != len(messages) - 1:
+            return None
+        messages_before_template = messages[: marker_indexes[-1]]
+        if not messages_before_template:
+            return "PLATFORM_RECOMMENDATION_EXCLUDED"
+        if len(messages_before_template) != 1:
+            return None
+        job_description = messages_before_template[0]
+        template = messages[marker_indexes[-1]]
+        is_job_description = any(
+            marker in job_description.content
+            for marker in ("职位描述", "职位要求", "岗位职责")
+        )
+        bundle_gap_seconds = (
+            template.received_at - job_description.received_at
+        ).total_seconds()
+        generated_together = (
+            0 <= bundle_gap_seconds <= RECOMMENDATION_BUNDLE_WINDOW_SECONDS
+        )
+        if is_job_description and generated_together:
+            return "PLATFORM_RECOMMENDATION_EXCLUDED"
+        return None
 
 
 def _verify_target(
