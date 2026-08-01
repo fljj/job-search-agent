@@ -25,6 +25,12 @@ export function activeRuns<T extends RunSummaryItem>(runs: T[]) {
     })
 }
 
+export function processedJobAndMessageCount(runs: RunSummaryItem[]) {
+  return activeRuns(runs)
+    .filter((item) => item.platform !== 'MAIMAI')
+    .reduce((sum, item) => sum + item.processed_count, 0)
+}
+
 export function agentStatusText(
   runs: RunSummaryItem[],
   workerRunning = true,

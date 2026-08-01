@@ -2,7 +2,13 @@ import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag, mes
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
-import { activeRuns, agentStatusText, canReconnectRun, canResumeRun } from './run-summary'
+import {
+  activeRuns,
+  agentStatusText,
+  canReconnectRun,
+  canResumeRun,
+  processedJobAndMessageCount,
+} from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
 import { businessLabel } from './business-labels'
 
@@ -90,7 +96,7 @@ export function OverviewPage() {
     }
   }, [load])
   const currentRuns = activeRuns(runs)
-  const processedCount = currentRuns.reduce((sum, item) => sum + item.processed_count, 0)
+  const processedCount = processedJobAndMessageCount(currentRuns)
   const currentWorkers = activeWorkers(operations?.workers)
   const workerRunning = currentWorkers.length > 0
   const llmCircuit = operations?.llm_circuit

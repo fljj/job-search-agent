@@ -3,7 +3,7 @@ import { message } from 'antd'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { OverviewPage } from './OverviewPage'
-import { canReconnectRun, canResumeRun } from './run-summary'
+import { canReconnectRun, canResumeRun, processedJobAndMessageCount } from './run-summary'
 
 vi.mock('../api/client', () => ({ api: vi.fn() }))
 
@@ -69,13 +69,21 @@ describe('OverviewPage 重新连接', () => {
     })).toBe(true)
   })
 
+  it('已处理职位和消息不计入脉脉推荐', () => {
+    expect(processedJobAndMessageCount([
+      pausedRun,
+      { ...pausedRun, id: 'maimai-run', platform: 'MAIMAI', processed_count: 99 },
+      { ...pausedRun, id: 'liepin-run', platform: 'LIEPIN', processed_count: 4 },
+    ])).toBe(14)
+  })
+
   it('分别展示人工确认和面试确认数量', async () => {
     render(<OverviewPage />)
 
     expect(await screen.findByText('待人工处理')).toBeTruthy()
     expect(screen.getByText('待确认面试')).toBeTruthy()
-    expect(screen.getByText('3')).toBeTruthy()
-    expect(screen.getByText('2')).toBeTruthy()
+    expect(await screen.findByText('3')).toBeTruthy()
+    expect(await screen.findByText('2')).toBeTruthy()
     expect(screen.getByText('LLM：正常可用 / 日历：已配置 / 执行器：已配置')).toBeTruthy()
     expect(screen.queryByText(/LLM:CLOSED/)).toBeNull()
   })
