@@ -1,4 +1,5 @@
 import json
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from time import monotonic
 from typing import TypeVar, cast
 
@@ -34,7 +35,7 @@ PROMPTS: dict[str, tuple[str, str]] = {
         "不得在没有候选人出生信息时推断年龄不匹配。",
     ),
     "score_job": (
-        "job-score-v10",
+        "job-score-v11",
         "仅按输入评分契约输出JSON。必须返回title/skills/experience/location/salary/"
         "industry/management七维且每个维度恰好出现一次。固定满分为："
         "title=15，skills=25，experience=15，location=15，salary=15，"
@@ -179,7 +180,7 @@ class QwenLlmProvider:
         evidence_aliases: dict[str, str] = {}
         if purpose == "score_job" and isinstance(request, ScoringContext):
             serialized_input, evidence_aliases = _compact_scoring_input(request)
-            output_schema = _compact_score_output_contract()
+            output_schema = _compact_score_output_contract(request, evidence_aliases)
         payload: dict[str, object] = {
             "model": self._model,
             "stream": False,
@@ -202,6 +203,10 @@ class QwenLlmProvider:
         payload.update(self._request_options)
         started = monotonic()
         attempt = 1
+        structured_retry = 0
+        input_tokens = 0
+        output_tokens = 0
+        parsed: OutputT
         while True:
             try:
                 response = self._transport.post(
@@ -213,24 +218,53 @@ class QwenLlmProvider:
                     payload,
                     self._timeout,
                 )
-                break
             except LlmNetworkError as exc:
                 if attempt > self._max_retries:
                     exc.attempt_number = attempt
                     raise
                 attempt += 1
+                continue
             except LlmProviderError as exc:
                 exc.attempt_number = attempt
                 raise
-        content = self._extract_content(response)
-        try:
-            parsed = output_type.model_validate_json(_strip_code_fence(content))
-        except (ValidationError, ValueError):
-            raise LlmInvalidResponseError("模型返回内容不符合结构化契约") from None
+            usage = response.get("usage")
+            usage_dict = usage if isinstance(usage, dict) else {}
+            input_tokens += _optional_int(usage_dict.get("prompt_tokens")) or 0
+            output_tokens += _optional_int(usage_dict.get("completion_tokens")) or 0
+            content = self._extract_content(response)
+            try:
+                raw_output = json.loads(_strip_code_fence(content))
+                if purpose == "score_job" and isinstance(request, ScoringContext):
+                    raw_output = _normalize_score_output(
+                        raw_output, request, evidence_aliases
+                    )
+                parsed = output_type.model_validate(raw_output)
+                break
+            except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+                if purpose != "score_job" or structured_retry >= 1:
+                    detail = _validation_error_summary(exc)
+                    raise LlmInvalidResponseError(
+                        f"模型返回内容不符合结构化契约：{detail}"
+                    ) from None
+                structured_retry += 1
+                messages = cast(list[dict[str, str]], payload["messages"])
+                messages.extend(
+                    [
+                        {"role": "assistant", "content": content},
+                        {
+                            "role": "user",
+                            "content": (
+                                "上次JSON未通过结构校验（"
+                                f"{_validation_error_summary(exc)}）。"
+                                "请依据原输入修正后，仅重新输出完整JSON；"
+                                "必须包含七个维度、分数、理由、允许的证据ID、总分和联系建议。"
+                            ),
+                        },
+                    ]
+                )
+                continue
         if isinstance(parsed, JobScoreOutput):
             parsed = cast(OutputT, _restore_score_evidence_refs(parsed, evidence_aliases))
-        usage = response.get("usage")
-        usage_dict = usage if isinstance(usage, dict) else {}
         response_id = response.get("id")
         return LlmResult[OutputT](
             data=parsed,
@@ -240,8 +274,8 @@ class QwenLlmProvider:
                 prompt_version=prompt_version,
                 response_id=response_id if isinstance(response_id, str) else None,
                 latency_ms=int((monotonic() - started) * 1000),
-                input_tokens=_optional_int(usage_dict.get("prompt_tokens")),
-                output_tokens=_optional_int(usage_dict.get("completion_tokens")),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
                 attempt_number=attempt,
             ),
         )
@@ -288,7 +322,10 @@ def _compact_scoring_input(context: ScoringContext) -> tuple[dict[str, object], 
     }, aliases
 
 
-def _compact_score_output_contract() -> dict[str, object]:
+def _compact_score_output_contract(
+    context: ScoringContext, aliases: dict[str, str]
+) -> dict[str, object]:
+    allowed_refs = _allowed_score_evidence_refs(context, aliases)
     return {
         "dimensions": [
             {
@@ -296,7 +333,8 @@ def _compact_score_output_contract() -> dict[str, object]:
                 "score": 0,
                 "max_score": max_score,
                 "reason": "不超过100字",
-                "evidence_refs": ["e1"],
+                "evidence_refs": allowed_refs[dimension][:1],
+                "allowed_evidence_refs": allowed_refs[dimension],
             }
             for dimension, max_score in (
                 ("title", 15),
@@ -314,6 +352,97 @@ def _compact_score_output_contract() -> dict[str, object]:
         "recommends_proactive_contact": False,
         "contact_reason": "不超过100字",
     }
+
+
+def _allowed_score_evidence_refs(
+    context: ScoringContext, aliases: dict[str, str]
+) -> dict[str, list[str]]:
+    reverse_aliases = {evidence_id: alias for alias, evidence_id in aliases.items()}
+    return {
+        dimension: [
+            reverse_aliases[item.id]
+            for item in context.evidence_items
+            if dimension in item.dimensions
+        ]
+        for dimension in (
+            "title", "skills", "experience", "location", "salary", "industry", "management"
+        )
+    }
+
+
+def _normalize_score_output(
+    output: object,
+    context: ScoringContext,
+    aliases: dict[str, str],
+) -> object:
+    """修正供应商常见的结构偏差，评分值仍完全来自模型。"""
+    if not isinstance(output, dict):
+        return output
+    dimensions = output.get("dimensions")
+    if isinstance(dimensions, dict):
+        dimensions = [
+            {"dimension": dimension, **value}
+            for dimension, value in dimensions.items()
+            if isinstance(dimension, str) and isinstance(value, dict)
+        ]
+        output["dimensions"] = dimensions
+    if not isinstance(dimensions, list):
+        return output
+
+    output.setdefault("match_reasons", [])
+    output.setdefault("risk_notes", [])
+    output.setdefault("recommends_proactive_contact", False)
+    output.setdefault("contact_reason", "根据职位匹配情况综合判断")
+
+    maximums = {
+        "title": 15, "skills": 25, "experience": 15, "location": 15,
+        "salary": 15, "industry": 10, "management": 5,
+    }
+    allowed_refs = _allowed_score_evidence_refs(context, aliases)
+    scores: list[Decimal] = []
+    for item in dimensions:
+        if not isinstance(item, dict):
+            continue
+        dimension = item.get("dimension")
+        if not isinstance(dimension, str) or dimension not in maximums:
+            continue
+        item["max_score"] = maximums[dimension]
+        allowed = allowed_refs[dimension]
+        references = item.get("evidence_refs")
+        valid_references: list[str] = []
+        if isinstance(references, list):
+            for reference in references:
+                if (
+                    isinstance(reference, str)
+                    and reference in allowed
+                    and reference not in valid_references
+                ):
+                    valid_references.append(reference)
+        if not valid_references and allowed:
+            valid_references.append(allowed[0])
+        item["evidence_refs"] = valid_references[:4]
+        try:
+            scores.append(Decimal(str(item.get("score"))))
+        except (InvalidOperation, ValueError):
+            return output
+
+    if len(scores) == len(maximums):
+        output["total_score"] = int(
+            sum(scores, start=Decimal(0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+    return output
+
+
+def _validation_error_summary(error: Exception) -> str:
+    if isinstance(error, json.JSONDecodeError):
+        return "JSON语法错误"
+    if isinstance(error, ValidationError):
+        issues = []
+        for item in error.errors()[:5]:
+            location = ".".join(str(part) for part in item["loc"])
+            issues.append(f"{location}:{item['type']}")
+        return "；".join(issues) or "字段校验失败"
+    return "字段校验失败"
 
 
 def _restore_score_evidence_refs(

@@ -12,6 +12,7 @@ from adapters.llm.errors import (
     LlmNetworkError,
 )
 from adapters.llm.fake import FakeLlmProvider
+from adapters.llm.http import JsonTransport
 from adapters.llm.qwen import (
     PROMPTS,
     QwenLlmProvider,
@@ -26,6 +27,7 @@ from packages.llm.models import (
     ReplyRequest,
     TrustedFact,
 )
+from packages.scoring.llm_engine import validate_llm_score
 from packages.scoring.models import ScoringContext
 
 
@@ -43,7 +45,7 @@ class StubTransport:
         return self.response
 
 
-def qwen(transport: StubTransport, *, retries: int = 1) -> QwenLlmProvider:
+def qwen(transport: JsonTransport, *, retries: int = 1) -> QwenLlmProvider:
     return QwenLlmProvider(
         api_key="secret-test-key",
         base_url="https://example.invalid/v1",
@@ -51,6 +53,18 @@ def qwen(transport: StubTransport, *, retries: int = 1) -> QwenLlmProvider:
         max_retries=retries,
         transport=transport,
     )
+
+
+class SequenceTransport:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, object]] = []
+
+    def post(
+        self, url: str, headers: dict[str, str], payload: dict[str, object], timeout: int
+    ) -> dict[str, object]:
+        self.calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+        return self.responses[len(self.calls) - 1]
 
 
 def response(content: str) -> dict[str, object]:
@@ -190,7 +204,7 @@ def test_authorization_key_is_not_in_payload() -> None:
 
 def test_score_prompt_lists_exact_evidence_contract() -> None:
     version, prompt = PROMPTS["score_job"]
-    assert version == "job-score-v10"
+    assert version == "job-score-v11"
     assert "title=15，skills=25" in prompt
     assert "industry=10，management=5" in prompt
     assert "total_score必须等于七项score之和" in prompt
@@ -271,6 +285,104 @@ def test_score_request_restores_compact_evidence_ids(
     assert set(sent["input"]) == {"evidence_groups"}
     assert sent["input"]["evidence_groups"][0]["items"][0][0] == "e1"
     assert result.data.dimensions[0].evidence_refs == [aliases[references["title"]]]
+
+
+def test_score_request_retries_invalid_structure_once(
+    evidence_context: ScoringContext,
+) -> None:
+    compact, _ = _compact_scoring_input(evidence_context)
+    groups = cast(list[dict[str, object]], compact["evidence_groups"])
+    references = {
+        dimension: next(
+            cast(str, item[0])
+            for group in groups
+            if dimension in cast(list[str], group["dimensions"])
+            for item in cast(list[list[object]], group["items"])
+        )
+        for dimension in (
+            "title", "skills", "experience", "location", "salary", "industry", "management"
+        )
+    }
+    maximums = {
+        "title": 15, "skills": 25, "experience": 15, "location": 15,
+        "salary": 15, "industry": 10, "management": 5,
+    }
+    valid_output = {
+        "dimensions": [
+            {
+                "dimension": dimension,
+                "score": 0,
+                "max_score": maximum,
+                "reason": "测试",
+                "evidence_refs": [references[dimension]],
+            }
+            for dimension, maximum in maximums.items()
+        ],
+        "total_score": 0,
+        "match_reasons": [],
+        "risk_notes": [],
+        "recommends_proactive_contact": False,
+        "contact_reason": "测试",
+    }
+    transport = SequenceTransport(
+        [response("{}"), response(json.dumps(valid_output, ensure_ascii=False))]
+    )
+
+    result = qwen(transport).score_job(evidence_context)
+
+    assert len(transport.calls) == 2
+    assert result.metadata.input_tokens == 20
+    second_payload = cast(dict[str, object], transport.calls[1]["payload"])
+    second_messages = cast(list[dict[str, str]], second_payload["messages"])
+    assert "上次JSON未通过结构校验" in second_messages[-1]["content"]
+
+
+def test_score_request_normalizes_fixed_fields_and_dimension_evidence(
+    evidence_context: ScoringContext,
+) -> None:
+    maximums = {
+        "title": 15,
+        "skills": 25,
+        "experience": 15,
+        "location": 15,
+        "salary": 15,
+        "industry": 10,
+        "management": 5,
+    }
+    output = {
+        "dimensions": [
+            {
+                "dimension": dimension,
+                "score": 1,
+                "max_score": 999,
+                "reason": "测试",
+                "evidence_refs": ["e1", "不存在的证据"],
+            }
+            for dimension in maximums
+        ],
+        "total_score": 99,
+        "match_reasons": [],
+        "risk_notes": [],
+        "recommends_proactive_contact": False,
+        "contact_reason": "测试",
+    }
+    transport = StubTransport(response(json.dumps(output, ensure_ascii=False)))
+
+    result = qwen(transport).score_job(evidence_context)
+
+    assert result.data.total_score == 7
+    assert {
+        item.dimension: item.max_score for item in result.data.dimensions
+    } == {dimension: Decimal(value) for dimension, value in maximums.items()}
+    validate_llm_score(evidence_context, result.data)
+
+    payload = cast(dict[str, object], transport.calls[0]["payload"])
+    messages = cast(list[dict[str, str]], payload["messages"])
+    contract = json.loads(messages[1]["content"])["output_schema"]
+    for dimension in contract["dimensions"]:
+        assert set(dimension["evidence_refs"]).issubset(
+            dimension["allowed_evidence_refs"]
+        )
 
 
 def test_greeting_prompt_requires_candidate_perspective() -> None:
