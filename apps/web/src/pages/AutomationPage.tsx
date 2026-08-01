@@ -46,7 +46,8 @@ interface StrategyOption { id: string; name: string; enabled: boolean }
 export function AutomationPage() {
   const [form] = Form.useForm<SettingForm>()
   const [llm, setLlm] = useState<LlmStatus>()
-  const [selectedLlm, setSelectedLlm] = useState<string>()
+  const [selectedProvider, setSelectedProvider] = useState<string>()
+  const [modelInput, setModelInput] = useState('')
   const [savingLlm, setSavingLlm] = useState(false)
   const [runs, setRuns] = useState<AgentRun[]>([])
   const [actions, setActions] = useState<AutomaticAction[]>([])
@@ -68,7 +69,7 @@ export function AutomationPage() {
       api<{ items: StrategyOption[] }>('/strategies?enabled=true'),
       api<{ items: SettingForm[] }>('/automation/settings'),
     ])
-    setLlm(llmStatus); setSelectedLlm(`${llmStatus.provider}:${llmStatus.model}`)
+    setLlm(llmStatus); setSelectedProvider(llmStatus.provider); setModelInput(llmStatus.model)
     setRuns(runList.items); setActions(actionList.items)
     setOperations(operationStatus)
     setStrategies(strategyList.items)
@@ -84,7 +85,7 @@ export function AutomationPage() {
       api<{ items: SettingForm[] }>('/automation/settings'),
     ]).then(([llmStatus, runList, actionList, operationStatus, strategyList, settingList]) => {
       setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
-      setSelectedLlm(`${llmStatus.provider}:${llmStatus.model}`)
+      setSelectedProvider(llmStatus.provider); setModelInput(llmStatus.model)
       setOperations(operationStatus)
       setStrategies(strategyList.items)
       setSettings(settingList.items)
@@ -116,17 +117,18 @@ export function AutomationPage() {
     form.setFieldsValue(existing ?? { scope_type: scopeType, scope_key: scopeKey })
   }
   const saveLlm = async () => {
-    const option = llm?.options.find(
-      (item) => `${item.provider}:${item.model}` === selectedLlm,
-    )
-    if (!option) return
+    const provider = selectedProvider?.trim()
+    const model = modelInput.trim()
+    if (!provider || !model) return message.warning('请选择供应商并输入模型名称')
     setSavingLlm(true)
     try {
       const updated = await api<LlmStatus>('/system/llm-status', {
         method: 'PUT',
-        body: JSON.stringify({ provider: option.provider, model: option.model }),
+        body: JSON.stringify({ provider, model }),
       })
       setLlm(updated)
+      setSelectedProvider(updated.provider)
+      setModelInput(updated.model)
       message.success(`已切换到 ${updated.provider} / ${updated.model}，后续调用立即生效`)
     } finally {
       setSavingLlm(false)
@@ -162,15 +164,23 @@ export function AutomationPage() {
         </Tag> },
       ]} />
       <Space wrap>
-        <Select style={{ width: 320 }} value={selectedLlm}
-          onChange={setSelectedLlm}
+        <Select aria-label="LLM 供应商" style={{ width: 180 }} value={selectedProvider}
+          onChange={(provider) => {
+            setSelectedProvider(provider)
+            const option = llm?.options.find((item) => item.provider === provider)
+            if (option) setModelInput(option.model)
+          }}
           options={(llm?.options ?? []).map((item) => ({
-            value: `${item.provider}:${item.model}`,
-            label: `${item.provider} / ${item.model}${item.configured ? '' : '（未配置密钥）'}`,
+            value: item.provider,
+            label: `${item.provider}${item.configured ? '' : '（未配置密钥）'}`,
             disabled: !item.configured,
           }))} />
+        <Input aria-label="LLM 模型" style={{ width: 280 }} value={modelInput}
+          placeholder="输入模型名称"
+          onChange={(event) => setModelInput(event.target.value)} />
         <Button type="primary" loading={savingLlm}
-          disabled={!selectedLlm || selectedLlm === `${llm?.provider}:${llm?.model}`}
+          disabled={!selectedProvider || !modelInput.trim()
+            || (selectedProvider === llm?.provider && modelInput.trim() === llm?.model)}
           onClick={() => void saveLlm().catch(showRequestError)}>
           切换模型
         </Button>

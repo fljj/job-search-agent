@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { AutomationPage } from './AutomationPage'
@@ -24,7 +25,13 @@ const operations = {
 
 function mockAutomationApi() {
   vi.mocked(api).mockImplementation(async (path) => {
-    if (path === '/system/llm-status') return { provider: 'ZHIPU', model: 'glm-5.2', configured: true }
+    if (path === '/system/llm-status') return {
+      provider: 'ZHIPU', model: 'glm-5.2', configured: true,
+      options: [
+        { provider: 'ZHIPU', model: 'glm-5.2', configured: true },
+        { provider: 'QWEN', model: 'qwen-plus', configured: true },
+      ],
+    }
     if (path === '/automation/runs') return { items: [] }
     if (path === '/automation/actions') return { items: [] }
     if (path === '/automation/operations/status') return operations
@@ -73,6 +80,26 @@ describe('AutomationPage', () => {
     ))
   })
 
+  it('供应商从环境允许列表选择，模型可以手动输入并热切换', async () => {
+    const user = userEvent.setup()
+    render(<AutomationPage />)
+    await screen.findByText('boss-worker:RUNNING')
+
+    await user.click(screen.getByLabelText('LLM 供应商'))
+    await user.click(await screen.findByTitle('QWEN'))
+    await user.clear(screen.getByLabelText('LLM 模型'))
+    await user.type(screen.getByLabelText('LLM 模型'), 'qwen-max-latest')
+    await user.click(screen.getByRole('button', { name: '切换模型' }))
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith(
+      '/system/llm-status',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ provider: 'QWEN', model: 'qwen-max-latest' }),
+      }),
+    ))
+  })
+
   it('猎聘不展示阶段文案，已停止的平台可重新启动', async () => {
     vi.mocked(api).mockImplementation(async (path, options) => {
       if (path === '/automation/runs' && options?.method === 'POST') return {}
@@ -81,7 +108,10 @@ describe('AutomationPage', () => {
         processed_count: 0, action_count: 0, failure_count: 0,
         consecutive_failure_count: 0, pause_reason_codes: [], cursor: {},
       }] }
-      if (path === '/system/llm-status') return { provider: 'ZHIPU', model: 'glm-5.2', configured: true }
+      if (path === '/system/llm-status') return {
+        provider: 'ZHIPU', model: 'glm-5.2', configured: true,
+        options: [{ provider: 'ZHIPU', model: 'glm-5.2', configured: true }],
+      }
       if (path === '/automation/actions') return { items: [] }
       if (path === '/automation/operations/status') return operations
       if (path === '/strategies?enabled=true') return { items: [{ id: 'strategy-1', name: '主策略', enabled: true }] }

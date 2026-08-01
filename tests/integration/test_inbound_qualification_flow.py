@@ -77,11 +77,12 @@ def test_llm_selection_is_stored_without_api_key_and_applies_immediately(
         lambda: settings,
     )
 
-    selected = select_llm_configuration(session, "QWEN", "qwen-test")
+    selected = select_llm_configuration(session, "QWEN", "qwen-max-latest")
 
     assert selected["provider"] == "QWEN"
-    assert selected["model"] == "qwen-test"
+    assert selected["model"] == "qwen-max-latest"
     assert runtime_settings(session, settings).llm_provider == "QWEN"
+    assert runtime_settings(session, settings).llm_model == "qwen-max-latest"
     assert "secret" not in str(llm_configuration(session))
 
 

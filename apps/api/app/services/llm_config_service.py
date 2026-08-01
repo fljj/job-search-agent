@@ -72,10 +72,10 @@ def select_llm_configuration(
     normalized = provider.upper()
     if normalized not in base.available_llm_providers:
         raise ValueError("该 LLM 供应商未在环境配置中启用")
-    expected_model = base.configured_model_for(normalized)
-    if model != expected_model:
-        raise ValueError("该模型未在环境配置中启用")
-    selected = base.with_llm_selection(normalized, model)
+    normalized_model = model.strip()
+    if not normalized_model:
+        raise ValueError("模型名称不能为空")
+    selected = base.with_llm_selection(normalized, normalized_model)
     if not selected.llm_configured:
         raise ValueError("该模型尚未配置 API Key")
     ensure_default_user(session)
@@ -88,12 +88,12 @@ def select_llm_configuration(
         row = db.LlmRuntimeSetting(
             user_id=DEFAULT_USER_ID,
             provider=normalized,
-            model=model,
+            model=normalized_model,
         )
         session.add(row)
     else:
         row.provider = normalized
-        row.model = model
+        row.model = normalized_model
         row.version += 1
     circuit = session.scalar(
         select(db.LlmCircuitBreaker).where(
@@ -102,7 +102,7 @@ def select_llm_configuration(
     )
     if circuit is not None:
         circuit.provider = normalized
-        circuit.model = model
+        circuit.model = normalized_model
         circuit.status = "CLOSED"
         circuit.failure_code = None
         circuit.probe_attempt_count = 0

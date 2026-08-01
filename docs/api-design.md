@@ -165,7 +165,8 @@ MAIMAI Run 只使用平台推荐接口；`POST /browser/read-current` 不接受 
 
 ## 10. 系统配置
 
-- `GET/PUT /system/llm-status`：读取或切换环境允许且已配置密钥的供应商和模型；API Key
+- `GET/PUT /system/llm-status`：供应商只能从环境允许列表中选择，模型名称为非空自由文本；
+  供应商和模型保存后后续 LLM 调用立即生效。Base URL 和 API Key
   只来自环境变量。
 - `GET /system/calendar-status`：返回 Apple、Google 或 Mock 日历能力状态。
 
