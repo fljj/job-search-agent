@@ -333,6 +333,8 @@ def create_reply_draft(
     session: Session,
     message_id: object,
     provider: LlmProvider | None = None,
+    *,
+    allow_provider_lookup: bool = True,
 ) -> DraftResponse:
     message = session.get(db.Message, message_id)
     if message is None:
@@ -460,7 +462,11 @@ def create_reply_draft(
             None,
             reply_source=ReplySource.RULE_TEMPLATE,
         )
-    llm_provider = _optional_llm_provider(session, provider)
+    llm_provider = (
+        _optional_llm_provider(session, provider)
+        if allow_provider_lookup
+        else provider
+    )
     score = _current_score(session, conversation)
     if (
         score is None
@@ -591,6 +597,8 @@ def create_resume_draft(
     session: Session,
     message_id: object,
     provider: LlmProvider | None = None,
+    *,
+    allow_provider_lookup: bool = True,
 ) -> DraftResponse:
     message = session.get(db.Message, message_id)
     if message is None:
@@ -622,7 +630,11 @@ def create_resume_draft(
         )
         authorization_basis = "INBOUND_EXPLICIT_RESUME_REQUEST"
     else:
-        llm_provider = _optional_llm_provider(session, provider)
+        llm_provider = (
+            _optional_llm_provider(session, provider)
+            if allow_provider_lookup
+            else provider
+        )
         if llm_provider is None:
             evaluation = ConversationEvaluation(
                 resume_requested=False,

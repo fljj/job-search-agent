@@ -72,7 +72,9 @@ def open_llm_circuit(
             seconds=PROBE_DELAYS_SECONDS[0]
         )
         row.recovered_at = None
-    row.failure_code = failure_code
+        row.failure_code = failure_code
+    # 熔断期间的派生错误不能覆盖首次真实故障，否则限流或网络异常会被
+    # 后续“Provider 暂不可用”误报成未配置。探测请求仍可更新故障原因。
     row.provider = settings.llm_provider
     row.model = settings.llm_model
     session.flush()

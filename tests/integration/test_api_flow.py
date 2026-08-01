@@ -840,6 +840,35 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
             )
         ) is None
 
+    deferred_message = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "external_message_id": "agent-llm-circuit-open",
+            "content": "请再介绍一个尚未处理的问题",
+            "received_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    assert deferred_message.status_code == 200
+    with Session(lease_engine, expire_on_commit=False) as agent_session:
+        tick_run(
+            agent_session,
+            run_id,
+            "circuit-open-worker",
+            executor=FakeActionExecutor(),
+        )
+    with Session(lease_engine) as waiting_session:
+        circuit = waiting_session.scalar(select(entities.LlmCircuitBreaker))
+        deferred = waiting_session.scalar(
+            select(entities.Message).where(
+                entities.Message.external_message_id == "agent-llm-circuit-open"
+            )
+        )
+        assert circuit is not None
+        assert circuit.failure_code == "LLM_SERVICE_ERROR"
+        assert deferred is not None
+        assert deferred.status == "WAITING_FOR_LLM"
+        assert deferred.error_code == "LLM_SERVICE_ERROR"
+
     safety_conversation = client.post("/api/v1/conversations", json={
         "job_id": job_id,
         "external_conversation_id": "agent-safety-conversation",

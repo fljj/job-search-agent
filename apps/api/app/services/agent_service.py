@@ -19,7 +19,11 @@ from apps.api.app.services.action_service import (
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
 from apps.api.app.services.errors import ResourceNotFoundError
-from apps.api.app.services.llm_circuit_service import llm_circuit_is_open, open_llm_circuit
+from apps.api.app.services.llm_circuit_service import (
+    llm_circuit_is_open,
+    llm_circuit_status,
+    open_llm_circuit,
+)
 from apps.api.app.services.llm_config_service import (
     build_runtime_llm_provider,
     runtime_settings,
@@ -249,12 +253,22 @@ def tick_run(
         session.commit()
         try:
             if "RESUME_REQUEST" in message.intents:
-                resume = create_resume_draft(session, message.id, llm_provider)
+                resume = create_resume_draft(
+                    session,
+                    message.id,
+                    llm_provider,
+                    allow_provider_lookup=False,
+                )
                 processed += 1
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
                 _complete_message(session, message)
                 continue
-            draft = create_reply_draft(session, message.id, llm_provider)
+            draft = create_reply_draft(
+                session,
+                message.id,
+                llm_provider,
+                allow_provider_lookup=False,
+            )
             processed += 1
             _event(session, run.id, "DRAFT_CREATED", "draft", draft.id)
             intent_values = [intent.value for intent in draft.intents]
@@ -279,16 +293,23 @@ def tick_run(
                     UUID(str(schedule["id"])),
                 )
             else:
-                resume = create_resume_draft(session, message.id, llm_provider)
+                resume = create_resume_draft(
+                    session,
+                    message.id,
+                    llm_provider,
+                    allow_provider_lookup=False,
+                )
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
             _complete_message(session, message)
         except LlmProviderError as exc:
             open_llm_circuit(session, settings, exc.code, now=current)
+            circuit = llm_circuit_status(session, settings)
+            failure_code = str(circuit.get("failure_code") or exc.code)
             message.status = "WAITING_FOR_LLM"
             message.retry_at = None
-            message.error_code = exc.code
+            message.error_code = failure_code
             message.processing_started_at = None
-            _record_failure(session, run, exc.code)
+            _record_failure(session, run, failure_code)
             session.commit()
             continue
         except (ValueError, ResourceNotFoundError) as exc:
