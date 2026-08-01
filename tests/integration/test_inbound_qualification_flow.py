@@ -36,8 +36,10 @@ from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.models import (
     BrowserConversation,
     BrowserMessage,
+    BrowserPlatformConsent,
     PageType,
     Platform,
+    PlatformConsentType,
     ReadResult,
     SessionStatus,
 )
@@ -471,3 +473,126 @@ def test_message_discovery_imports_unbound_scoreless_conversation(
     assert conversation.state == "ACTIVE"
     assert conversation.observed_company_name == "观察公司"
     assert conversation.observed_job_title == "Java后端"
+
+
+def test_rediscovery_upgrades_identity_and_queues_resume_consent_once(
+    session: Session,
+) -> None:
+    session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    session.flush()
+    profile = db.CandidateProfile(
+        user_id=DEFAULT_USER_ID,
+        name="测试候选人",
+        total_years=10,
+        management_years=0,
+        has_architecture_experience=True,
+        has_core_system_experience=True,
+    )
+    session.add(profile)
+    session.flush()
+    strategy = db.JobStrategy(
+        user_id=DEFAULT_USER_ID,
+        candidate_profile_id=profile.id,
+        name="默认策略",
+        enabled=True,
+        priority=1,
+    )
+    session.add(strategy)
+    session.flush()
+    run = db.AgentRun(
+        user_id=DEFAULT_USER_ID,
+        strategy_id=strategy.id,
+        platform="BOSS",
+        executor_type="REAL_CDP",
+        status="RUNNING",
+        cursor={},
+    )
+    conversation = db.Conversation(
+        user_id=DEFAULT_USER_ID,
+        strategy_id=strategy.id,
+        platform="BOSS",
+        external_conversation_id="derived:existing",
+        recruiter_name="刘女士",
+        state="ACTIVE",
+        identity_reliable=False,
+        qualification_status="ROUGH_MATCH",
+    )
+    session.add_all(
+        [
+            run,
+            conversation,
+            db.AutomationSetting(
+                user_id=DEFAULT_USER_ID,
+                scope_type="GLOBAL",
+                scope_key="GLOBAL",
+                enabled=True,
+                auto_resume_enabled=True,
+            ),
+        ]
+    )
+    session.commit()
+    now = datetime.now(UTC)
+    item = DiscoveredConversation(
+        summary={
+            "external_conversation_id": "derived:existing",
+            "recruiter_name": "刘女士",
+            "job_title": "Java 后端开发工程师",
+            "company_name": "元合共生网络科技",
+            "last_message_id": "message-1",
+            "unread_count": 0,
+            "identity_reliable": True,
+        },
+        detail=ReadResult(
+            platform=Platform.BOSS,
+            status=SessionStatus.SESSION_READY,
+            page_type=PageType.CONVERSATION,
+            page_url="https://www.zhipin.com/web/geek/chat",
+            page_title="消息",
+            content_hash="b" * 64,
+            selector_version="fixture",
+            conversation=BrowserConversation(
+                external_conversation_id="derived:existing",
+                recruiter_name="刘女士",
+                job_title="Java 后端开发工程师",
+                company_name="元合共生网络科技",
+                identity_reliable=True,
+                messages=[
+                    BrowserMessage(
+                        external_message_id="message-1",
+                        content="你好，在看新的工作机会吗？",
+                        received_at=now,
+                    )
+                ],
+                platform_consents=[
+                    BrowserPlatformConsent(
+                        external_consent_id="resume-card-1",
+                        consent_type=PlatformConsentType.RESUME,
+                        prompt="我想要一份您的附件简历，您是否同意",
+                        pending=True,
+                    )
+                ],
+            ),
+        ),
+    )
+    batch = MessageDiscoveryBatch(
+        platform=Platform.BOSS,
+        partition="ALL",
+        scroll_position=1,
+        scanned_at=now,
+        items=[item],
+        exhausted=True,
+    )
+
+    persist_discovery_batch(session, run, "test-worker", batch, now=now)
+    persist_discovery_batch(session, run, "test-worker", batch, now=now)
+
+    session.refresh(conversation)
+    actions = session.scalars(
+        select(db.ActionQueue).where(
+            db.ActionQueue.conversation_id == conversation.id,
+            db.ActionQueue.action_type == "RESUME_CONSENT_ACCEPT",
+        )
+    ).all()
+    assert conversation.identity_reliable is True
+    assert len(actions) == 1
+    assert actions[0].status == "APPROVED"

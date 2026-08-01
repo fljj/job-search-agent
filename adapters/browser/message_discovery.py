@@ -61,6 +61,7 @@ class MessageDiscoveryAdapter:
         partition: str = "UNREAD",
         scroll_position: int = 0,
         seen_message_keys: list[str] | None = None,
+        priority_conversation_ids: list[str] | None = None,
         excluded_conversation_ids: list[str] | None = None,
         terminal_message_ids: dict[str, str] | None = None,
         known_linked_job_ids: dict[str, str] | None = None,
@@ -96,6 +97,7 @@ class MessageDiscoveryAdapter:
             candidates = select_discovery_candidates(
                 eligible,
                 stable_seen_message_keys,
+                priority_conversation_ids=priority_conversation_ids,
                 scroll_position=scroll_position,
                 limit=limit,
             )
@@ -561,16 +563,19 @@ def select_discovery_candidates(
     items: list[BrowserConversationSummary],
     seen_message_keys: list[str],
     *,
+    priority_conversation_ids: list[str] | None = None,
     scroll_position: int,
     limit: int,
 ) -> list[BrowserConversationSummary]:
     """列表重排后仍按最后消息去重，同时保留虚拟滚动位置。"""
     seen = set(seen_message_keys)
+    priority = set(priority_conversation_ids or [])
     window = items[scroll_position : scroll_position + limit]
     return [
         item
         for item in window
-        if _message_key(item) not in seen
+        if item.external_conversation_id in priority
+        or _message_key(item) not in seen
         or (not _has_stable_message_key(item) and item.unread_count > 0)
     ]
 

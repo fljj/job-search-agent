@@ -148,6 +148,15 @@ def _discover_messages(
             )
         ).all()
     )
+    priority_conversation_ids = list(
+        session.scalars(
+            select(db.Conversation.external_conversation_id).where(
+                db.Conversation.platform == run.platform,
+                db.Conversation.state == "ACTIVE",
+                db.Conversation.identity_reliable.is_(False),
+            )
+        ).all()
+    )
     terminal_message_ids = {
         str(conversation_id): str(message_id)
         for conversation_id, message_id in session.execute(
@@ -182,6 +191,7 @@ def _discover_messages(
             seen_message_keys=[
                 str(item) for item in (raw_seen if isinstance(raw_seen, list) else [])
             ],
+            priority_conversation_ids=priority_conversation_ids,
             excluded_conversation_ids=blocked_conversation_ids,
             terminal_message_ids=terminal_message_ids,
             known_linked_job_ids=known_linked_job_ids,

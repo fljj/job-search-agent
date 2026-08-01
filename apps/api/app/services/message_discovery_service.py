@@ -630,11 +630,9 @@ def _next_seen_message_keys(
     )
     if not rescan_due:
         return batch.seen_message_keys, previous_rescan_at or current
-    # BOSS 部分列表项没有消息 ID、预览或可靠未读数，不能永久标记已读。
-    return (
-        [key for key in batch.seen_message_keys if not key.endswith(":conversation")],
-        current,
-    )
+    # 平台同意卡片不一定改变列表最后消息 ID；定时释放去重键，才能重新读取卡片。
+    # 终止会话仍由 scan 的 terminal_message_ids 排除，不会被重新打开。
+    return ([], current)
 
 
 def record_ready_platform_session(

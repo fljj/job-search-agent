@@ -490,7 +490,19 @@ def test_unstable_seen_conversation_is_reopened_only_when_unread() -> None:
     ) == [item]
 
 
-def test_unstable_conversations_are_rechecked_after_full_scan_cooldown() -> None:
+def test_priority_conversation_is_rechecked_even_when_message_was_seen() -> None:
+    item = summary(1)
+
+    assert select_discovery_candidates(
+        [item],
+        [_message_key(item)],
+        priority_conversation_ids=[item.external_conversation_id],
+        scroll_position=0,
+        limit=10,
+    ) == [item]
+
+
+def test_all_active_conversations_are_rechecked_after_full_scan_cooldown() -> None:
     now = datetime.now(UTC)
     batch = MessageDiscoveryBatch(
         platform=Platform.BOSS,
@@ -510,7 +522,7 @@ def test_unstable_conversations_are_rechecked_after_full_scan_cooldown() -> None
         now,
     )
 
-    assert seen == ["stable:message-1"]
+    assert seen == []
     assert rescanned_at == now
 
 

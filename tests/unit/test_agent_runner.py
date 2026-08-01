@@ -289,14 +289,15 @@ def test_message_discovery_reuses_platform_cursor(
     )
     adapter.scan.assert_called_once_with(
         "http://127.0.0.1:9222",
-        partition="ALL",
-        scroll_position=20,
-        seen_message_keys=["chat-1:message-1"],
+            partition="ALL",
+            scroll_position=20,
+            seen_message_keys=["chat-1:message-1"],
+            priority_conversation_ids=["closed-chat"],
             excluded_conversation_ids=["closed-chat"],
             terminal_message_ids={},
-        known_linked_job_ids={},
-        limit=10,
-    )
+            known_linked_job_ids={},
+            limit=10,
+        )
     assert persisted == [batch]
     assert "message_discovery_health" not in (run.cursor or {})
 
