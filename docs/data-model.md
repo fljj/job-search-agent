@@ -87,7 +87,8 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
 保存 `GREETING/REPLY/RESUME/MISMATCH_DECLINE` 草稿、内容、事实 ID、输入指纹、版本、决策和
 `RULE_TEMPLATE/KNOWLEDGE_BASE/LLM/HUMAN` 回复来源。`dispatch_enabled` 是持久化派发边界：
 猎聘 L3 只读流程生成的草稿固定为 `false`，不能在当前或未来阶段进入动作队列；历史数据迁移
-默认保持 `true`。相同有效输入不得重复生成草稿。
+默认保持 `true`。L4 代码不会修改该历史标志；只有发布开关已授权时，基于新入站消息新生成
+或显式重新生成且重新通过策略的草稿才可派发。相同有效输入不得重复生成草稿。
 
 ## 5. 决策、动作和审计
 
@@ -111,6 +112,10 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
 
 `LOW_SCORE_DECLINE` 仅为历史动作值保留，当前代码不能创建新动作。
 
+猎聘沿用通用 `GREETING/REPLY/RESUME` 动作类型，但三类动作分别使用职位、源入站消息或
+明确简历请求构造独立幂等键和发送指纹。执行器回读到已执行结果时复用原动作；写入后结果
+不可确认时进入 `OUTCOME_UNKNOWN`，不得创建第二个动作或直接重试。
+
 ### `action_attempts`、`resume_send_records`、`reconciliation_tasks`
 
 - 每次外部尝试保存开始/结束、结果、写入前后证据和错误；
@@ -130,8 +135,8 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
 - `platform_sessions`：登录、页面和选择器可用状态；
 - `browser_page_registrations`：平台页面角色、CDP target、所有权和唯一性；
 - `browser_read_runs` / `page_evidence`：脱敏页面读取与证据；
-- `job_discovery_records`：职位预筛、处理、重试、正文版本和原因；猎聘满足主动条件但尚未
-  开放写入的记录使用 `SCORED + PROACTIVE_CONTACT_CANDIDATE`，不创建 Action Queue；
+- `job_discovery_records`：职位预筛、处理、重试、正文版本和原因；猎聘发布开关关闭时，满足
+  主动条件的记录使用 `SCORED + PROACTIVE_CONTACT_CANDIDATE`，不创建 Action Queue；
 - `platform_recommendations`：脉脉推荐卡片、简化判断、动作和回读证据；
 - `llm_circuit_breakers`：用户级模型能力状态、探测和失败信息；
 - `llm_runtime_settings`：当前 provider/model 和版本，不保存 API Key。

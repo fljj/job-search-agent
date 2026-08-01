@@ -1,6 +1,6 @@
 {
   "platform": "LIEPIN",
-  "version": "2026-08-01-v1",
+  "version": "2026-08-01-v2",
   "allowed_hosts": ["c.liepin.com", "www.liepin.com"],
   "session": {
     "login_marker": "#im-c-entry",
@@ -78,7 +78,7 @@
     "location_consent_button": null
   },
   "resume_action": {
-    "resume_trigger": ".job-apply-operate .btn-minor",
+    "resume_trigger": ".im-ui-resume-trigger, .job-apply-operate .btn-minor",
     "resume_direct_confirm_button": null,
     "resume_items": ".resume-card-container",
     "resume_confirm_button": ".ant-btn-primary",

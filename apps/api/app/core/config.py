@@ -30,8 +30,9 @@ class Settings(BaseSettings):
     agent_tick_batch_size: int = Field(default=10, ge=1, le=100)
     boss_job_batch_size: int = Field(default=5, ge=1, le=20)
     boss_job_scan_interval_seconds: int = Field(default=180, ge=30, le=3600)
-    liepin_job_batch_size: int = Field(default=5, ge=1, le=20)
+    liepin_job_batch_size: int = Field(default=1, ge=1, le=20)
     liepin_job_scan_interval_seconds: int = Field(default=180, ge=30, le=3600)
+    liepin_writes_enabled: bool = False
     boss_llm_retry_base_seconds: int = Field(default=300, ge=60, le=3600)
     boss_llm_retry_max_seconds: int = Field(default=3600, ge=300, le=21600)
     boss_job_retry_max_attempts: int = Field(default=5, ge=1, le=10)

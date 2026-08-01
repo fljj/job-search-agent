@@ -23,6 +23,26 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
     def __init__(self, config: BrowserSelectorsConfig) -> None:
         super().__init__(Platform.LIEPIN, config)
         self.home_ready_for_job_discovery = False
+        self._hold_drawer_for_actions = False
+        self._held_target: str | None = None
+        self._held_opened_by_agent = False
+
+    def hold_drawer_for_actions(self) -> None:
+        """消息扫描成功后保留抽屉，供当前批次的已授权动作使用。"""
+
+        self._hold_drawer_for_actions = True
+
+    def finish_actions(self) -> None:
+        """动作批次结束后只收起本适配器打开的抽屉。"""
+
+        target = self._held_target
+        opened_by_agent = self._held_opened_by_agent
+        self._held_target = None
+        self._held_opened_by_agent = False
+        self._hold_drawer_for_actions = False
+        if target and opened_by_agent:
+            self._restore_home(target)
+            self.home_ready_for_job_discovery = True
 
     def scan(
         self,
@@ -42,7 +62,7 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
         target = self._find_home_target(cdp_url)
         opened_by_agent = self._ensure_drawer_open(target)
         try:
-            return super().scan(
+            result = super().scan(
                 cdp_url,
                 partition=partition,
                 scroll_position=scroll_position,
@@ -53,10 +73,18 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
                 known_linked_job_ids=known_linked_job_ids,
                 limit=limit,
             )
-        finally:
+        except Exception:
             if opened_by_agent:
                 self._restore_home(target)
                 self.home_ready_for_job_discovery = True
+            raise
+        if self._hold_drawer_for_actions:
+            self._held_target = target
+            self._held_opened_by_agent = opened_by_agent
+        elif opened_by_agent:
+            self._restore_home(target)
+            self.home_ready_for_job_discovery = True
+        return result
 
     def _find_home_target(self, cdp_url: str) -> str:
         with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:

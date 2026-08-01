@@ -63,6 +63,32 @@ def test_user_opened_drawer_is_not_closed(
     restore.assert_not_called()
 
 
+def test_agent_drawer_is_held_until_l4_actions_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = LiepinMessageDiscoveryAdapter(get_browser_selectors())
+    restore = MagicMock()
+    monkeypatch.setattr(adapter, "_find_home_target", lambda _url: "ws://home")
+    monkeypatch.setattr(adapter, "_ensure_drawer_open", lambda _target: True)
+    monkeypatch.setattr(adapter, "_restore_home", restore)
+    monkeypatch.setattr(
+        MessageDiscoveryAdapter,
+        "scan",
+        lambda *_args, **_kwargs: _batch(),
+    )
+
+    adapter.hold_drawer_for_actions()
+    adapter.scan("http://127.0.0.1:9222")
+
+    restore.assert_not_called()
+    assert adapter.home_ready_for_job_discovery is False
+
+    adapter.finish_actions()
+
+    restore.assert_called_once_with("ws://home")
+    assert adapter.home_ready_for_job_discovery is True
+
+
 def test_agent_opened_drawer_is_restored_when_scan_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

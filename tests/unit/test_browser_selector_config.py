@@ -20,7 +20,7 @@ def test_loads_independently_versioned_platform_configs() -> None:
 
     assert set(config.platforms) == {"BOSS", "MAIMAI", "LIEPIN"}
     assert config.platforms["BOSS"].version == "2026-07-29-v14"
-    assert config.platforms["LIEPIN"].version == "2026-08-01-v1"
+    assert config.platforms["LIEPIN"].version == "2026-08-01-v2"
     assert config.version.startswith("bundle-")
 
 

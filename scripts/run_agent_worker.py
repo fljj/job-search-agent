@@ -29,7 +29,6 @@ from adapters.browser.message_discovery import (
     MessageDiscoveryAdapter,
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
-from adapters.browser.read_only_actions import ReadOnlyActionExecutor
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings, reload_settings
@@ -129,8 +128,8 @@ def _build_executor(platform: str, mode: str) -> tuple[ActionExecutor, str]:
         return PlaywrightActionExecutor(get_browser_selectors()), "REAL_CDP"
     if platform == Platform.LIEPIN.value:
         if mode != "REAL":
-            raise ValueError("猎聘只读阶段禁止使用 Fake 执行器")
-        return ReadOnlyActionExecutor(), "READ_ONLY_CDP"
+            raise ValueError("猎聘正式运行禁止使用 Fake 执行器")
+        return PlaywrightActionExecutor(get_browser_selectors()), "REAL_CDP"
     if platform == "MOCK":
         if mode != "FAKE":
             raise ValueError("MOCK 运行必须显式配置 Fake 执行器")
@@ -385,6 +384,8 @@ def _run_liepin_job_discovery(
     cdp_url: str,
     executor: ActionExecutor,
     rules: object,
+    *,
+    execute_external_actions: bool | None = None,
 ) -> None:
     settings = get_settings()
     _run_job_discovery(
@@ -398,7 +399,11 @@ def _run_liepin_job_discovery(
         search_keys=["HOME"],
         batch_size=settings.liepin_job_batch_size,
         interval_seconds=settings.liepin_job_scan_interval_seconds,
-        execute_external_actions=False,
+        execute_external_actions=(
+            settings.liepin_writes_enabled
+            if execute_external_actions is None
+            else execute_external_actions
+        ),
     )
 
 
@@ -652,28 +657,50 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     continue
                 elif run.platform == Platform.LIEPIN.value:
                     run.executor_type = executor_type
+                    liepin_writes_enabled = get_settings().liepin_writes_enabled
                     message_adapter = LiepinMessageDiscoveryAdapter(
                         get_browser_selectors()
                     )
-                    if not _discover_messages(
-                        session,
-                        run,
-                        worker_id,
-                        cdp_url,
-                        message_adapter,
-                        executor,
-                        execute_external_actions=False,
-                    ):
-                        continue
-                    _tick_and_log(
-                        session,
-                        run,
-                        worker_id,
-                        executor,
-                        execute_external_actions=False,
-                    )
+                    message_adapter.hold_drawer_for_actions()
+                    message_ready = False
+                    restore_failed = False
+                    try:
+                        message_ready = _discover_messages(
+                            session,
+                            run,
+                            worker_id,
+                            cdp_url,
+                            message_adapter,
+                            executor,
+                            execute_external_actions=liepin_writes_enabled,
+                        )
+                        if message_ready:
+                            _tick_and_log(
+                                session,
+                                run,
+                                worker_id,
+                                executor,
+                                execute_external_actions=liepin_writes_enabled,
+                            )
+                    finally:
+                        try:
+                            message_adapter.finish_actions()
+                        except LiepinHomeRestoreError:
+                            restore_failed = True
+                            record_platform_session_failure(
+                                session,
+                                run,
+                                "MESSAGE_DISCOVERY_UNAVAILABLE",
+                            )
+                            pause_run(
+                                session,
+                                run.id,
+                                ["MESSAGE_DISCOVERY_UNAVAILABLE"],
+                            )
                     if (
-                        run.status != "RUNNING"
+                        not message_ready
+                        or restore_failed
+                        or run.status != "RUNNING"
                         or not message_adapter.home_ready_for_job_discovery
                     ):
                         continue
@@ -700,6 +727,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                                 cdp_url,
                                 executor,
                                 rules,
+                                execute_external_actions=liepin_writes_enabled,
                             )
                     continue
                 elif run.platform == Platform.MAIMAI.value:

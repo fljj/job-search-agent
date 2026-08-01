@@ -49,6 +49,8 @@ class LiepinJobDiscoveryAdapter:
         interval_seconds: int = 180,
     ) -> JobDiscoveryBatch:
         del search_key, search_keys, refresh_before_scan, switch_search_before_scan
+        # L4 需保留详情到“聊一聊”回读结束；共享首页一次只能持有一个临时详情。
+        limit = min(limit, 1)
         validate_local_cdp_url(cdp_url)
         target = self._find_home_target(cdp_url)
         with RawCdpPageReader(target) as page:
@@ -231,6 +233,7 @@ class LiepinJobDiscoveryAdapter:
                 summary=summary, reason_codes=["JOB_DETAIL_OPEN_FAILED"]
             )
         created_target_id = str(created_target.get("id") or "")
+        keep_target = False
         try:
             for _ in range(100):
                 with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
@@ -268,16 +271,23 @@ class LiepinJobDiscoveryAdapter:
                     time.sleep(0.1)
                     continue
                 reasons = verify_job_target(summary, result)
+                keep_target = not reasons
                 return DiscoveredJob(
                     summary=summary,
                     detail=result if not reasons else None,
+                    detail_target_id=(created_target_id if not reasons else None),
+                    detail_target_url=(href if not reasons else None),
                     reason_codes=reasons,
                 )
             return DiscoveredJob(
                 summary=summary, reason_codes=["JOB_DETAIL_NOT_READY"]
             )
         finally:
-            if created_target_id and created_target_id not in before:
+            if (
+                not keep_target
+                and created_target_id
+                and created_target_id not in before
+            ):
                 self._close_target(cdp_url, created_target_id, href)
 
     def _scroll_home(self, page: RawCdpPageReader) -> None:
@@ -320,5 +330,13 @@ class LiepinJobDiscoveryAdapter:
         except (OSError, TimeoutError, ValueError):
             return
 
-    def close_details(self, _cdp_url: str, _batch: JobDiscoveryBatch) -> None:
-        """猎聘 L2 在读取每个详情后立即关闭，因此批次结束无需再次关闭。"""
+    def close_details(self, cdp_url: str, batch: JobDiscoveryBatch) -> None:
+        """评分和已授权动作完成后关闭本批次创建的详情页。"""
+
+        for item in batch.items:
+            if item.detail_target_id and item.detail_target_url:
+                self._close_target(
+                    cdp_url,
+                    item.detail_target_id,
+                    item.detail_target_url,
+                )

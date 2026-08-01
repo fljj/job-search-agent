@@ -146,6 +146,8 @@ def dispatch(
         raise ResourceNotFoundError("对话不存在")
     if draft is None or draft.user_id != DEFAULT_USER_ID:
         raise ResourceNotFoundError("草稿不存在")
+    if not draft.dispatch_enabled:
+        raise ValueError("只读阶段生成的历史草稿不可派发")
     if draft.conversation_id and draft.conversation_id != conversation.id:
         raise ValueError("草稿与对话不匹配")
     if payload.action_type != draft.draft_type:
@@ -224,6 +226,11 @@ def dispatch(
     if inbound_action and not conversation.identity_reliable:
         decision = AutomationDecision.DENY
         reasons = ["CONVERSATION_IDENTITY_UNRELIABLE"]
+    if inbound_action and conversation.platform == "LIEPIN":
+        identity_gaps = _liepin_inbound_identity_gaps(conversation, job)
+        if identity_gaps:
+            decision = AutomationDecision.DENY
+            reasons = identity_gaps
     policy = db.PolicyDecision(
         user_id=DEFAULT_USER_ID, draft_id=draft.id, action_type=payload.action_type,
         decision=decision.value, reason_codes=reasons, policy_version=POLICY_VERSION,
@@ -385,7 +392,9 @@ def dispatch_proactive_greeting(
         status=ActionStatus.APPROVED.value,
         content=draft.content,
         delivery_mode=(
-            "PLATFORM_DEFAULT" if platform == "BOSS" else "CUSTOM"
+            "PLATFORM_DEFAULT"
+            if platform in {"BOSS", "LIEPIN"}
+            else "CUSTOM"
         ),
         platform=platform,
         target_company=job.company_name,
@@ -419,6 +428,20 @@ def _proactive_safety_gaps(job: db.Job, recruiter_name: str) -> list[str]:
         reasons.append("RECRUITER_UNKNOWN")
     if not job.external_job_id:
         reasons.append("EXTERNAL_JOB_ID_MISSING")
+    return reasons
+
+
+def _liepin_inbound_identity_gaps(
+    conversation: db.Conversation,
+    job: db.Job | None,
+) -> list[str]:
+    reasons: list[str] = []
+    if job is None or not job.external_job_id:
+        reasons.append("LIEPIN_LINKED_JOB_ID_MISSING")
+    if job is None or not job.company_name or not job.title:
+        reasons.append("LIEPIN_LINKED_JOB_IDENTITY_INCOMPLETE")
+    if not conversation.recruiter_name or not conversation.external_conversation_id:
+        reasons.append("LIEPIN_CONVERSATION_IDENTITY_INCOMPLETE")
     return reasons
 
 

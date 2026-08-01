@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head><title>猎聘会话动作</title></head>
+<body>
+  <button id="im-c-entry">消息</button>
+  <aside class="im-ui-contact-list-wrapper">
+    <article class="im-ui-contact-list-item im-ui-active"
+      data-tlg-ext="%7B%22to_imid%22%3A%22liepin-chat-1%22%7D">
+      <span class="im-ui-contact-title-name">李女士</span>
+      <span class="im-ui-contact-title-sub">示例科技 · Java 后端工程师</span>
+    </article>
+  </aside>
+  <header class="im-ui-chat-header">
+    <span class="im-ui-contact-title-name">李女士</span>
+    <span class="im-ui-contact-title-sub">示例科技 · Java 后端工程师</span>
+  </header>
+  <a class="im-ui-position-title"
+    href="https://www.liepin.com/job/1983664515.shtml?job_id=job-liepin-1">Java 后端工程师</a>
+  <section class="im-ui-message-list-wrapper">
+    <article class="im-ui-message-item-wrapper" data-message-id="inbound-1"
+      data-direction="inbound" data-sent-at="2026-08-01T10:30:00+08:00">
+      <div class="im-ui-message-item-normal-message-wrapper">方便发一份简历吗？</div>
+    </article>
+  </section>
+  <textarea class="im-ui-textarea"></textarea>
+  <button class="im-ui-basic-send-btn">发送</button>
+  <button class="im-ui-resume-trigger">投简历</button>
+  <section class="resume-dialog" hidden>
+    <button class="resume-card-container">已维护的默认简历</button>
+    <button class="ant-btn-primary">确认投递</button>
+  </section>
+  <script>
+    const messages = document.querySelector('.im-ui-message-list-wrapper')
+    document.querySelector('.im-ui-basic-send-btn').addEventListener('click', () => {
+      const composer = document.querySelector('.im-ui-textarea')
+      const item = document.createElement('article')
+      item.className = 'im-ui-message-item-wrapper im-ui-message-item-body im-ui-message-item-send'
+      item.innerHTML = `<div class="im-ui-message-item-normal-message-wrapper">${composer.value}</div>`
+      messages.appendChild(item)
+      composer.value = ''
+    })
+    document.querySelector('.im-ui-resume-trigger').addEventListener('click', () => {
+      document.querySelector('.resume-dialog').hidden = false
+    })
+    document.querySelector('.ant-btn-primary').addEventListener('click', () => {
+      const item = document.createElement('article')
+      item.className = 'im-ui-message-item-wrapper im-ui-message-item-body im-ui-message-item-send'
+      item.textContent = '已维护的默认简历'
+      messages.appendChild(item)
+      document.querySelector('.resume-dialog').hidden = true
+    })
+  </script>
+</body>
+</html>

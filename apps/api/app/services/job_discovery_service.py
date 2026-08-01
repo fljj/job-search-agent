@@ -50,8 +50,6 @@ def process_job_discovery_batch(
 ) -> dict[str, int]:
     if run.platform != batch.platform.value:
         raise ValueError("职位发现批次平台与 Agent 运行不匹配")
-    if batch.platform.value == "LIEPIN" and execute_external_actions:
-        raise ValueError("猎聘 L2 只允许发现和评分，禁止创建外部写动作")
     current = now or datetime.now(UTC)
     rules = _effective_rules(session, run.platform, run.strategy_id)
     blocked = job_scan_block_reasons(session, run, rules, current)
@@ -176,6 +174,16 @@ def process_job_discovery_batch(
                     counts["skipped"] += 1
                     continue
                 counts["scored"] += 1
+                if (
+                    execute_external_actions
+                    and source.recruiter_role == "HEADHUNTER"
+                ):
+                    _finish(
+                        record,
+                        "SCORED",
+                        ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"],
+                    )
+                    continue
                 if not execute_external_actions:
                     contact_candidate = (
                         score.automation_eligible

@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, sync_playwright
 
+from adapters.browser.playwright_actions import PlaywrightActionExecutor
 from adapters.browser.playwright_reader import PlaywrightPageReader, _current_cdp_target
 from apps.api.app.core.browser_config import get_browser_selectors
+from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome
 from packages.browser_worker.extractor import _job_id_from_url, extract_current_page
 from packages.browser_worker.models import (
     MessageDirection,
@@ -75,7 +77,7 @@ def test_reads_job_detail_with_platform_selector_version() -> None:
 
     assert result.status is SessionStatus.SESSION_READY
     assert result.page_type is PageType.JOB
-    assert result.selector_version == "2026-08-01-v1"
+    assert result.selector_version == "2026-08-01-v2"
     assert result.job is not None
     assert result.job.external_job_id == "job-liepin-1"
     assert result.job.company_name == "示例科技"
@@ -133,6 +135,134 @@ def test_write_confirmation_fixtures_have_unique_read_only_targets() -> None:
     with fixture_page("resume-confirm.html") as page:
         assert page.locator(selectors.resume_items).count() == 1
         assert page.locator(selectors.resume_confirm_button).count() == 1
+
+
+def _approved_command(action_type: str, **changes: str | None) -> ApprovedCommand:
+    values: dict[str, str | None] = {
+        "action_type": action_type,
+        "platform": "LIEPIN",
+        "conversation_key": "liepin-chat-1",
+        "external_job_id": "job-liepin-1",
+        "company": "示例科技",
+        "job_title": "Java 后端工程师",
+        "recruiter": "李女士",
+    }
+    values.update(changes)
+    return ApprovedCommand.model_validate(values)
+
+
+def test_liepin_greeting_click_is_read_back_once() -> None:
+    with fixture_page("action-job.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            _approved_command(
+                "GREETING",
+                conversation_key=None,
+                content="内部草稿不作为第二条消息发送",
+                delivery_mode="PLATFORM_DEFAULT",
+            ),
+        )
+
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert result.observed_content == "您好，希望进一步沟通。"
+        assert page.locator(".im-ui-message-item-send").count() == 1
+
+
+def test_liepin_reply_uses_approved_conversation_and_reads_back() -> None:
+    with fixture_page("action-conversation.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            _approved_command("REPLY", content="您好，可以进一步沟通。"),
+        )
+
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert page.locator(".im-ui-message-item-send").filter(
+            has_text="您好，可以进一步沟通。"
+        ).count() == 1
+
+
+def test_liepin_conversation_list_target_decodes_stable_im_id() -> None:
+    class EvaluationPage:
+        def __init__(self, page: Page) -> None:
+            self.page = page
+            self.commands: list[str] = []
+
+        def _evaluate(self, expression: str) -> object:
+            return self.page.evaluate(expression)
+
+        def _command(self, method: str, _params: dict[str, object]) -> dict[str, object]:
+            self.commands.append(method)
+            return {}
+
+    with fixture_page("action-conversation.html") as page:
+        raw_page = EvaluationPage(page)
+        opened = PlaywrightActionExecutor._open_approved_conversation(
+            raw_page,  # type: ignore[arg-type]
+            get_browser_selectors().platforms["LIEPIN"],
+            _approved_command("REPLY", content="您好"),
+        )
+
+    assert opened
+    assert raw_page.commands == ["Input.dispatchMouseEvent", "Input.dispatchMouseEvent"]
+
+
+def test_liepin_resume_selects_only_registered_existing_resume() -> None:
+    with fixture_page("action-conversation.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            _approved_command(
+                "RESUME",
+                attachment_name="已维护的默认简历",
+            ),
+        )
+
+        assert result.outcome is ExecutionOutcome.SUCCEEDED
+        assert page.locator(".im-ui-message-item-send").filter(
+            has_text="已维护的默认简历"
+        ).count() == 1
+
+
+def test_liepin_resume_name_mismatch_stops_before_submission() -> None:
+    with fixture_page("action-conversation.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            _approved_command(
+                "RESUME",
+                attachment_name="未登记的简历",
+            ),
+        )
+
+        assert result.outcome is ExecutionOutcome.FAILED_FINAL
+        assert result.error_code == "ATTACHMENT_TARGET_MISMATCH"
+        assert page.locator(".im-ui-message-item-send").filter(
+            has_text="未登记的简历"
+        ).count() == 0
+
+
+def test_liepin_changed_target_stops_before_write() -> None:
+    with fixture_page("action-conversation.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            _approved_command(
+                "REPLY",
+                recruiter="其他招聘人",
+                content="不应发送",
+            ),
+        )
+
+        assert result.outcome is ExecutionOutcome.FAILED_FINAL
+        assert page.get_by_text("不应发送").count() == 0
+
+
+def test_liepin_unobserved_write_is_not_reported_as_success() -> None:
+    with fixture_page("conversation-detail.html") as page:
+        result = PlaywrightActionExecutor(get_browser_selectors()).execute_on_page(
+            page,
+            _approved_command("REPLY", content="无法回读的回复"),
+        )
+
+        assert result.outcome is ExecutionOutcome.OUTCOME_UNKNOWN
+        assert result.error_code == "RESULT_NOT_OBSERVED"
 
 
 def test_shared_home_conflict_fixture_preserves_user_input_and_dialog() -> None:

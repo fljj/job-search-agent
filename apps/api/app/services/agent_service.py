@@ -175,8 +175,6 @@ def tick_run(
 ) -> dict[str, object]:
     current = now or datetime.now(UTC)
     requested_run = _get_run(session, run_id)
-    if requested_run.platform == "LIEPIN" and execute_external_actions:
-        raise ValueError("猎聘 L3 只允许生成草稿和确认任务，禁止外部写动作")
     if executor is None and requested_run.platform != "MOCK":
         raise ValueError("真实平台 Agent 必须显式提供真实执行器")
     run = _acquire_lease(session, run_id, worker_id, current)

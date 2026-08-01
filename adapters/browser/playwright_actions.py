@@ -864,6 +864,7 @@ class PlaywrightActionExecutor:
         recruiter_selector = selectors.conversation_list_item_recruiter
         job_selector = selectors.conversation_list_item_job_title
         company_selector = selectors.conversation_list_item_company
+        company_separator = selectors.conversation_company_separator
         point = page._evaluate(
                 "(() => {"
                 f"const items = [...document.querySelectorAll({json.dumps(item_selector)})];"
@@ -876,11 +877,16 @@ class PlaywrightActionExecutor:
                 f"const recruiterSelector = {json.dumps(recruiter_selector)};"
                 f"const jobSelector = {json.dumps(job_selector)};"
                 f"const companySelector = {json.dumps(company_selector)};"
+                f"const companySeparator = {json.dumps(company_separator)};"
                 "const matches = items.filter(item => {"
                 " const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim() || '';"
                 " if (recruiter !== expectedRecruiter) return false;"
-                "  const job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
-                "  const company = item.querySelector(companySelector)?.textContent?.trim() || '';"
+                " let job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
+                " let company = item.querySelector(companySelector)?.textContent?.trim() || '';"
+                " if (jobSelector === companySelector && companySeparator && company) {"
+                "  const parts = company.split(companySeparator, 2).map(value => value.trim());"
+                "  company = parts[0] || ''; job = parts[1] || '';"
+                " }"
                 " if (expectedId.startsWith('derived:')) {"
                 "  const visible = (item.innerText || item.textContent || '').replace(/\\s+/g, ' ');"
                 "  const companyMatches = expectedCompany && expectedCompany !== '未知公司' "
@@ -893,7 +899,7 @@ class PlaywrightActionExecutor:
                 " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
                 " if (!raw) return false;"
                 " if (!idJsonKey) return raw === expectedId;"
-                " try { return String(JSON.parse(raw)[idJsonKey]) === expectedId; }"
+                " try { return String(JSON.parse(decodeURIComponent(raw))[idJsonKey]) === expectedId; }"
                 " catch { return false; }"
                 "});"
                 "if (matches.length !== 1) return null;"
@@ -935,10 +941,17 @@ class PlaywrightActionExecutor:
                     "(() => { const element = document.querySelector("
                     f"{json.dumps(selectors.message_composer)}"
                     f"); if (!element) return false; const value = {json.dumps(command.content)}; "
-                    "element.focus(); element.textContent = value; "
+                    "element.focus(); if ('value' in element) { "
+                    "const prototype = element.tagName === 'TEXTAREA' "
+                    "? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; "
+                    "const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set; "
+                    "if (setter) setter.call(element, value); else element.value = value; "
+                    "} else { element.textContent = value; } "
                     "element.dispatchEvent(new InputEvent('input', {bubbles: true, "
-                    "inputType: 'insertText', data: value})); return "
-                    "(element.textContent || '').trim() === value; })()"
+                    "inputType: 'insertText', data: value})); "
+                    "element.dispatchEvent(new Event('change', {bubbles: true})); return "
+                    "(('value' in element ? element.value : element.textContent) || '').trim() "
+                    "=== value; })()"
                 )
                 if not filled:
                     return ExecutionResult(
@@ -950,7 +963,8 @@ class PlaywrightActionExecutor:
                     sent = page._evaluate(
                         "(() => { const composer = document.querySelector("
                         f"{json.dumps(selectors.message_composer)}"
-                        f"); if ((composer?.textContent || '').trim() !== "
+                        f"); if (((composer && 'value' in composer ? composer.value : "
+                        "composer?.textContent) || '').trim() !== "
                         f"{json.dumps(command.content)}) return false; "
                         "const element = Array.from(document.querySelectorAll("
                         f"{json.dumps(selectors.message_send_button)}"
@@ -1214,7 +1228,9 @@ class PlaywrightActionExecutor:
                 if command.delivery_mode == "PLATFORM_DEFAULT":
                     observed = page.text(selectors.platform_greeting_message)
                     dialog = page.text(selectors.platform_greeting_dialog)
-                    if observed and dialog and "已发送" in dialog and (
+                    if observed and dialog and (
+                        command.platform == "LIEPIN" or "已发送" in dialog
+                    ) and (
                         not command.expected_platform_content
                         or observed == command.expected_platform_content
                     ):
@@ -1358,7 +1374,9 @@ class PlaywrightActionExecutor:
                     for _ in range(30):
                         observed = page.text(selectors.platform_greeting_message)
                         dialog = page.text(selectors.platform_greeting_dialog)
-                        if observed and dialog and "已发送" in dialog:
+                        if observed and dialog and (
+                            command.platform == "LIEPIN" or "已发送" in dialog
+                        ):
                             evidence = hashlib.sha256(
                                 f"{page.url}:{observed}:{command.model_dump_json()}".encode()
                             ).hexdigest()

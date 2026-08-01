@@ -766,6 +766,8 @@ def edit_draft(session: Session, draft_id: object, content: str) -> DraftRespons
     original = session.get(db.GeneratedDraft, draft_id)
     if original is None or original.user_id != DEFAULT_USER_ID:
         raise ResourceNotFoundError("草稿不存在")
+    if not original.dispatch_enabled:
+        raise ValueError("只读阶段生成的历史草稿不可编辑后派发")
     if session.scalar(select(db.ActionQueue.id).where(db.ActionQueue.draft_id == original.id)):
         raise ValueError("草稿已经创建动作，不能直接修改")
     risks = validate_edited_content(content)

@@ -200,6 +200,7 @@ def test_explicit_inbound_resume_request_does_not_require_score(
             ),
             executor=FakeActionExecutor(),
         )
+    executor = FakeActionExecutor()
     sent = dispatch(
         session,
         AutomationDispatchRequest(
@@ -208,7 +209,7 @@ def test_explicit_inbound_resume_request_does_not_require_score(
             draft_id=draft.id,
             resume_id=draft.resume_id,
         ),
-        executor=FakeActionExecutor(),
+        executor=executor,
     )
     assert sent["action_status"] == "SUCCEEDED"
     action = session.get(db.ActionQueue, sent["action_id"])
@@ -216,6 +217,20 @@ def test_explicit_inbound_resume_request_does_not_require_score(
     assert action.authorization_basis == "INBOUND_EXPLICIT_RESUME_REQUEST"
     assert action.qualification_snapshot["status"] == "ROUGH_MATCH"
     assert action.evidence_message_ids
+    repeated = dispatch(
+        session,
+        AutomationDispatchRequest(
+            action_type="RESUME",
+            conversation_id=conversation.id,
+            draft_id=draft.id,
+            resume_id=draft.resume_id,
+        ),
+        executor=executor,
+    )
+    assert repeated["decision"] == "DENY"
+    assert repeated["reason_codes"] == ["RESUME_ALREADY_SENT"]
+    assert len(executor.commands) == 1
+    assert session.query(db.ActionQueue).filter_by(draft_id=draft.id).count() == 1
 
     phone_message = import_message(
         session,
@@ -695,3 +710,58 @@ def test_platform_outbound_message_blocks_historical_draft_dispatch(
     assert stored_outbound is not None
     assert stored_outbound.direction == "OUTBOUND"
     assert _pending_drafts(session, run, 10) == []
+
+
+def test_liepin_l3_draft_cannot_be_dispatched_after_l4_upgrade(
+    session: Session,
+) -> None:
+    session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    session.flush()
+    conversation = db.Conversation(
+        user_id=DEFAULT_USER_ID,
+        platform="LIEPIN",
+        external_conversation_id="liepin-l3-history",
+        recruiter_name="招聘人",
+        state="ACTIVE",
+    )
+    session.add(conversation)
+    session.flush()
+    draft = db.GeneratedDraft(
+        user_id=DEFAULT_USER_ID,
+        conversation_id=conversation.id,
+        draft_type="REPLY",
+        content="L3 历史草稿",
+        intents=[],
+        fact_ids=[],
+        confidence=1,
+        risk_codes=[],
+        input_fingerprint="liepin-l3-disabled-draft",
+        generator_version="test",
+        reply_source="RULE_TEMPLATE",
+        dispatch_enabled=False,
+    )
+    session.add(draft)
+    session.flush()
+    session.add(
+        db.PolicyDecision(
+            user_id=DEFAULT_USER_ID,
+            draft_id=draft.id,
+            action_type="REPLY",
+            decision="ALLOW_AUTO",
+            reason_codes=[],
+            policy_version="test",
+            input_snapshot={},
+        )
+    )
+    session.commit()
+
+    with pytest.raises(ValueError, match="历史草稿不可派发"):
+        dispatch(
+            session,
+            AutomationDispatchRequest(
+                action_type="REPLY",
+                conversation_id=conversation.id,
+                draft_id=draft.id,
+            ),
+            executor=FakeActionExecutor(),
+        )

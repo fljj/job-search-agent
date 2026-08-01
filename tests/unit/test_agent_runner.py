@@ -20,13 +20,11 @@ from adapters.browser.message_discovery import (
     MessageDiscoveryBatch,
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
-from adapters.browser.read_only_actions import ReadOnlyActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import Settings
 from apps.api.app.models import entities as db
 from apps.api.app.services.agent_service import (
     _disable_message_draft_dispatch,
-    tick_run,
 )
 from packages.browser_worker.actions import (
     ApprovedCommand,
@@ -201,19 +199,19 @@ def test_worker_executor_mode_is_explicitly_isolated() -> None:
 
     assert isinstance(real_executor, PlaywrightActionExecutor)
     assert real_type == "REAL_CDP"
-    assert isinstance(liepin_executor, ReadOnlyActionExecutor)
-    assert liepin_type == "READ_ONLY_CDP"
+    assert isinstance(liepin_executor, PlaywrightActionExecutor)
+    assert liepin_type == "REAL_CDP"
     assert isinstance(fake_executor, FakeActionExecutor)
     assert fake_type == "FAKE"
     with pytest.raises(ValueError, match="禁止使用 Fake"):
         _build_executor("BOSS", "FAKE")
-    with pytest.raises(ValueError, match="只读阶段禁止使用 Fake"):
+    with pytest.raises(ValueError, match="正式运行禁止使用 Fake"):
         _build_executor("LIEPIN", "FAKE")
     with pytest.raises(ValueError, match="显式配置 Fake"):
         _build_executor("MOCK", "REAL")
 
 
-def test_liepin_job_discovery_forces_read_only_batch_processing(
+def test_liepin_job_discovery_enables_l4_action_processing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run = db.AgentRun(
@@ -249,7 +247,11 @@ def test_liepin_job_discovery_forces_read_only_batch_processing(
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.get_settings",
-        lambda: Settings(_env_file=None, liepin_job_batch_size=5),
+        lambda: Settings(
+            _env_file=None,
+            liepin_job_batch_size=1,
+            liepin_writes_enabled=True,
+        ),
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.get_job_parser_config", MagicMock()
@@ -269,34 +271,16 @@ def test_liepin_job_discovery_forces_read_only_batch_processing(
         run,
         "worker-1",
         "http://127.0.0.1:9222",
-        ReadOnlyActionExecutor(),
+        PlaywrightActionExecutor(get_browser_selectors()),
         AutomationRules(),
     )
 
     assert adapter.scan.call_args.kwargs["search_key"] == "HOME"
     assert adapter.scan.call_args.kwargs["refresh_before_scan"] is False
-    assert processed.call_args.kwargs["execute_external_actions"] is False
+    assert processed.call_args.kwargs["execute_external_actions"] is True
     adapter.close_details.assert_called_once_with(
         "http://127.0.0.1:9222", batch
     )
-
-
-def test_liepin_tick_rejects_external_action_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run = db.AgentRun(id=uuid4(), platform="LIEPIN")
-    monkeypatch.setattr(
-        "apps.api.app.services.agent_service._get_run",
-        lambda *_args: run,
-    )
-
-    with pytest.raises(ValueError, match="猎聘 L3 只允许生成草稿"):
-        tick_run(
-            MagicMock(spec=Session),
-            run.id,
-            "worker-1",
-            executor=ReadOnlyActionExecutor(),
-        )
 
 
 def test_liepin_prepare_mode_persists_draft_dispatch_guard() -> None:
@@ -421,7 +405,7 @@ def test_message_discovery_reuses_platform_cursor(
     assert "message_discovery_health" not in (run.cursor or {})
 
 
-def test_liepin_message_discovery_scores_but_never_executes_consents(
+def test_liepin_message_discovery_runs_l4_action_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = MagicMock(spec=Session)
@@ -478,10 +462,10 @@ def test_liepin_message_discovery_scores_but_never_executes_consents(
         "worker-1",
         "http://127.0.0.1:9222",
         adapter,
-        ReadOnlyActionExecutor(),
-        execute_external_actions=False,
+        PlaywrightActionExecutor(get_browser_selectors()),
+        execute_external_actions=True,
     )
-    consents.assert_not_called()
+    consents.assert_called_once()
     score.assert_called_once()
 
 
@@ -616,6 +600,10 @@ def test_disabled_maimai_recommendations_do_not_block_ordinary_messages(
         FakeActionExecutor(),
     )
     scan.assert_not_called()
+
+
+def test_liepin_writes_require_explicit_release_authorization() -> None:
+    assert Settings(_env_file=None).liepin_writes_enabled is False
 
 
 def test_raw_reply_waits_for_button_and_delayed_readback(

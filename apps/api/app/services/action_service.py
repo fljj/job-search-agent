@@ -23,10 +23,15 @@ from packages.policy_engine.state_machine import ActionStatus, ActionType, requi
 
 PREWRITE_RETRYABLE_FAILURES = {
     "APPROVED_TARGET_PAGE_NOT_FOUND",
+    "GREETING_TRIGGER_NOT_VISIBLE",
+    "COMPOSER_FILL_NOT_CONFIRMED",
+    "SEND_BUTTON_NOT_READY",
     "RESUME_TRIGGER_NOT_READY",
     "RESUME_CONFIRM_NOT_READY",
     "PLATFORM_CONSENT_BUTTON_NOT_READY",
     "LOCATION_CONSENT_BUTTON_NOT_READY",
+    "RAW_CDP_PREFLIGHT_ERROR",
+    "RAW_CDP_ACTION_ERROR",
 }
 
 PREWRITE_PAUSE_FAILURES = {
@@ -51,6 +56,8 @@ def approve_task(
             raise ValueError("幂等键已用于其他确认任务")
         return _response(existing)
     task, decision, draft = _task_bundle(session, task_id)
+    if not draft.dispatch_enabled:
+        raise ValueError("只读阶段生成的历史草稿不可批准")
     if task.expires_at and task.expires_at < datetime.now(UTC):
         task.status = ActionStatus.EXPIRED.value
         session.commit()

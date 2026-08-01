@@ -105,9 +105,10 @@ def test_scan_prefilters_irrelevant_title_before_opening_detail(
         limit=3,
     )
 
-    assert opened == ["relevant", "unknown"]
+    assert opened == []
     assert batch.items[0].reason_codes == ["TITLE_STRONGLY_IRRELEVANT"]
-    assert batch.seen_job_ids == ["irrelevant", "relevant", "unknown"]
+    assert batch.seen_job_ids == ["irrelevant"]
+    assert len(batch.items) == 1
     assert batch.platform is Platform.LIEPIN
     assert batch.refresh_before_next_scan is False
 
@@ -149,22 +150,38 @@ def test_close_only_exact_worker_owned_liepin_detail(
 
 
 @pytest.mark.parametrize(
-    ("recruiter_role", "expected_reasons"),
+    (
+        "recruiter_role",
+        "execute_external_actions",
+        "expected_reasons",
+        "expected_contacted",
+    ),
     [
-        ("DIRECT_EMPLOYER", ["PROACTIVE_CONTACT_CANDIDATE"]),
+        ("DIRECT_EMPLOYER", False, ["PROACTIVE_CONTACT_CANDIDATE"], 0),
+        ("DIRECT_EMPLOYER", True, ["GREETING_SENT"], 1),
         (
             "HEADHUNTER",
+            False,
             [
                 "PROACTIVE_CONTACT_NOT_ELIGIBLE",
                 "HEADHUNTER_PROACTIVE_CONTACT_BLOCKED",
             ],
+            0,
+        ),
+        (
+            "HEADHUNTER",
+            True,
+            ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"],
+            0,
         ),
     ],
 )
-def test_liepin_read_only_batch_scores_without_creating_or_executing_action(
+def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
     monkeypatch: pytest.MonkeyPatch,
     recruiter_role: str,
+    execute_external_actions: bool,
     expected_reasons: list[str],
+    expected_contacted: int,
 ) -> None:
     item = _summary("liepin-job-1", "Java 后端工程师")
     batch = JobDiscoveryBatch(
@@ -222,7 +239,12 @@ def test_liepin_read_only_batch_scores_without_creating_or_executing_action(
         strategy if model is db.JobStrategy else job
     )
     greet = MagicMock()
-    dispatch = MagicMock()
+    dispatch = MagicMock(
+        return_value={
+            "action_id": uuid4(),
+            "action_status": "SUCCEEDED",
+        }
+    )
     monkeypatch.setattr(
         "apps.api.app.services.job_discovery_service._effective_rules",
         lambda *_args: AutomationRules(
@@ -280,14 +302,23 @@ def test_liepin_read_only_batch_scores_without_creating_or_executing_action(
         provider=MagicMock(),
         executor=ReadOnlyActionExecutor(),
         cdp_url="http://127.0.0.1:9222",
-        execute_external_actions=False,
+        execute_external_actions=execute_external_actions,
     )
 
-    assert counts == {"discovered": 1, "scored": 1, "contacted": 0, "skipped": 0}
-    assert record.status == "SCORED"
+    assert counts == {
+        "discovered": 1,
+        "scored": 1,
+        "contacted": expected_contacted,
+        "skipped": 0,
+    }
+    assert record.status == ("CONTACTED" if expected_contacted else "SCORED")
     assert record.reason_codes == expected_reasons
-    greet.assert_not_called()
-    dispatch.assert_not_called()
+    if expected_contacted:
+        greet.assert_called_once()
+        dispatch.assert_called_once()
+    else:
+        greet.assert_not_called()
+        dispatch.assert_not_called()
 
 
 def test_read_only_executor_fails_closed_before_write() -> None:
@@ -312,30 +343,3 @@ def test_only_liepin_candidate_home_is_registered_as_job_list() -> None:
     assert _page_role("LIEPIN", "https://c.liepin.com/?time=1") == "JOB_LIST"
     assert _page_role("LIEPIN", "https://www.liepin.com/") is None
     assert _page_role("LIEPIN", "https://example.com/") is None
-
-
-def test_liepin_batch_rejects_write_enabled_processing() -> None:
-    run = db.AgentRun(
-        id=uuid4(),
-        user_id=uuid4(),
-        strategy_id=uuid4(),
-        platform="LIEPIN",
-        cursor={},
-    )
-    batch = JobDiscoveryBatch(
-        platform=Platform.LIEPIN,
-        search_key="HOME",
-        scroll_position=0,
-        scanned_at=datetime.now(UTC),
-        next_scan_at=datetime.now(UTC),
-    )
-
-    with pytest.raises(ValueError, match="猎聘 L2 只允许发现和评分"):
-        process_job_discovery_batch(
-            MagicMock(),
-            run,
-            batch,
-            provider=MagicMock(),
-            executor=ReadOnlyActionExecutor(),
-            cdp_url="http://127.0.0.1:9222",
-        )

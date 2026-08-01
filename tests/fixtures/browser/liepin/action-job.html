@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head><title>猎聘职位动作</title></head>
+<body>
+  <button id="im-c-entry">消息</button>
+  <main class="job-apply-container" data-job-id="job-liepin-1">
+    <div class="job-apply-content">
+      <h1 class="job-title">Java 后端工程师</h1>
+      <span class="job-salary">25-35k</span>
+    </div>
+    <div class="job-properties">
+      <span class="job-location">济南-历下区</span>
+      <span class="work-mode">现场办公</span>
+    </div>
+    <section class="recruiter-container">
+      <span class="recruiter-name">李女士</span>
+      <span class="recruiter-role">企业 HR</span>
+      <span class="company-name">示例科技</span>
+    </section>
+    <section class="company-intro-container">
+      <span class="company-industry">互联网</span>
+    </section>
+    <section class="job-intro-container">负责 Java 服务端和核心系统研发。</section>
+    <div class="job-apply-operate"><button class="btn-chat">聊一聊</button></div>
+  </main>
+  <script>
+    document.querySelector('.btn-chat').addEventListener('click', () => {
+      const dialog = document.createElement('section')
+      dialog.className = 'im-ui-chat-modal-container'
+      dialog.innerHTML = '<article class="im-ui-message-item-wrapper im-ui-message-item-body im-ui-message-item-send"><span class="im-ui-message-item-normal-message-wrapper">您好，希望进一步沟通。</span></article>'
+      document.body.appendChild(dialog)
+    })
+  </script>
+</body>
+</html>
