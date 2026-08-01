@@ -32,6 +32,7 @@ function mockOverviewApi() {
         pending_schedule_confirmation_count: 2,
         workers: [{ worker_id: 'worker-1', status: 'RUNNING' }],
         discrepancies: [],
+        capabilities: { llm: 'CLOSED', calendar: 'CONFIGURED', executor: 'CONFIGURED' },
         llm_circuit: {
           status: 'CLOSED',
           provider: 'ZHIPU',
@@ -75,6 +76,8 @@ describe('OverviewPage 重新连接', () => {
     expect(screen.getByText('待确认面试')).toBeTruthy()
     expect(screen.getByText('3')).toBeTruthy()
     expect(screen.getByText('2')).toBeTruthy()
+    expect(screen.getByText('LLM：正常可用 / 日历：已配置 / 执行器：已配置')).toBeTruthy()
+    expect(screen.queryByText(/LLM:CLOSED/)).toBeNull()
   })
 
   it('点击后调用恢复接口并提示重新检查页面', async () => {

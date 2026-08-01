@@ -144,7 +144,7 @@ export function OverviewPage() {
               : currentWorkers.length === 1 ? 'green' : 'default'
         }>{workerStatusText(operations?.workers)}</Tag> },
         { key: 'capabilities', label: '能力', children: operations?.capabilities
-          ? `LLM:${operations.capabilities.llm} / 日历:${operations.capabilities.calendar} / 执行器:${operations.capabilities.executor}`
+          ? `LLM：${businessLabel(operations.capabilities.llm)} / 日历：${businessLabel(operations.capabilities.calendar)} / 执行器：${businessLabel(operations.capabilities.executor)}`
           : '-' },
         { key: 'unknown', label: '未知结果', children: operations?.unknown_action_count ?? 0 },
         { key: 'discrepancies', label: '审计差异', children: operations?.discrepancies.length ?? 0 },

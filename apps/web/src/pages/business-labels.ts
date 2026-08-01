@@ -1,7 +1,8 @@
 const labels: Record<string, string> = {
   RUNNING: '运行中', PAUSED: '已暂停', STOPPED: '已停止', STALE: '心跳过期',
   SESSION_READY: '页面就绪', SESSION_UNAVAILABLE: '页面不可用',
-  OPEN: '模型暂停', PROBING: '模型探测中', CLOSED: '模型正常',
+  OPEN: '暂停（模型不可用）', PROBING: '正在检测', CLOSED: '正常可用',
+  CONFIGURED: '已配置', UNCONFIGURED: '未配置',
   GREETING: '主动招呼', REPLY: '普通回复', RESUME: '发送默认简历',
   MISMATCH_DECLINE: '礼貌拒绝', SUCCEEDED: '已成功', APPROVED: '待执行',
   FAILED_RETRYABLE: '可重试失败', FAILED_FINAL: '最终失败',
