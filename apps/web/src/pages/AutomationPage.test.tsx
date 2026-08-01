@@ -73,4 +73,35 @@ describe('AutomationPage', () => {
     ))
   })
 
+  it('猎聘不展示阶段文案，已停止的平台可重新启动', async () => {
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      if (path === '/automation/runs' && options?.method === 'POST') return {}
+      if (path === '/automation/runs') return { items: [{
+        id: 'liepin-run', platform: 'LIEPIN', strategy_id: 'strategy-1', status: 'STOPPED',
+        processed_count: 0, action_count: 0, failure_count: 0,
+        consecutive_failure_count: 0, pause_reason_codes: [], cursor: {},
+      }] }
+      if (path === '/system/llm-status') return { provider: 'ZHIPU', model: 'glm-5.2', configured: true }
+      if (path === '/automation/actions') return { items: [] }
+      if (path === '/automation/operations/status') return operations
+      if (path === '/strategies?enabled=true') return { items: [{ id: 'strategy-1', name: '主策略', enabled: true }] }
+      if (path === '/automation/settings') return { items: [] }
+      return {}
+    })
+
+    render(<AutomationPage />)
+
+    await screen.findByText('平台任务管理（高级）')
+    expect(screen.queryByText(/L4 已就绪/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '重新启动' }))
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith(
+      '/automation/runs',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ platform: 'LIEPIN', strategy_id: 'strategy-1' }),
+      }),
+    ))
+  })
+
 })

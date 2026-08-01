@@ -50,3 +50,9 @@ export function canReconnectRun(
   return run.status === 'PAUSED'
     && run.pause_reason_codes.some((reason) => reconnectablePauseReasons.has(reason))
 }
+
+export function canResumeRun(
+  run: Pick<RunSummaryItem, 'status' | 'pause_reason_codes'>,
+) {
+  return run.status === 'PAUSED' && run.pause_reason_codes.includes('USER_PAUSED')
+}

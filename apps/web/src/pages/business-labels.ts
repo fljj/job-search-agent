@@ -1,5 +1,9 @@
 const labels: Record<string, string> = {
   RUNNING: '运行中', PAUSED: '已暂停', STOPPED: '已停止', STALE: '心跳过期',
+  USER_PAUSED: '人工暂停', MESSAGE_DISCOVERY_UNAVAILABLE: '消息页面不可用',
+  JOB_DISCOVERY_UNAVAILABLE: '职位页面不可用',
+  RECOMMENDATION_DISCOVERY_UNAVAILABLE: '推荐页面不可用',
+  RESULT_NOT_OBSERVED: '发送结果待核对',
   SESSION_READY: '页面就绪', SESSION_UNAVAILABLE: '页面不可用',
   OPEN: '暂停（模型不可用）', PROBING: '正在检测', CLOSED: '正常可用',
   CONFIGURED: '已配置', UNCONFIGURED: '未配置',

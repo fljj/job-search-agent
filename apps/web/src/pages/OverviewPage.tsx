@@ -2,7 +2,7 @@ import { Alert, Button, Card, Col, Descriptions, Row, Space, Statistic, Tag, mes
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { statusColor } from './automation-status'
-import { activeRuns, agentStatusText, canReconnectRun } from './run-summary'
+import { activeRuns, agentStatusText, canReconnectRun, canResumeRun } from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
 import { businessLabel } from './business-labels'
 
@@ -49,14 +49,18 @@ export function OverviewPage() {
       setLoadError(error instanceof Error ? error.message : '无法连接 API 服务')
     }
   }, [])
-  const reconnect = async (run: Run) => {
+  const resume = async (run: Run) => {
+    const reconnecting = canReconnectRun(run)
     setReconnectingRunId(run.id)
     try {
       await api(`/automation/runs/${run.id}/resume`, { method: 'POST' })
-      message.success(`${run.platform} 已恢复，正在重新检查页面`)
+      message.success(reconnecting
+        ? `${run.platform} 已恢复，正在重新检查页面`
+        : `${run.platform} 已恢复运行`)
       await load()
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '重新连接失败，请确认平台页面已经打开')
+      message.error(error instanceof Error ? error.message
+        : reconnecting ? '重新连接失败，请确认平台页面已经打开' : '恢复运行失败')
     } finally {
       setReconnectingRunId(undefined)
     }
@@ -126,10 +130,12 @@ export function OverviewPage() {
               <Tag color={statusColor(run.status)}>
                 {run.platform}:{businessLabel(run.status)}
                 {run.status === 'PAUSED' && run.pause_reason_codes.length > 0
-                  ? `（${run.pause_reason_codes.join('、')}）` : ''}
+                  ? `（${run.pause_reason_codes.map(businessLabel).join('、')}）` : ''}
               </Tag>
               {canReconnectRun(run) && <Button size="small" loading={reconnectingRunId === run.id}
-                onClick={() => void reconnect(run)}>重新连接</Button>}
+                onClick={() => void resume(run)}>重新连接</Button>}
+              {canResumeRun(run) && <Button size="small" loading={reconnectingRunId === run.id}
+                onClick={() => void resume(run)}>恢复运行</Button>}
             </Space>)}</Space>
           : <Tag>STOPPED</Tag> },
         { key: 'platform', label: '平台', children:

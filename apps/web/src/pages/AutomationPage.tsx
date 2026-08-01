@@ -132,12 +132,14 @@ export function AutomationPage() {
       setSavingLlm(false)
     }
   }
-  const start = async () => {
-    if (!strategyId) return message.warning('请填写已启用的策略 ID')
+  const start = async (targetPlatform = platform, targetStrategyId = strategyId) => {
+    if (!targetStrategyId) return message.warning('请选择已启用的求职策略')
     await api('/automation/runs', {
-      method: 'POST', body: JSON.stringify({ platform, strategy_id: strategyId }),
+      method: 'POST', body: JSON.stringify({
+        platform: targetPlatform, strategy_id: targetStrategyId,
+      }),
     })
-    await load(); message.success('Agent 运行已创建')
+    await load(); message.success(`${targetPlatform} 平台任务已启动`)
   }
   const changeRun = async (run: AgentRun, operation: 'pause' | 'resume') => {
     await api(`/automation/runs/${run.id}/${operation}`, { method: 'POST' })
@@ -199,18 +201,23 @@ export function AutomationPage() {
       </Button>
     </Card>
 
-    <Card title="Agent 运行">
+    <Card title="平台任务管理（高级）">
+      <Alert type="info" showIcon style={{ marginBottom: 16 }}
+        message="这里管理各平台的期望运行状态"
+        description="启动平台任务后，还需 Worker 和浏览器会话正常才会实际执行。平台页面断开请到总览执行重新连接。" />
       <Space wrap style={{ marginBottom: 16 }}>
         <Select value={platform} onChange={setPlatform} options={[
           { value: 'BOSS', label: 'BOSS' }, { value: 'MAIMAI', label: '脉脉' },
-          { value: 'LIEPIN', label: '猎聘（L4 已就绪）' },
+          { value: 'LIEPIN', label: '猎聘' },
           { value: 'MOCK', label: '本地模拟' },
         ]} />
         <Select style={{ width: 360 }} value={strategyId || undefined} onChange={setStrategyId}
           placeholder="选择已启用策略" options={strategies.map((item) => ({
             value: item.id, label: item.name,
           }))} />
-        <Button type="primary" onClick={() => void start().catch(showRequestError)}>启动</Button>
+        <Button type="primary" onClick={() => void start().catch(showRequestError)}>
+          启动平台任务
+        </Button>
         <Button onClick={() => void load().catch(showRequestError)}>刷新</Button>
       </Space>
       <Table rowKey="id" dataSource={runs} columns={[
@@ -227,6 +234,10 @@ export function AutomationPage() {
             onClick={() => void changeRun(run, 'pause').catch(showRequestError)}>暂停</Button>
           <Button disabled={run.status !== 'PAUSED'}
             onClick={() => void changeRun(run, 'resume').catch(showRequestError)}>恢复</Button>
+          {!['RUNNING', 'PAUSED'].includes(run.status) && <Button type="primary"
+            onClick={() => void start(run.platform, run.strategy_id).catch(showRequestError)}>
+            重新启动
+          </Button>}
         </Space> },
       ]} />
     </Card>

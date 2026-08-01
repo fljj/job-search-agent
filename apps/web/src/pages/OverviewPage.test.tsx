@@ -3,7 +3,7 @@ import { message } from 'antd'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { OverviewPage } from './OverviewPage'
-import { canReconnectRun } from './run-summary'
+import { canReconnectRun, canResumeRun } from './run-summary'
 
 vi.mock('../api/client', () => ({ api: vi.fn() }))
 
@@ -63,6 +63,10 @@ describe('OverviewPage 重新连接', () => {
       status: 'PAUSED',
       pause_reason_codes: ['USER_PAUSED'],
     })).toBe(false)
+    expect(canResumeRun({
+      status: 'PAUSED',
+      pause_reason_codes: ['USER_PAUSED'],
+    })).toBe(true)
   })
 
   it('分别展示人工确认和面试确认数量', async () => {
@@ -74,6 +78,50 @@ describe('OverviewPage 重新连接', () => {
     expect(screen.getByText('2')).toBeTruthy()
     expect(screen.getByText('LLM：正常可用 / 日历：已配置 / 执行器：已配置')).toBeTruthy()
     expect(screen.queryByText(/LLM:CLOSED/)).toBeNull()
+  })
+
+  it('人工暂停显示中文原因并允许恢复运行', async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path === '/automation/runs') return { items: [{
+        ...pausedRun,
+        id: 'liepin-run',
+        platform: 'LIEPIN',
+        pause_reason_codes: ['USER_PAUSED'],
+      }] }
+      if (path === '/automation/overview') return {
+        job_count: 0,
+        active_conversation_count: 0,
+        successful_action_count: 0,
+        waiting_message_count: 0,
+        failed_action_count: 0,
+      }
+      if (path === '/automation/operations/status') return {
+        database_ready: true,
+        llm_configured: true,
+        unknown_action_count: 0,
+        pending_confirmation_count: 0,
+        pending_human_confirmation_count: 0,
+        pending_schedule_confirmation_count: 0,
+        workers: [{ worker_id: 'worker-1', status: 'RUNNING' }],
+        discrepancies: [],
+        platform_readiness: [],
+        capabilities: { llm: 'CLOSED', calendar: 'CONFIGURED', executor: 'CONFIGURED' },
+        llm_circuit: { status: 'CLOSED', provider: 'ZHIPU', model: 'glm-5.2' },
+      }
+      if (path === '/automation/runs/liepin-run/resume') return {}
+      return {}
+    })
+    const successSpy = vi.spyOn(message, 'success').mockImplementation(() => undefined as never)
+
+    render(<OverviewPage />)
+
+    expect(await screen.findByText('LIEPIN:已暂停（人工暂停）')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '恢复运行' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith(
+      '/automation/runs/liepin-run/resume',
+      { method: 'POST' },
+    ))
+    await waitFor(() => expect(successSpy).toHaveBeenCalledWith('LIEPIN 已恢复运行'))
   })
 
   it('点击后调用恢复接口并提示重新检查页面', async () => {
