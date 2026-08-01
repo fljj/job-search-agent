@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from adapters.browser.fake_actions import FakeActionExecutor
+from adapters.browser.job_discovery import DiscoveredJob, JobDiscoveryBatch
 from adapters.browser.message_discovery import (
     BossMessageDiscoveryAdapter,
     MessageDiscoveryAdapter,
@@ -23,7 +24,7 @@ from packages.browser_worker.actions import (
     ExecutionOutcome,
     ExecutionResult,
 )
-from packages.browser_worker.models import Platform
+from packages.browser_worker.models import BrowserJobSummary, Platform
 from packages.policy_engine.automation import AutomationRules
 from scripts.run_agent_worker import (
     _build_executor,
@@ -31,6 +32,7 @@ from scripts.run_agent_worker import (
     _heartbeat_loop,
     _merge_seen_job_ids,
     _process_maimai_recommendations,
+    _run_boss_job_discovery,
     _single_worker_lock,
 )
 
@@ -69,6 +71,92 @@ def test_boss_job_search_labels_are_configurable() -> None:
     )
 
     assert settings.boss_job_searches == ["推荐", "Java", "区块链工程师"]
+
+
+def test_invisible_retry_target_falls_back_to_normal_job_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = db.AgentRun(
+        id=uuid4(),
+        user_id=uuid4(),
+        strategy_id=uuid4(),
+        platform="BOSS",
+        cursor={"job_discovery": {"search_key": "推荐"}},
+    )
+    retry = MagicMock(external_job_id="retry-job")
+    now = datetime.now(UTC)
+    empty_retry = JobDiscoveryBatch(
+        platform=Platform.BOSS,
+        search_key="推荐",
+        scroll_position=0,
+        scanned_at=now,
+        next_scan_at=now,
+        exhausted=True,
+    )
+    normal = JobDiscoveryBatch(
+        platform=Platform.BOSS,
+        search_key="推荐",
+        scroll_position=2,
+        scanned_at=now,
+        next_scan_at=now,
+        items=[
+            DiscoveredJob(summary=BrowserJobSummary(
+                external_job_id="job-1", title="Java", company_name="公司一"
+            )),
+            DiscoveredJob(summary=BrowserJobSummary(
+                external_job_id="job-2", title="Java", company_name="公司二"
+            )),
+        ],
+    )
+    adapter = MagicMock()
+    adapter.scan.side_effect = [empty_retry, normal]
+    session = MagicMock(spec=Session)
+    session.scalars.return_value.all.return_value = []
+    session.get.return_value = MagicMock(title_rules=[])
+    marked: list[object] = []
+    processed: list[JobDiscoveryBatch] = []
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.BossJobDiscoveryAdapter",
+        lambda _config: adapter,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.next_retryable_job", lambda *_: retry
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.mark_retry_target_not_visible",
+        lambda _session, record: marked.append(record),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.process_job_discovery_batch",
+        lambda _session, _run, batch, **_kwargs: processed.append(batch),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_settings",
+        lambda: Settings(_env_file=None, boss_job_batch_size=5),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_job_parser_config", MagicMock()
+    )
+    monkeypatch.setattr("scripts.run_agent_worker.get_browser_selectors", MagicMock())
+    monkeypatch.setattr("scripts.run_agent_worker.build_runtime_llm_provider", MagicMock())
+    monkeypatch.setattr("scripts.run_agent_worker.runtime_event", lambda *_, **__: None)
+
+    _run_boss_job_discovery(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        MagicMock(),
+        AutomationRules(),
+    )
+
+    assert marked == [retry]
+    assert adapter.scan.call_count == 2
+    assert adapter.scan.call_args_list[0].kwargs["target_job_ids"] == {"retry-job"}
+    assert adapter.scan.call_args_list[0].kwargs["limit"] == 1
+    assert adapter.scan.call_args_list[1].kwargs["target_job_ids"] is None
+    assert adapter.scan.call_args_list[1].kwargs["limit"] == 5
+    assert processed == [normal]
 
 
 def test_fake_executor_is_offline_and_records_commands() -> None:

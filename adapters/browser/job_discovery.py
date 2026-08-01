@@ -112,6 +112,39 @@ class BossJobDiscoveryAdapter:
                 scroll_position=0,
                 limit=limit,
             )
+            if not candidates:
+                page._evaluate(
+                    "(() => { const element = document.querySelector("
+                    f"{json.dumps(self.selectors.job_list_root)}); "
+                    "if (!element) return false; element.scrollTop = element.scrollHeight; "
+                    "element.dispatchEvent(new Event('scroll', {bubbles: true})); return true; })()"
+                )
+                # BOSS 使用虚拟列表。当前视窗没有新职位时，等待滚动加载并重新
+                # 提取；不能在触发 scroll 后立刻把搜索入口判定为已遍历完成。
+                for _ in range(10):
+                    time.sleep(0.25)
+                    refreshed = extract_current_page(
+                        page, Platform.BOSS, self.selectors, self.config.version
+                    )
+                    if (
+                        refreshed.status is not SessionStatus.SESSION_READY
+                        or refreshed.page_type is not PageType.JOB_LIST
+                    ):
+                        continue
+                    listing = refreshed
+                    candidates = select_job_candidates(
+                        [
+                            item
+                            for item in listing.jobs
+                            if target_job_ids is None
+                            or item.external_job_id in target_job_ids
+                        ],
+                        seen_job_ids or [],
+                        scroll_position=0,
+                        limit=limit,
+                    )
+                    if candidates:
+                        break
             items = []
             for summary in candidates:
                 prefilter = classify_job_title(
@@ -128,7 +161,16 @@ class BossJobDiscoveryAdapter:
                         )
                     )
                 else:
-                    items.append(self._open_detail(cdp_url, page, summary))
+                    opened = self._open_detail(cdp_url, page, summary)
+                    if opened.detail_target_id and opened.detail_target_url:
+                        self._close_target(
+                            cdp_url,
+                            opened.detail_target_id,
+                            opened.detail_target_url,
+                        )
+                        opened.detail_target_id = None
+                        opened.detail_target_url = None
+                    items.append(opened)
             page._evaluate(
                 "(() => { const element = document.querySelector("
                 f"{json.dumps(self.selectors.job_list_root)}); "

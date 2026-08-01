@@ -23,6 +23,7 @@ from apps.api.app.services.automation_service import _proactive_safety_gaps
 from apps.api.app.services.job_discovery_service import (
     _is_prewrite_retryable,
     _job_safety_reasons,
+    _release_deferred_seen_ids,
     _schedule_retry,
     job_scan_block_reasons,
     mark_retry_target_not_visible,
@@ -335,6 +336,56 @@ def test_scan_ignores_legacy_refresh_cursor(
     assert all("location.reload" not in call.args[0] for call in page._evaluate.call_args_list)
 
 
+def test_scan_waits_for_new_virtual_list_items_after_scroll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = object.__new__(BossJobDiscoveryAdapter)
+    adapter.config = MagicMock(version="test")
+    adapter.selectors = MagicMock(job_list_root="[data-testid='job-list']")
+    page = MagicMock()
+    page.__enter__.return_value = page
+    page.__exit__.return_value = False
+    initial = MagicMock(
+        status=SessionStatus.SESSION_READY,
+        page_type=PageType.JOB_LIST,
+        jobs=[summary(1)],
+        cursor=None,
+    )
+    loaded = MagicMock(
+        status=SessionStatus.SESSION_READY,
+        page_type=PageType.JOB_LIST,
+        jobs=[summary(2), summary(3)],
+        cursor=None,
+    )
+    monkeypatch.setattr(adapter, "_find_list_target", lambda _cdp_url: "ws://page")
+    monkeypatch.setattr(
+        "adapters.browser.job_discovery.RawCdpPageReader",
+        lambda _target: page,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.job_discovery.extract_current_page",
+        MagicMock(side_effect=[initial, loaded]),
+    )
+    monkeypatch.setattr("adapters.browser.job_discovery.time.sleep", lambda _: None)
+    monkeypatch.setattr(
+        adapter,
+        "_open_detail",
+        lambda _cdp_url, _page, item: DiscoveredJob(summary=item),
+    )
+
+    batch = adapter.scan(
+        "http://127.0.0.1:9222",
+        seen_job_ids=["job-1"],
+        limit=5,
+    )
+
+    assert [item.summary.external_job_id for item in batch.items] == [
+        "job-2",
+        "job-3",
+    ]
+    assert batch.exhausted is False
+
+
 def test_search_activation_waits_for_page_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -604,6 +655,27 @@ def test_single_job_retry_does_not_block_other_job_scans() -> None:
         rules,
         datetime.now(UTC),
     ) == []
+
+
+def test_batch_backoff_releases_current_and_unprocessed_job_ids() -> None:
+    now = datetime.now(UTC)
+    batch = JobDiscoveryBatch(
+        platform=Platform.BOSS,
+        search_key="Java",
+        scroll_position=3,
+        scanned_at=now,
+        next_scan_at=now,
+        items=[
+            DiscoveredJob(summary=summary(1)),
+            DiscoveredJob(summary=summary(2)),
+            DiscoveredJob(summary=summary(3)),
+        ],
+        seen_job_ids=["older-job", "job-1", "job-2", "job-3"],
+    )
+
+    _release_deferred_seen_ids(batch, 1)
+
+    assert batch.seen_job_ids == ["older-job", "job-1"]
 
 
 def test_only_prewrite_failure_allows_greeting_retry() -> None:

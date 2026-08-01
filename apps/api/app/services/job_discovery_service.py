@@ -90,6 +90,7 @@ def process_job_discovery_batch(
                 _finish(record, "SKIPPED", reasons)
             counts["skipped"] += 1
             if retry_backoff_until is not None:
+                _release_deferred_seen_ids(batch, index)
                 counts["skipped"] += len(batch.items[index + 1:])
                 break
             continue
@@ -189,15 +190,7 @@ def process_job_discovery_batch(
                 record.reason_codes = [exc.code, "WAITING_FOR_LLM_RECOVERY"]
                 record.next_retry_at = current
                 retry_backoff_until = current
-                deferred_ids = {
-                    deferred.summary.external_job_id
-                    for deferred in batch.items[index:]
-                }
-                batch.seen_job_ids = [
-                    external_id
-                    for external_id in batch.seen_job_ids
-                    if external_id not in deferred_ids
-                ]
+                _release_deferred_seen_ids(batch, index)
             else:
                 _finish(record, "SKIPPED", [exc.code])
             counts["skipped"] += 1
@@ -435,6 +428,18 @@ def _finish(
     record.reason_codes = reasons
     if status != "RETRYABLE":
         record.next_retry_at = None
+
+
+def _release_deferred_seen_ids(batch: JobDiscoveryBatch, index: int) -> None:
+    """释放本批尚未完成的职位，避免中途退避导致后续候选永久丢失。"""
+    deferred_ids = {
+        item.summary.external_job_id for item in batch.items[index:]
+    }
+    batch.seen_job_ids = [
+        external_id
+        for external_id in batch.seen_job_ids
+        if external_id not in deferred_ids
+    ]
 
 
 def _schedule_retry(

@@ -386,7 +386,8 @@ def _run_boss_job_discovery(
         else []
     )
     parser_config = get_job_parser_config()
-    search_keys = get_settings().boss_job_searches
+    settings = get_settings()
+    search_keys = settings.boss_job_searches
     adapter = BossJobDiscoveryAdapter(get_browser_selectors())
     try:
         job_batch = adapter.scan(
@@ -415,9 +416,31 @@ def _run_boss_job_discovery(
                 *parser_config.relevant_title_keywords,
                 *relevant_title_keywords,
             ],
-            limit=1,
-            interval_seconds=get_settings().boss_job_scan_interval_seconds,
+            limit=1 if retry_job_id else settings.boss_job_batch_size,
+            interval_seconds=settings.boss_job_scan_interval_seconds,
         )
+        if retry_record is not None and not job_batch.items:
+            mark_retry_target_not_visible(session, retry_record)
+            retry_record = None
+            job_batch = adapter.scan(
+                cdp_url,
+                search_key=job_batch.search_key,
+                search_keys=search_keys,
+                refresh_before_scan=False,
+                switch_search_before_scan=False,
+                scroll_position=job_batch.scroll_position,
+                previous_cursor=job_batch.next_cursor,
+                seen_job_ids=seen_job_ids,
+                target_job_ids=None,
+                irrelevant_title_keywords=parser_config.irrelevant_title_keywords,
+                relevant_title_keywords=relevant_title_keywords,
+                direction_title_keywords=[
+                    *parser_config.relevant_title_keywords,
+                    *relevant_title_keywords,
+                ],
+                limit=settings.boss_job_batch_size,
+                interval_seconds=settings.boss_job_scan_interval_seconds,
+            )
     except (OSError, TimeoutError, ValueError) as exc:
         record_platform_session_failure(session, run, "JOB_DISCOVERY_UNAVAILABLE")
         runtime_event(
