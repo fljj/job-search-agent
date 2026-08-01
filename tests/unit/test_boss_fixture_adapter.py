@@ -332,6 +332,64 @@ def test_selects_unique_existing_resume_and_reads_back_result() -> None:
         ).count() == 1
 
 
+def test_real_boss_resume_trigger_is_restricted_by_visible_text() -> None:
+    page = MagicMock()
+    page._evaluate.return_value = {"x": 10, "y": 20}
+    selectors = get_browser_selectors().platforms["BOSS"]
+
+    point = PlaywrightActionExecutor._visible_element_point_by_text(
+        page,
+        selectors.resume_trigger,
+        {"发简历", "发送简历"},
+    )
+
+    assert point == {"x": 10, "y": 20}
+    script = page._evaluate.call_args.args[0]
+    assert ".toolbar-btn-content .toolbar-btn" in script
+    assert "发简历" in script
+
+
+def test_real_boss_default_resume_uses_direct_confirmation(monkeypatch) -> None:
+    page = MagicMock()
+    page._evaluate.side_effect = [0, 0, None, {"x": 10, "y": 20}, {"x": 30, "y": 40}, True]
+    reader = MagicMock()
+    reader.__enter__.return_value = page
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.RawCdpPageReader",
+        lambda _: reader,
+    )
+
+    result = PlaywrightActionExecutor(get_browser_selectors())._send_resume_on_raw_page(
+        "ws://127.0.0.1/devtools/page/test",
+        approved_command("RESUME", attachment_name="后端开发简历"),
+    )
+
+    assert result.outcome is ExecutionOutcome.SUCCEEDED
+    assert result.write_started
+    assert page._command.call_count == 4
+
+
+def test_real_boss_does_not_fall_back_to_legacy_attachment_list(monkeypatch) -> None:
+    page = MagicMock()
+    page._evaluate.side_effect = [0, 0, None, {"x": 10, "y": 20}, None]
+    reader = MagicMock()
+    reader.__enter__.return_value = page
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.RawCdpPageReader",
+        lambda _: reader,
+    )
+
+    result = PlaywrightActionExecutor(get_browser_selectors())._send_resume_on_raw_page(
+        "ws://127.0.0.1/devtools/page/test",
+        approved_command("RESUME", attachment_name="后端开发简历"),
+    )
+
+    assert result.outcome is ExecutionOutcome.FAILED_RETRYABLE
+    assert result.error_code == "RESUME_CONFIRM_NOT_READY"
+    assert not result.write_started
+    assert page._command.call_count == 2
+
+
 def test_inbound_resume_rejects_changed_company_identity() -> None:
     with fixture_page("conversation-detail.html") as page:
         browser = page.context.browser

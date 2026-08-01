@@ -60,6 +60,7 @@ class PlatformSelectors(BaseModel):
     message_send_button: str
     sent_message_items: str
     resume_trigger: str
+    resume_direct_confirm_button: str | None = None
     resume_items: str
     resume_confirm_button: str
     sent_resume_items: str

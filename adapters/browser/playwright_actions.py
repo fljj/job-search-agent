@@ -784,15 +784,60 @@ class PlaywrightActionExecutor:
                 baseline_count = int(page._evaluate(
                     f"document.querySelectorAll({json.dumps(selectors.sent_resume_items)}).length"
                 ) or 0)
-                baseline = {"sent_resume_count": baseline_count}
-                trigger = self._visible_element_point(page, selectors.resume_trigger)
-                if trigger is None:
+                baseline_message_count = int(page._evaluate(
+                    f"document.querySelectorAll({json.dumps(selectors.sent_message_items)}).length"
+                ) or 0)
+                baseline = {
+                    "sent_resume_count": baseline_count,
+                    "sent_message_count": baseline_message_count,
+                }
+                direct_confirm = (
+                    self._visible_element_point_by_text(
+                        page,
+                        selectors.resume_direct_confirm_button,
+                        {"确定"},
+                    )
+                    if selectors.resume_direct_confirm_button
+                    else None
+                )
+                if direct_confirm is None:
+                    trigger = self._visible_element_point_by_text(
+                        page,
+                        selectors.resume_trigger,
+                        {"发简历", "发送简历"},
+                    )
+                    if trigger is None:
+                        return ExecutionResult(
+                            outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                            error_code="RESUME_TRIGGER_NOT_READY",
+                            observation_baseline=baseline,
+                        )
+                    self._trusted_click(page, trigger)
+                    direct_confirm = (
+                        self._visible_element_point_by_text(
+                            page,
+                            selectors.resume_direct_confirm_button,
+                            {"确定"},
+                        )
+                        if selectors.resume_direct_confirm_button
+                        else None
+                    )
+                if direct_confirm is not None:
+                    write_started = True
+                    self._trusted_click(page, direct_confirm)
+                    return self._observe_resume_result(
+                        page,
+                        command,
+                        baseline_count=baseline_count,
+                        baseline_message_count=baseline_message_count,
+                        baseline=baseline,
+                    )
+                if selectors.resume_direct_confirm_button:
                     return ExecutionResult(
                         outcome=ExecutionOutcome.FAILED_RETRYABLE,
-                        error_code="RESUME_TRIGGER_NOT_READY",
+                        error_code="RESUME_CONFIRM_NOT_READY",
                         observation_baseline=baseline,
                     )
-                self._trusted_click(page, trigger)
                 attachment_point = page._evaluate(
                     "(() => { const expected="
                     f"{json.dumps(command.attachment_name)};"
@@ -819,26 +864,12 @@ class PlaywrightActionExecutor:
                     )
                 write_started = True
                 self._trusted_click(page, confirm)
-                for _ in range(30):
-                    observed = page._evaluate(
-                        "Array.from(document.querySelectorAll("
-                        f"{json.dumps(selectors.sent_resume_items)}"
-                        f")).slice({baseline_count}).some(item => "
-                        f"(item.textContent||'').trim()==={json.dumps(command.attachment_name)})"
-                    )
-                    if observed:
-                        return ExecutionResult(
-                            outcome=ExecutionOutcome.SUCCEEDED,
-                            observed_content=command.attachment_name,
-                            write_started=True,
-                            observation_baseline=baseline,
-                        )
-                    time.sleep(0.1)
-                return ExecutionResult(
-                    outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
-                    error_code="RESUME_RESULT_NOT_OBSERVED",
-                    write_started=True,
-                    observation_baseline=baseline,
+                return self._observe_resume_result(
+                    page,
+                    command,
+                    baseline_count=baseline_count,
+                    baseline_message_count=baseline_message_count,
+                    baseline=baseline,
                 )
         except (OSError, TimeoutError, ValueError):
             return ExecutionResult(
@@ -847,6 +878,42 @@ class PlaywrightActionExecutor:
                 write_started=write_started,
                 observation_baseline=baseline,
             )
+
+    def _observe_resume_result(
+        self,
+        page: RawCdpPageReader,
+        command: ApprovedCommand,
+        *,
+        baseline_count: int,
+        baseline_message_count: int,
+        baseline: dict[str, object],
+    ) -> ExecutionResult:
+        selectors = self.config.platforms[command.platform]
+        for _ in range(30):
+            observed = page._evaluate(
+                "(() => { const resumeItems=Array.from(document.querySelectorAll("
+                f"{json.dumps(selectors.sent_resume_items)}"
+                f")).slice({baseline_count});"
+                f"const messages=Array.from(document.querySelectorAll({json.dumps(selectors.sent_message_items)}))"
+                f".slice({baseline_message_count});"
+                f"const expected={json.dumps(command.attachment_name)};"
+                "return resumeItems.some(item => (item.textContent||'').trim()===expected) || "
+                "messages.some(item => /简历/.test((item.textContent||'').trim())); })()"
+            )
+            if observed:
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.SUCCEEDED,
+                    observed_content=command.attachment_name,
+                    write_started=True,
+                    observation_baseline=baseline,
+                )
+            time.sleep(0.1)
+        return ExecutionResult(
+            outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
+            error_code="RESUME_RESULT_NOT_OBSERVED",
+            write_started=True,
+            observation_baseline=baseline,
+        )
 
     @staticmethod
     def _visible_element_point(
@@ -857,6 +924,24 @@ class PlaywrightActionExecutor:
             "(() => { const items=[...document.querySelectorAll("
             f"{json.dumps(selector)}"
             ")].filter(item => item.getClientRects().length>0 && !item.disabled);"
+            "if(items.length!==1)return null;const r=items[0].getBoundingClientRect();"
+            "return {x:r.x+r.width/2,y:r.y+r.height/2};})()"
+        )
+        return point if isinstance(point, dict) else None
+
+    @staticmethod
+    def _visible_element_point_by_text(
+        page: RawCdpPageReader,
+        selector: str,
+        expected_texts: set[str],
+    ) -> dict[str, object] | None:
+        point = page._evaluate(
+            "(() => { const expected=new Set("
+            f"{json.dumps(sorted(expected_texts), ensure_ascii=False)}"
+            ");const items=[...document.querySelectorAll("
+            f"{json.dumps(selector)}"
+            ")].filter(item => item.getClientRects().length>0 && !item.disabled && "
+            "expected.has((item.textContent||'').trim()));"
             "if(items.length!==1)return null;const r=items[0].getBoundingClientRect();"
             "return {x:r.x+r.width/2,y:r.y+r.height/2};})()"
         )
