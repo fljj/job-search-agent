@@ -21,7 +21,7 @@ def upgrade() -> None:
         "messages",
         "status IN ('RECEIVED','AWAITING_IDENTITY','SUPERSEDED','PROCESSING',"
         "'RETRY_WAIT','WAITING_FOR_LLM','QUARANTINED','COMPLETED',"
-        "'MISMATCH_DECLINED')",
+        "'MISMATCH_DECLINED','PLATFORM_EVENT_IGNORED')",
     )
     op.create_check_constraint(
         "ck_action_queue_status",

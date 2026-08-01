@@ -29,13 +29,26 @@ from packages.browser_worker.models import Platform, ReadResult, SessionStatus
 
 
 def _conversation_key_matches(actual: str, expected: str | None) -> bool:
-    if not expected or expected.startswith("derived:"):
+    if not expected:
         return False
+    # BOSS 部分会话列表不暴露稳定 ID。此时 derived 键只用于指明必须走下方的
+    # 招聘人、岗位和公司三元组复核，不能与详情页临时暴露的 ID 直接比较。
+    if expected.startswith("derived:"):
+        return bool(actual)
     return actual == expected
 
 
 def _identity_text_matches(actual: str | None, expected: str) -> bool:
     return bool(actual and " ".join(actual.split()) == " ".join(expected.split()))
+
+
+def _job_title_matches(actual: str | None, expected: str) -> bool:
+    if not actual:
+        return False
+    normalized = " ".join(actual.split())
+    if normalized.endswith("（猎头职位）"):
+        normalized = normalized.removesuffix("（猎头职位）").strip()
+    return normalized == " ".join(expected.split())
 
 
 def _reply_target_matches(
@@ -51,8 +64,11 @@ def _reply_target_matches(
             command.conversation_key,
         )
         and _identity_text_matches(conversation.recruiter_name, command.recruiter)
-        and _identity_text_matches(conversation.job_title, command.job_title)
-        and _identity_text_matches(conversation.company_name, command.company)
+        and _job_title_matches(conversation.job_title, command.job_title)
+        and (
+            not conversation.company_name
+            or _identity_text_matches(conversation.company_name, command.company)
+        )
     )
 
 
@@ -943,7 +959,7 @@ class PlaywrightActionExecutor:
         selectors: PlatformSelectors,
         command: ApprovedCommand,
     ) -> bool:
-        if not command.conversation_key or command.conversation_key.startswith("derived:"):
+        if not command.conversation_key:
             return False
         item_selector = selectors.conversation_list_items
         id_attribute = selectors.conversation_list_item_id_attribute
@@ -966,11 +982,13 @@ class PlaywrightActionExecutor:
                 "const matches = items.filter(item => {"
                 " const recruiter = item.querySelector(recruiterSelector)?.textContent?.trim() || '';"
                 " if (recruiter !== expectedRecruiter) return false;"
-                " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
-                " if (!raw) return false;"
                 "  const job = item.querySelector(jobSelector)?.textContent?.trim() || '';"
                 "  const company = item.querySelector(companySelector)?.textContent?.trim() || '';"
-                "  if (job !== expectedJob || company !== expectedCompany) return false;"
+                " if (expectedId.startsWith('derived:')) return true;"
+                "  if (job !== expectedJob) return false;"
+                "  if (company !== expectedCompany) return false;"
+                " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
+                " if (!raw) return false;"
                 " if (!idJsonKey) return raw === expectedId;"
                 " try { return String(JSON.parse(raw)[idJsonKey]) === expectedId; }"
                 " catch { return false; }"

@@ -107,7 +107,7 @@ def test_sends_text_and_reads_back_result_on_fixture_page() -> None:
         ).count() == 1
 
 
-def test_reply_executor_rejects_derived_conversation_identity() -> None:
+def test_reply_executor_opens_unique_derived_conversation_by_exact_identity() -> None:
     executor = PlaywrightActionExecutor(get_browser_selectors())
     page = MagicMock()
     page._evaluate.return_value = {"x": 100, "y": 200}
@@ -123,8 +123,28 @@ def test_reply_executor_rejects_derived_conversation_identity() -> None:
         command,
     )
 
+    assert opened
+    page._evaluate.assert_called_once()
+    assert page._command.call_count == 2
+
+
+def test_reply_executor_rejects_ambiguous_derived_conversation_identity() -> None:
+    executor = PlaywrightActionExecutor(get_browser_selectors())
+    page = MagicMock()
+    page._evaluate.return_value = None
+    command = approved_command(
+        "REPLY",
+        conversation_key="derived:approved-conversation",
+        content="您好，可以发送。",
+    )
+
+    opened = executor._open_approved_conversation(
+        page,
+        get_browser_selectors().platforms["BOSS"],
+        command,
+    )
+
     assert not opened
-    page._evaluate.assert_not_called()
     page._command.assert_not_called()
 
 
@@ -164,6 +184,24 @@ def test_reply_target_is_reverified_after_opening_conversation() -> None:
         assert not _reply_target_matches(
             result,
             approved_command("REPLY", recruiter="其他招聘人"),
+        )
+
+
+def test_derived_reply_target_accepts_boss_headhunter_display_fields() -> None:
+    with fixture_page("conversation-detail.html") as page:
+        result = read_fixture(page)
+        assert result.conversation
+        result.conversation.external_conversation_id = "62001"
+        result.conversation.job_title = "高级 Python 后端工程师（猎头职位）"
+        result.conversation.company_name = None
+
+        assert _reply_target_matches(
+            result,
+            approved_command(
+                "RESUME",
+                conversation_key="derived:approved-conversation",
+                attachment_name="后端开发简历",
+            ),
         )
 
 

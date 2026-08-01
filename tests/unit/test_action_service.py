@@ -4,7 +4,10 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from apps.api.app.models import entities as db
-from apps.api.app.services.action_service import _ensure_telegram_conversation
+from apps.api.app.services.action_service import (
+    _ensure_telegram_conversation,
+    _retry_policy_denied_after_prewrite_failure,
+)
 
 
 def test_successful_telegram_greeting_creates_message_center_conversation() -> None:
@@ -44,3 +47,19 @@ def test_successful_telegram_greeting_creates_message_center_conversation() -> N
         and call.args[0].event_type == "TELEGRAM_CONVERSATION_STARTED"
         for call in session.add.call_args_list
     )
+
+
+def test_user_can_retry_policy_denial_only_after_proven_prewrite_failure() -> None:
+    action = db.ActionQueue(
+        failure_code="RETRY_POLICY_DENIED",
+        write_started_at=None,
+    )
+    attempt = db.ActionAttempt(
+        error_code="APPROVED_TARGET_PAGE_NOT_FOUND",
+        write_started=False,
+    )
+
+    assert _retry_policy_denied_after_prewrite_failure(action, attempt)
+
+    attempt.write_started = True
+    assert not _retry_policy_denied_after_prewrite_failure(action, attempt)

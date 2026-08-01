@@ -354,9 +354,18 @@ def observe_action(
 
 def approve_retry(session: Session, action_id: UUID) -> ActionResponse:
     action = _get_action(session, action_id)
+    latest_attempt = session.scalar(
+        select(db.ActionAttempt)
+        .where(db.ActionAttempt.action_id == action.id)
+        .order_by(db.ActionAttempt.attempt_number.desc())
+        .limit(1)
+    )
     if not (
         action.status == ActionStatus.FAILED_FINAL.value
-        and action.failure_code in PREWRITE_RETRYABLE_FAILURES
+        and (
+            action.failure_code in PREWRITE_RETRYABLE_FAILURES
+            or _retry_policy_denied_after_prewrite_failure(action, latest_attempt)
+        )
     ):
         require_transition(action.status, ActionStatus.APPROVED)
     before = action.status
@@ -375,6 +384,19 @@ def approve_retry(session: Session, action_id: UUID) -> ActionResponse:
     session.commit()
     session.refresh(action)
     return _response(action)
+
+
+def _retry_policy_denied_after_prewrite_failure(
+    action: db.ActionQueue,
+    latest_attempt: db.ActionAttempt | None,
+) -> bool:
+    return bool(
+        action.failure_code == "RETRY_POLICY_DENIED"
+        and action.write_started_at is None
+        and latest_attempt is not None
+        and not latest_attempt.write_started
+        and latest_attempt.error_code in PREWRITE_RETRYABLE_FAILURES
+    )
 
 
 def _approved_command(session: Session, action: db.ActionQueue) -> ApprovedCommand:
