@@ -77,7 +77,7 @@ class MessageDiscoveryAdapter:
         websocket_url = self._find_list_target(cdp_url)
         with RawCdpPageReader(websocket_url) as page:
             listing = extract_conversation_list(
-                page, self.platform, self.selectors, self.config.version
+                page, self.platform, self.selectors, self.selectors.version
             )
             if listing.status is not SessionStatus.SESSION_READY:
                 raise ValueError(f"{self.platform.value} 对话列表结构不可用")
@@ -216,7 +216,7 @@ class MessageDiscoveryAdapter:
                 page,
                 self.platform,
                 self.selectors,
-                self.config.version,
+                self.selectors.version,
                 expected_recruiter=summary.recruiter_name,
             )
             if (
@@ -322,7 +322,7 @@ class MessageDiscoveryAdapter:
                             job_page,
                             self.platform,
                             self.selectors,
-                            self.config.version,
+                            self.selectors.version,
                         )
                         if (
                             result.status is SessionStatus.SESSION_READY

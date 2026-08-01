@@ -46,7 +46,7 @@ def read_fixture(page: Page) -> ReadResult:
         PlaywrightPageReader(page),
         Platform.MAIMAI,
         config.platforms[Platform.MAIMAI.value],
-        config.version,
+        config.platforms[Platform.MAIMAI.value].version,
     )
 
 

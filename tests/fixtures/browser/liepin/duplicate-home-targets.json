@@ -1,0 +1,14 @@
+[
+  {
+    "id": "liepin-home-1",
+    "type": "page",
+    "url": "https://c.liepin.com/",
+    "webSocketDebuggerUrl": "ws://127.0.0.1/mock/home-1"
+  },
+  {
+    "id": "liepin-home-2",
+    "type": "page",
+    "url": "https://c.liepin.com/?from=duplicate",
+    "webSocketDebuggerUrl": "ws://127.0.0.1/mock/home-2"
+  }
+]

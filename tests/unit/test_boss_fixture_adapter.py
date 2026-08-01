@@ -44,7 +44,7 @@ def read_fixture(page: Page) -> ReadResult:
         PlaywrightPageReader(page),
         Platform.BOSS,
         config.platforms["BOSS"],
-        config.version,
+        config.platforms["BOSS"].version,
     )
 
 

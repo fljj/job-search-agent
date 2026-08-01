@@ -27,7 +27,7 @@ apps/
     api/                    # HTTP 客户端
     pages/                  # 路由级懒加载页面
 adapters/
-  browser/                  # BOSS、脉脉页面适配
+  browser/                  # BOSS、脉脉页面适配及猎聘只读基础
   calendar/                 # Apple、Google 日历适配
   llm/                      # 智谱、千问、Fake 适配器
 packages/
@@ -122,6 +122,12 @@ BOSS 职位发现创建的临时详情页在当前职位评分和主动招呼处
 
 `adapters/browser/playwright_actions.py` 是当前真实 CDP 写执行器，不包含业务授权判断；
 `fake_actions.py` 只用于测试。
+
+浏览器选择器按平台存放在 `config/browser-selectors/`，每个平台文件独立维护版本、允许域名
+以及 `session/job_list/job_detail/conversation/resume_action` 能力块。加载器要求 BOSS、脉脉、
+猎聘三个文件齐全且文件名与内部平台名一致，配置缺失、重复或结构无效时直接启动失败；页面
+读取证据记录当前平台的选择器版本，而不是整套配置版本。猎聘 L1 目前仅开放只读解析基础，
+Worker 调度和真实写动作仍未启用。
 
 ## 7. 数据、查询和审计
 

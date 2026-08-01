@@ -61,6 +61,10 @@ class PlaywrightPageReader(PlaywrightElementReader, PageReader):
         locator = self.page.locator(selector)
         return any(locator.nth(index).is_visible(timeout=500) for index in range(locator.count()))
 
+    def value(self, selector: str) -> str | None:
+        locator = self.page.locator(selector).first
+        return locator.input_value(timeout=1000) if locator.count() else None
+
     def elements(self, selector: str) -> list[ElementReader]:
         locator = self.page.locator(selector)
         return [PlaywrightElementReader(locator.nth(index)) for index in range(locator.count())]
@@ -123,6 +127,14 @@ class RawCdpPageReader(PageReader):
             "element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden'))()"
         )
         return bool(self._evaluate(expression))
+
+    def value(self, selector: str) -> str | None:
+        expression = (
+            "(() => { const element = document.querySelector("
+            f"{json.dumps(selector)}); return element?.value || null; }})()"
+        )
+        value = self._evaluate(expression)
+        return str(value) if value is not None else None
 
     def elements(self, selector: str) -> list[ElementReader]:
         count = int(self._evaluate(
@@ -187,12 +199,24 @@ class PlaywrightReadOnlyAdapter:
         expected_job_title: str | None = None, expected_recruiter: str | None = None,
     ) -> ReadResult:
         validate_local_cdp_url(cdp_url)
-        target = _current_cdp_target(cdp_url, self.config.platforms[self.platform.value].allowed_hosts)
+        selectors = self.config.platforms[self.platform.value]
+        target = _current_cdp_target(
+            cdp_url,
+            selectors.allowed_hosts,
+            unique_home_host=(
+                "c.liepin.com" if self.platform is Platform.LIEPIN else None
+            ),
+        )
         with RawCdpPageReader(target["webSocketDebuggerUrl"]) as page:
-            return extract_current_page(page, self.platform,
-                                        self.config.platforms[self.platform.value],
-                                        self.config.version, expected_company,
-                                        expected_job_title, expected_recruiter)
+            return extract_current_page(
+                page,
+                self.platform,
+                selectors,
+                selectors.version,
+                expected_company,
+                expected_job_title,
+                expected_recruiter,
+            )
 
 
 class BossReadOnlyAdapter(PlaywrightReadOnlyAdapter):
@@ -203,6 +227,11 @@ class BossReadOnlyAdapter(PlaywrightReadOnlyAdapter):
 class MaimaiReadOnlyAdapter(PlaywrightReadOnlyAdapter):
     def __init__(self, config: BrowserSelectorsConfig) -> None:
         super().__init__(Platform.MAIMAI, config)
+
+
+class LiepinReadOnlyAdapter(PlaywrightReadOnlyAdapter):
+    def __init__(self, config: BrowserSelectorsConfig) -> None:
+        super().__init__(Platform.LIEPIN, config)
 
 
 def _current_page(browser: Browser) -> Page:
@@ -218,7 +247,12 @@ def _current_page(browser: Browser) -> Page:
     return pages[-1]
 
 
-def _current_cdp_target(cdp_url: str, allowed_hosts: list[str]) -> dict[str, str]:
+def _current_cdp_target(
+    cdp_url: str,
+    allowed_hosts: list[str],
+    *,
+    unique_home_host: str | None = None,
+) -> dict[str, str]:
     with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
         targets = json.loads(response.read())
     pages = [
@@ -229,6 +263,15 @@ def _current_cdp_target(cdp_url: str, allowed_hosts: list[str]) -> dict[str, str
     ]
     if not pages:
         raise ValueError("未找到当前平台页面，请在专用浏览器中打开目标页")
+    if unique_home_host:
+        home_pages = [
+            target
+            for target in pages
+            if urlparse(target.get("url", "")).hostname == unique_home_host
+            and urlparse(target.get("url", "")).path in {"", "/"}
+        ]
+        if len(home_pages) > 1:
+            raise ValueError("找到多个猎聘首页，请只保留一个常驻首页")
     for target in pages:
         try:
             with RawCdpPageReader(target["webSocketDebuggerUrl"]) as page:

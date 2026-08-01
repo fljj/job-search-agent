@@ -739,8 +739,11 @@ def test_successful_discovery_records_ready_platform_session() -> None:
         cdp_url="http://127.0.0.1:9222",
     )
 
-    platform_session = session.add.call_args.args[0]
-    assert isinstance(platform_session, db.PlatformSession)
+    platform_session = next(
+        call.args[0]
+        for call in session.add.call_args_list
+        if isinstance(call.args[0], db.PlatformSession)
+    )
     assert platform_session.platform == "BOSS"
     assert platform_session.status == "SESSION_READY"
     assert platform_session.cdp_endpoint == "http://127.0.0.1:9222"

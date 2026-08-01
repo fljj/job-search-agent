@@ -146,7 +146,7 @@ class PlaywrightActionExecutor:
                         page,
                         platform,
                         selectors,
-                        self.config.version,
+                        selectors.version,
                     )
                     if _reply_target_matches(check, command):
                         matches += 1
@@ -164,7 +164,7 @@ class PlaywrightActionExecutor:
                             page,
                             platform,
                             selectors,
-                            self.config.version,
+                            selectors.version,
                         )
                         if _reply_target_matches(check, command):
                             matches += 1
@@ -231,7 +231,7 @@ class PlaywrightActionExecutor:
                         page,
                         platform,
                         selectors,
-                        self.config.version,
+                        selectors.version,
                     )
                 if (
                     check.status is SessionStatus.SESSION_READY
@@ -298,7 +298,7 @@ class PlaywrightActionExecutor:
                         page,
                         Platform.BOSS,
                         selectors,
-                        self.config.version,
+                        selectors.version,
                     )
                     if not _reply_target_matches(check, command):
                         if not page.exists(selectors.conversation_list_root):
@@ -312,7 +312,7 @@ class PlaywrightActionExecutor:
                                 page,
                                 Platform.BOSS,
                                 selectors,
-                                self.config.version,
+                                selectors.version,
                             )
                             if _reply_target_matches(check, command):
                                 break
@@ -563,7 +563,7 @@ class PlaywrightActionExecutor:
                     continue
                 with RawCdpPageReader(str(websocket_url)) as page:
                     check = extract_current_page(
-                        page, Platform(command.platform), selectors, self.config.version
+                        page, Platform(command.platform), selectors, selectors.version
                     )
                 if _reply_target_matches(check, command):
                     matches.append(str(websocket_url))
@@ -776,7 +776,7 @@ class PlaywrightActionExecutor:
                 if target.get("type") != "page" or not websocket_url:
                     continue
                 with RawCdpPageReader(websocket_url) as page:
-                    check = extract_current_page(page, platform, selectors, self.config.version)
+                    check = extract_current_page(page, platform, selectors, selectors.version)
                     if _reply_target_matches(check, command):
                         matches.append(str(websocket_url))
                         continue
@@ -787,7 +787,7 @@ class PlaywrightActionExecutor:
                     ):
                         continue
                     for _ in range(30):
-                        check = extract_current_page(page, platform, selectors, self.config.version)
+                        check = extract_current_page(page, platform, selectors, selectors.version)
                         if _reply_target_matches(check, command):
                             matches.append(str(websocket_url))
                             break
@@ -1055,7 +1055,7 @@ class PlaywrightActionExecutor:
                 if target.get("type") != "page" or not websocket_url:
                     continue
                 with RawCdpPageReader(websocket_url) as page:
-                    check = extract_current_page(page, platform, selectors, self.config.version)
+                    check = extract_current_page(page, platform, selectors, selectors.version)
                 if _reply_target_matches(check, command):
                     matches.append(str(websocket_url))
             if len(matches) != 1:
@@ -1132,7 +1132,7 @@ class PlaywrightActionExecutor:
                     continue
                 with RawCdpPageReader(str(websocket_url)) as page:
                     check = extract_current_page(
-                        page, Platform(command.platform), selectors, self.config.version
+                        page, Platform(command.platform), selectors, selectors.version
                     )
                 if _reply_target_matches(check, command):
                     matches.append(str(websocket_url))
@@ -1195,7 +1195,7 @@ class PlaywrightActionExecutor:
                     continue
                 with RawCdpPageReader(str(websocket_url)) as page:
                     check = extract_current_page(
-                        page, Platform(command.platform), selectors, self.config.version
+                        page, Platform(command.platform), selectors, selectors.version
                     )
                 if (
                     check.job
@@ -1282,7 +1282,7 @@ class PlaywrightActionExecutor:
                     continue
                 with RawCdpPageReader(str(websocket_url)) as page:
                     check = extract_current_page(
-                        page, Platform(command.platform), selectors, self.config.version
+                        page, Platform(command.platform), selectors, selectors.version
                     )
                 if _reply_target_matches(check, command):
                     matches.append(str(websocket_url))
@@ -1481,7 +1481,7 @@ class PlaywrightActionExecutor:
                     PlaywrightPageReader(page),
                     platform,
                     selectors,
-                    self.config.version,
+                    selectors.version,
                 )
             except PlaywrightError:
                 continue
@@ -1523,7 +1523,7 @@ class PlaywrightActionExecutor:
                 reader,
                 platform,
                 selectors,
-                self.config.version,
+                selectors.version,
                 expected_company=(
                     command.company if command.action_type == "GREETING" else None
                 ),

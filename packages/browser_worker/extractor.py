@@ -2,8 +2,7 @@ import hashlib
 import json
 import re
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from packages.browser_worker.config import PlatformSelectors
 from packages.browser_worker.models import (
@@ -52,6 +51,22 @@ def extract_current_page(
     if not page.exists(selectors.login_marker):
         return _failure(
             page, platform, selector_version, SessionStatus.SESSION_AUTH_REQUIRED, "LOGIN_REQUIRED"
+        )
+    if selectors.pending_user_input and (page.value(selectors.pending_user_input) or "").strip():
+        return _failure(
+            page,
+            platform,
+            selector_version,
+            SessionStatus.SESSION_PAUSED,
+            "PENDING_USER_INPUT",
+        )
+    if selectors.blocking_dialog_marker and page.exists(selectors.blocking_dialog_marker):
+        return _failure(
+            page,
+            platform,
+            selector_version,
+            SessionStatus.SESSION_PAUSED,
+            "BLOCKING_DIALOG_VISIBLE",
         )
     if page.exists(selectors.job_root):
         return _extract_job(
@@ -362,7 +377,7 @@ def _extract_conversation(
         )
     company = page.text(selectors.conversation_company or selectors.company)
     if company and selectors.conversation_company_separator:
-        company = company.split(selectors.conversation_company_separator, 1)[0]
+        company = company.split(selectors.conversation_company_separator, 1)[0].strip()
     platform_consents: list[BrowserPlatformConsent] = []
     if selectors.consent_cards and selectors.consent_card_title:
         for element in page.elements(selectors.consent_cards):
@@ -500,7 +515,7 @@ def _stable_id(raw_value: str | None, json_key: str | None) -> str | None:
     if not json_key:
         return raw_value
     try:
-        value = json.loads(raw_value).get(json_key)
+        value = json.loads(unquote(raw_value)).get(json_key)
     except (json.JSONDecodeError, AttributeError):
         return None
     return str(value) if value is not None else None
@@ -509,6 +524,16 @@ def _stable_id(raw_value: str | None, json_key: str | None) -> str | None:
 def _unread_count(raw_value: str | None) -> int | None:
     if not raw_value:
         return 0
+    try:
+        metadata = json.loads(unquote(raw_value))
+    except (json.JSONDecodeError, TypeError):
+        metadata = None
+    if isinstance(metadata, dict) and "unread" in metadata:
+        unread = metadata["unread"]
+        if isinstance(unread, bool):
+            return int(unread)
+        if isinstance(unread, int):
+            return max(0, unread)
     match = re.search(r"\d+", raw_value)
     if match:
         return max(0, int(match.group(0)))
@@ -533,5 +558,16 @@ def _normalize_company_name(value: str | None) -> str | None:
 
 
 def _job_id_from_url(value: str) -> str | None:
-    name = PurePosixPath(urlparse(value).path).name
-    return name.removesuffix(".html") or None
+    parsed = urlparse(value)
+    query_job_id = parse_qs(parsed.query).get("job_id", [None])[0]
+    if query_job_id:
+        return query_job_id
+    liepin_match = re.search(r"/(?:job|a)/([^/?#]+?)\.shtml$", parsed.path)
+    if liepin_match:
+        return liepin_match.group(1)
+    name = parsed.path.rsplit("/", 1)[-1]
+    for suffix in (".shtml", ".html"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name or None

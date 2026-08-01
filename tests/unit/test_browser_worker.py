@@ -33,10 +33,14 @@ class FakePage(FakeElement):
     url: str = "https://www.zhipin.com/job_detail/abc"
     title: str = "职位详情"
     visible: set[str] = field(default_factory=set)
+    input_values: dict[str, str] = field(default_factory=dict)
     element_lists: dict[str, list[FakeElement]] = field(default_factory=dict)
 
     def exists(self, selector: str) -> bool:
         return selector in self.visible
+
+    def value(self, selector: str) -> str | None:
+        return self.input_values.get(selector)
 
     def elements(self, selector: str) -> list[ElementReader]:
         return [cast(ElementReader, item) for item in self.element_lists.get(selector, [])]

@@ -7,7 +7,12 @@ from playwright.sync_api import Error as PlaywrightError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from adapters.browser.playwright_reader import BossReadOnlyAdapter, MaimaiReadOnlyAdapter
+from adapters.browser.playwright_reader import (
+    BossReadOnlyAdapter,
+    LiepinReadOnlyAdapter,
+    MaimaiReadOnlyAdapter,
+    PlaywrightReadOnlyAdapter,
+)
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.browser import (
@@ -26,7 +31,12 @@ from packages.browser_worker.models import MessageDirection, Platform, ReadResul
 
 def read_current_page(session: Session, payload: BrowserReadRequest) -> BrowserReadResponse:
     config = get_browser_selectors()
-    adapter = BossReadOnlyAdapter(config) if payload.platform is Platform.BOSS else MaimaiReadOnlyAdapter(config)
+    adapters: dict[Platform, PlaywrightReadOnlyAdapter] = {
+        Platform.BOSS: BossReadOnlyAdapter(config),
+        Platform.MAIMAI: MaimaiReadOnlyAdapter(config),
+        Platform.LIEPIN: LiepinReadOnlyAdapter(config),
+    }
+    adapter = adapters[payload.platform]
     try:
         result = adapter.read_current_page(payload.cdp_url, payload.expected_company,
                                            payload.expected_job_title, payload.expected_recruiter)

@@ -87,7 +87,7 @@ class BossJobDiscoveryAdapter:
             listing = None
             for _ in range(10):
                 listing = extract_current_page(
-                    page, Platform.BOSS, self.selectors, self.config.version
+                    page, Platform.BOSS, self.selectors, self.selectors.version
                 )
                 if (
                     listing.status is SessionStatus.SESSION_READY
@@ -124,7 +124,7 @@ class BossJobDiscoveryAdapter:
                 for _ in range(10):
                     time.sleep(0.25)
                     refreshed = extract_current_page(
-                        page, Platform.BOSS, self.selectors, self.config.version
+                        page, Platform.BOSS, self.selectors, self.selectors.version
                     )
                     if (
                         refreshed.status is not SessionStatus.SESSION_READY
@@ -310,7 +310,7 @@ class BossJobDiscoveryAdapter:
                             detail_page,
                             Platform.BOSS,
                             self.selectors,
-                            self.config.version,
+                            self.selectors.version,
                             expected_company=summary.company_name,
                             expected_job_title=summary.title,
                         )
