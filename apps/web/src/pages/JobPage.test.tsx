@@ -24,11 +24,9 @@ describe('JobPage', () => {
           company_name: '示例公司',
           work_mode: 'REMOTE',
           source: 'BOSS',
-          latest_score: {
-            id: 'score-1',
-            total_score: 97,
-            grade: 'A',
-            eligibility: 'ELIGIBLE',
+          latest_decision: {
+            id: 'decision-1', decision: 'CONTACT', confidence: 0.9,
+            reason: '方向匹配', automation_eligible: true,
             hard_rejected: false,
             effective_job_status: 'OPEN',
           },
@@ -61,11 +59,9 @@ describe('JobPage', () => {
           company_name: '示例公司',
           work_mode: 'REMOTE',
           source: 'BOSS',
-          latest_score: {
-            id: 'score-1',
-            total_score: 97,
-            grade: 'A',
-            eligibility: 'ELIGIBLE',
+          latest_decision: {
+            id: 'decision-1', decision: 'CONTACT', confidence: 0.9,
+            reason: '方向匹配', automation_eligible: true,
             hard_rejected: false,
             effective_job_status: 'OPEN',
           },
@@ -106,7 +102,7 @@ describe('JobPage', () => {
     expect(link.getAttribute('target')).toBe('_blank')
   })
 
-  it('消息关联职位未评分时不被策略筛选隐藏', async () => {
+  it('消息关联职位未决策时不被策略筛选隐藏', async () => {
     window.location.hash = 'jobs?job_id=job-unscored'
     vi.mocked(api)
       .mockResolvedValueOnce({

@@ -178,7 +178,7 @@ def test_explicit_inbound_resume_request_does_not_require_score(
     assert draft.decision.value == "ALLOW_AUTO"
     assert draft.resume_id is not None
     assert draft.reason_codes == ["INBOUND_RESUME_REQUEST_ALLOWED"]
-    assert session.query(db.JobScore).count() == 0
+    assert session.query(db.JobDecision).count() == 0
     session.add(
         db.AutomationSetting(
             user_id=DEFAULT_USER_ID,
@@ -481,7 +481,7 @@ def test_message_discovery_imports_unbound_scoreless_conversation(
     }
     assert conversation is not None
     assert conversation.job_id is None
-    assert conversation.latest_job_score_id is None
+    assert conversation.latest_job_decision_id is None
     assert conversation.state == "ACTIVE"
     assert conversation.observed_company_name == "观察公司"
     assert conversation.observed_job_title == "Java后端"

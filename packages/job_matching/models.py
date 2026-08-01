@@ -17,19 +17,10 @@ class IndustryRuleType(StrEnum):
     EXCLUDED = "EXCLUDED"
 
 
-class InterpolationType(StrEnum):
-    STEP = "STEP"
-    LINEAR = "LINEAR"
-
-
-class Grade(StrEnum):
-    A = "A"
-    B = "B"
-    C = "C"
-
-
-class Eligibility(StrEnum):
-    ELIGIBLE = "ELIGIBLE"
+class ContactDecision(StrEnum):
+    CONTACT = "CONTACT"
+    SKIP = "SKIP"
+    REVIEW = "REVIEW"
     FILTERED_OUT = "FILTERED_OUT"
 
 
@@ -62,8 +53,6 @@ class CandidateProfile(BaseModel):
 class TitleRule(BaseModel):
     rule_type: RuleType
     pattern: str
-    score: Decimal = Field(default=Decimal(15), ge=0, le=15)
-    is_hard_requirement: bool = False
 
 
 class WorkModeRule(BaseModel):
@@ -71,24 +60,6 @@ class WorkModeRule(BaseModel):
     enabled: bool = True
     allowed_locations: list[str] = Field(default_factory=list)
     location_restricted: bool = False
-    score: Decimal = Field(default=Decimal(15), ge=0, le=15)
-    unknown_score: Decimal = Field(default=Decimal(8), ge=0, le=15)
-
-
-class SalaryBand(BaseModel):
-    lower_bound_k: Decimal = Field(ge=0)
-    upper_bound_k: Decimal | None = Field(default=None, ge=0)
-    min_score: Decimal = Field(ge=0, le=15)
-    max_score: Decimal = Field(ge=0, le=15)
-    interpolation: InterpolationType = InterpolationType.STEP
-
-    @model_validator(mode="after")
-    def validate_band(self) -> "SalaryBand":
-        if self.upper_bound_k is not None and self.lower_bound_k >= self.upper_bound_k:
-            raise ValueError("薪资区间上限必须大于下限")
-        if self.min_score > self.max_score:
-            raise ValueError("min_score 不能大于 max_score")
-        return self
 
 
 class SalaryRule(BaseModel):
@@ -96,27 +67,19 @@ class SalaryRule(BaseModel):
     currency: str = "CNY"
     minimum_monthly_k: Decimal = Field(ge=0)
     expected_monthly_k: Decimal = Field(ge=0)
-    negotiable_score: Decimal = Field(default=Decimal(8), ge=0, le=15)
-    unknown_score: Decimal = Field(default=Decimal(8), ge=0, le=15)
     exchange_rate: Decimal | None = Field(default=None, gt=0)
     exchange_rate_version: str | None = None
-    bands: list[SalaryBand]
 
     @model_validator(mode="after")
     def validate_rule(self) -> "SalaryRule":
         if self.minimum_monthly_k > self.expected_monthly_k:
             raise ValueError("最低薪资不能高于期望薪资")
-        ordered = sorted(self.bands, key=lambda item: item.lower_bound_k)
-        for previous, current in zip(ordered, ordered[1:], strict=False):
-            if previous.upper_bound_k is None or previous.upper_bound_k > current.lower_bound_k:
-                raise ValueError("薪资计分区间不能重叠")
         return self
 
 
 class IndustryRule(BaseModel):
     industry: str
     rule_type: IndustryRuleType
-    score: Decimal = Field(ge=0, le=10)
 
 
 class Strategy(BaseModel):
@@ -132,7 +95,6 @@ class Strategy(BaseModel):
     accept_outsourcing: bool = False
     accept_part_time: bool = False
     accept_headhunter: bool = True
-    headhunter_score_cap: int | None = Field(default=None, ge=0, le=79)
     max_posted_days: int = Field(default=30, ge=1)
     core_required_skills: list[str] = Field(default_factory=list)
     arrival_time_reply: str | None = Field(default=None, max_length=200)
@@ -153,58 +115,28 @@ class Strategy(BaseModel):
         return self
 
 
-class ScoreDetail(BaseModel):
-    dimension: str
-    score: Decimal
-    max_score: Decimal
-    rule_code: str
-    explanation: str
-    evidence_refs: list[str] = Field(default_factory=list)
-    matched_facts: dict[str, object] = Field(default_factory=dict)
-
-
-class RejectionReason(BaseModel):
+class HardRejectionReason(BaseModel):
     rule_code: str
     message: str
     evidence: dict[str, object] = Field(default_factory=dict)
 
 
-class ScoringEvidenceItem(BaseModel):
-    id: str = Field(pattern=r"^evidence:[0-9a-f]{64}$")
-    source_path: str
-    value: object
-    dimensions: list[str] = Field(min_length=1)
-
-
-class ScoringContext(BaseModel):
+class JobDecisionContext(BaseModel):
     job: JobInput
     parsed_job: ParsedJob
     candidate: CandidateProfile
     strategy: Strategy
-    evidence_items: list[ScoringEvidenceItem] = Field(default_factory=list)
 
 
-class ScoreResult(BaseModel):
-    total_score: int
-    grade: Grade
-    eligibility: Eligibility
+class JobDecisionResult(BaseModel):
+    decision: ContactDecision
+    confidence: Decimal = Field(ge=0, le=1)
     hard_rejected: bool
     effective_job_status: EffectiveJobStatus
-    action_blockers: list[str]
-    dimension_scores: dict[str, Decimal]
-    details: list[ScoreDetail]
-    rejection_reasons: list[RejectionReason]
-    match_reasons: list[str]
-    risk_notes: list[str]
-    scoring_version: str
-
-
-DIMENSION_MAX: dict[str, Decimal] = {
-    "title": Decimal(15),
-    "skills": Decimal(25),
-    "experience": Decimal(15),
-    "location": Decimal(15),
-    "salary": Decimal(15),
-    "industry": Decimal(10),
-    "management": Decimal(5),
-}
+    action_blockers: list[str] = Field(default_factory=list)
+    rejection_reasons: list[HardRejectionReason] = Field(default_factory=list)
+    matched_evidence: list[str] = Field(default_factory=list, max_length=3)
+    uncertainties: list[str] = Field(default_factory=list, max_length=3)
+    reason: str
+    automation_eligible: bool = False
+    decision_version: str

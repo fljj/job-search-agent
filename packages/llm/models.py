@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import TypeVar
+from typing import Literal, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -25,21 +25,19 @@ class LlmResult[T](BaseModel):
     metadata: LlmCallMetadata
 
 
-class ScoreDimension(BaseModel):
-    dimension: str
-    score: Decimal = Field(ge=0)
-    max_score: Decimal = Field(gt=0)
-    reason: str = Field(min_length=1, max_length=500)
-    evidence_refs: list[str] = Field(default_factory=list)
+class JobContactDecisionRequest(BaseModel):
+    job: dict[str, object]
+    requirements: dict[str, object]
+    candidate: dict[str, object]
+    strategy: dict[str, object]
 
 
-class JobScoreOutput(BaseModel):
-    dimensions: list[ScoreDimension]
-    total_score: int = Field(ge=0, le=100)
-    match_reasons: list[str] = Field(default_factory=list, max_length=5)
-    risk_notes: list[str] = Field(default_factory=list, max_length=5)
-    recommends_proactive_contact: bool
-    contact_reason: str = Field(min_length=1, max_length=500)
+class JobContactDecisionOutput(BaseModel):
+    decision: Literal["CONTACT", "SKIP", "REVIEW"]
+    confidence: Decimal = Field(ge=0, le=1)
+    matched_evidence: list[str] = Field(default_factory=list, max_length=3)
+    uncertainties: list[str] = Field(default_factory=list, max_length=3)
+    reason: str = Field(min_length=1, max_length=200)
 
 
 class MessageClassificationRequest(BaseModel):
@@ -85,10 +83,10 @@ class ReplyContext(BaseModel):
     work_mode: str
     required_skills: list[str] = Field(default_factory=list, max_length=30)
     preferred_skills: list[str] = Field(default_factory=list, max_length=30)
-    total_score: int = Field(ge=0, le=100)
-    dimension_scores: dict[str, Decimal] = Field(default_factory=dict)
-    match_reasons: list[str] = Field(default_factory=list, max_length=5)
-    risk_notes: list[str] = Field(default_factory=list, max_length=8)
+    contact_decision: str
+    decision_reason: str
+    matched_evidence: list[str] = Field(default_factory=list, max_length=3)
+    uncertainties: list[str] = Field(default_factory=list, max_length=3)
     enabled_work_modes: list[str] = Field(default_factory=list)
     allowed_onsite_locations: list[str] = Field(default_factory=list)
     remote_preferred: bool = False

@@ -30,7 +30,7 @@ from apps.api.app.services.message_discovery_service import (
     _next_seen_message_keys,
     _terminal_state_from_messages,
     persist_discovery_batch,
-    process_next_inbound_job_score,
+    process_next_inbound_job_decision,
     record_ready_platform_session,
 )
 from apps.api.app.services.user_service import DEFAULT_USER_ID
@@ -636,7 +636,7 @@ def test_explicit_candidate_correction_supersedes_older_decline() -> None:
     assert _terminal_state_from_messages([decline, correction]) is None
 
 
-def test_inbound_job_scoring_saves_score_without_creating_greeting(
+def test_inbound_job_decision_is_saved_without_creating_greeting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = MagicMock(spec=Session)
@@ -650,30 +650,30 @@ def test_inbound_job_scoring_saves_score_without_creating_greeting(
     conversation = SimpleNamespace(
         id=uuid4(),
         job_id=uuid4(),
-        latest_job_score_id=None,
+        latest_job_decision_id=None,
     )
     strategy = SimpleNamespace(
         id=run.strategy_id,
         candidate_profile_id=uuid4(),
     )
-    score = SimpleNamespace(id=uuid4(), hard_rejected=False)
+    decision = SimpleNamespace(id=uuid4(), hard_rejected=False, decision="CONTACT")
     session.scalar.return_value = conversation
     session.get.return_value = strategy
-    create_score = MagicMock(return_value=score)
+    create_decision = MagicMock(return_value=decision)
     monkeypatch.setattr(
-        "apps.api.app.services.message_discovery_service.create_score",
-        create_score,
+        "apps.api.app.services.message_discovery_service.create_decision",
+        create_decision,
     )
 
-    result = process_next_inbound_job_score(
+    result = process_next_inbound_job_decision(
         session,
         run,  # type: ignore[arg-type]
         FakeLlmProvider(),
     )
 
-    assert result == "SCORED"
-    assert conversation.latest_job_score_id == score.id
-    create_score.assert_called_once()
+    assert result == "DECIDED"
+    assert conversation.latest_job_decision_id == decision.id
+    create_decision.assert_called_once()
     session.commit.assert_called_once()
 
 

@@ -32,7 +32,6 @@ from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
-from packages.scoring.llm_engine import LlmScoreValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -327,25 +326,6 @@ def tick_run(
             _record_failure(session, run, failure_code)
             session.commit()
             continue
-        except LlmScoreValidationError as exc:
-            message.status = "RETRY_WAIT"
-            message.retry_at = current + timedelta(
-                seconds=settings.boss_llm_retry_base_seconds
-            )
-            message.error_code = "INVALID_SCORING_OUTPUT"
-            message.processing_started_at = None
-            _record_failure(session, run, "INVALID_SCORING_OUTPUT")
-            _event(
-                session,
-                run.id,
-                "MESSAGE_SCORING_RETRY_SCHEDULED",
-                "message",
-                message.id,
-                ["INVALID_SCORING_OUTPUT"],
-                {"validation_error": str(exc)[:500]},
-            )
-            session.commit()
-            continue
         except (ValueError, ResourceNotFoundError) as exc:
             message.status = "QUARANTINED"
             message.error_code = type(exc).__name__
@@ -527,11 +507,14 @@ def _pending_drafts(
     for draft in drafts:
         if len(result) >= limit:
             break
-        score = session.get(db.JobScore, draft.job_score_id) if draft.job_score_id else None
-        if score is not None and score.strategy_id != run.strategy_id:
+        job_decision = (
+            session.get(db.JobDecision, draft.job_decision_id)
+            if draft.job_decision_id else None
+        )
+        if job_decision is not None and job_decision.strategy_id != run.strategy_id:
             continue
         if (
-            score is None
+            job_decision is None
             and draft.draft_type not in {"REPLY", "RESUME", "MISMATCH_DECLINE"}
         ):
             continue

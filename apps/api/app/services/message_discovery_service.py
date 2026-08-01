@@ -12,11 +12,10 @@ from adapters.browser.message_discovery import (
     MessageDiscoveryBatch,
 )
 from adapters.llm.errors import LlmProviderError
-from apps.api.app.core.config import get_settings
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.conversation import ConversationPayload, MessagePayload
+from apps.api.app.schemas.decision import DecisionRequest
 from apps.api.app.schemas.job import JobImportPayload
-from apps.api.app.schemas.score import ScoreRequest
 from apps.api.app.services.action_service import execute_action
 from apps.api.app.services.automation_service import (
     authorize_automatic_action,
@@ -26,11 +25,11 @@ from apps.api.app.services.conversation_service import (
     create_conversation,
     import_message,
 )
+from apps.api.app.services.decision_service import create_decision
 from apps.api.app.services.job_service import import_job, to_job_domain
 from apps.api.app.services.llm_circuit_service import open_llm_circuit
 from apps.api.app.services.llm_config_service import runtime_settings
 from apps.api.app.services.qualification_service import refresh_qualification
-from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.actions import ActionExecutor
 from packages.browser_worker.models import (
@@ -43,7 +42,6 @@ from packages.job_parser.normalizers import normalize_location
 from packages.llm.ports import LlmProvider
 from packages.policy_engine.automation import AutomationContext, AutomationDecision
 from packages.policy_engine.state_machine import ActionType
-from packages.scoring.llm_engine import LlmScoreValidationError
 
 TERMINAL_CONVERSATION_STATES = {
     "ENDED",
@@ -78,19 +76,19 @@ CONVERSATION_REOPEN_MARKERS = (
 )
 
 
-def process_next_inbound_job_score(
+def process_next_inbound_job_decision(
     session: Session,
     run: db.AgentRun,
     provider: LlmProvider,
     *,
     now: datetime | None = None,
 ) -> str:
-    """每轮最多分析一个入站职位，硬性排除结果也保存为正式评分记录。"""
+    """每轮最多分析一个入站职位，硬性排除结果也保存为正式决策记录。"""
     current = now or datetime.now(UTC)
     root_cursor = dict(run.cursor or {})
-    scoring_cursor = root_cursor.get("inbound_job_scoring")
-    scoring_cursor = scoring_cursor if isinstance(scoring_cursor, dict) else {}
-    raw_retry_at = scoring_cursor.get("next_retry_at")
+    decision_cursor = root_cursor.get("inbound_job_decision")
+    decision_cursor = decision_cursor if isinstance(decision_cursor, dict) else {}
+    raw_retry_at = decision_cursor.get("next_retry_at")
     try:
         retry_at = datetime.fromisoformat(str(raw_retry_at)) if raw_retry_at else None
     except ValueError:
@@ -102,7 +100,7 @@ def process_next_inbound_job_score(
             db.Conversation.platform == run.platform,
             db.Conversation.strategy_id == run.strategy_id,
             db.Conversation.job_id.is_not(None),
-            db.Conversation.latest_job_score_id.is_(None),
+            db.Conversation.latest_job_decision_id.is_(None),
             db.Conversation.state == "ACTIVE",
         )
         .order_by(db.Conversation.updated_at.desc(), db.Conversation.id.desc())
@@ -113,17 +111,17 @@ def process_next_inbound_job_score(
     if (
         retry_at is not None
         and current < retry_at
-        and scoring_cursor.get("conversation_id") == str(conversation.id)
+        and decision_cursor.get("conversation_id") == str(conversation.id)
     ):
         return "DEFERRED"
     strategy = session.get(db.JobStrategy, run.strategy_id)
     if strategy is None:
         return "NONE"
     try:
-        score = create_score(
+        decision = create_decision(
             session,
             conversation.job_id,
-            ScoreRequest(
+            DecisionRequest(
                 strategy_id=strategy.id,
                 candidate_profile_id=strategy.candidate_profile_id,
             ),
@@ -131,40 +129,23 @@ def process_next_inbound_job_score(
         )
     except LlmProviderError as exc:
         open_llm_circuit(session, runtime_settings(session), exc.code, now=current)
-        _inbound_scoring_event(
-            session, run, conversation, "INBOUND_JOB_SCORE_LLM_BLOCKED", [exc.code]
+        _inbound_decision_event(
+            session, run, conversation, "INBOUND_JOB_DECISION_LLM_BLOCKED", [exc.code]
         )
         session.commit()
         return "LLM_BLOCKED"
-    except LlmScoreValidationError:
-        retry_at = current + timedelta(seconds=get_settings().boss_llm_retry_base_seconds)
-        root_cursor["inbound_job_scoring"] = {
-            "next_retry_at": retry_at.isoformat(),
-            "conversation_id": str(conversation.id),
-        }
-        run.cursor = root_cursor
-        _inbound_scoring_event(
-            session,
-            run,
-            conversation,
-            "INBOUND_JOB_SCORE_DEFERRED",
-            ["INVALID_SCORING_OUTPUT"],
-        )
-        session.commit()
-        return "DEFERRED"
-
-    conversation.latest_job_score_id = score.id
-    root_cursor.pop("inbound_job_scoring", None)
+    conversation.latest_job_decision_id = decision.id
+    root_cursor.pop("inbound_job_decision", None)
     run.cursor = root_cursor
-    _inbound_scoring_event(
+    _inbound_decision_event(
         session,
         run,
         conversation,
-        "INBOUND_JOB_SCORED",
-        ["HARD_FILTERED" if score.hard_rejected else "SCORED"],
+        "INBOUND_JOB_DECIDED",
+        ["HARD_FILTERED" if decision.hard_rejected else decision.decision],
     )
     session.commit()
-    return "HARD_FILTERED" if score.hard_rejected else "SCORED"
+    return "HARD_FILTERED" if decision.hard_rejected else "DECIDED"
 
 
 def persist_discovery_batch(
@@ -203,7 +184,7 @@ def persist_discovery_batch(
             counts["paused"] += 1
             continue
         job = _resolve_job(session, batch, item)
-        score = _current_score(session, run, job) if job else None
+        decision = _current_decision(session, run, job) if job else None
         conversation_data = create_conversation(
             session,
             ConversationPayload(
@@ -233,7 +214,7 @@ def persist_discovery_batch(
         )
         conversation.job_id = job.id if job else None
         conversation.strategy_id = run.strategy_id
-        conversation.latest_job_score_id = score.id if score else None
+        conversation.latest_job_decision_id = decision.id if decision else None
         conversation.observed_company_name = detail.company_name or item.summary.company_name
         conversation.observed_job_title = detail.job_title or item.summary.job_title
         previous_external_job_id = conversation.observed_external_job_id
@@ -341,8 +322,8 @@ def persist_discovery_batch(
         reasons = ["CONVERSATION_IMPORTED"]
         if job is None:
             reasons.append("JOB_UNBOUND")
-        elif score is None:
-            reasons.append("CURRENT_SCORE_MISSING")
+        elif decision is None:
+            reasons.append("CURRENT_DECISION_MISSING")
         _discovery_event(session, run, item, reasons)
         _record_state_sequence(session, run, item, ["RETURNING_TO_LIST"])
     root_cursor = dict(run.cursor or {})
@@ -424,9 +405,9 @@ def _queue_platform_consents(
     consents: list[BrowserPlatformConsent],
     current: datetime,
 ) -> None:
-    score = (
-        session.get(db.JobScore, conversation.latest_job_score_id)
-        if conversation.latest_job_score_id
+    job_decision = (
+        session.get(db.JobDecision, conversation.latest_job_decision_id)
+        if conversation.latest_job_decision_id
         else None
     )
     for consent in consents:
@@ -435,7 +416,7 @@ def _queue_platform_consents(
         safety_blockers: list[str] = []
         if not conversation.identity_reliable:
             safety_blockers.append("CONVERSATION_IDENTITY_UNRELIABLE")
-        if score is not None and score.hard_rejected:
+        if job_decision is not None and job_decision.hard_rejected:
             safety_blockers.append("JOB_HARD_REJECTED")
         if consent.consent_type.value == "LOCATION":
             action_type = ActionType.LOCATION_CONSENT_ACCEPT.value
@@ -459,8 +440,6 @@ def _queue_platform_consents(
             continue
         context = AutomationContext(
             action_type=action_type,
-            score=score.total_score if score is not None else 0,
-            grade=score.grade if score is not None else "UNKNOWN",
             eligible=not bool(safety_blockers),
             job_open=True,
             original_decision=(
@@ -806,7 +785,9 @@ def _resolve_job(
     return matches[0] if len(matches) == 1 else None
 
 
-def _current_score(session: Session, run: db.AgentRun, job: db.Job) -> db.JobScore | None:
+def _current_decision(
+    session: Session, run: db.AgentRun, job: db.Job
+) -> db.JobDecision | None:
     strategy = session.get(db.JobStrategy, run.strategy_id)
     if strategy is None:
         return None
@@ -814,15 +795,15 @@ def _current_score(session: Session, run: db.AgentRun, job: db.Job) -> db.JobSco
     if profile is None:
         return None
     return session.scalar(
-        select(db.JobScore)
+        select(db.JobDecision)
         .where(
-            db.JobScore.job_id == job.id,
-            db.JobScore.strategy_id == run.strategy_id,
-            db.JobScore.strategy_version == strategy.version,
-            db.JobScore.profile_version == profile.version,
-            db.JobScore.effective_job_status == "OPEN",
+            db.JobDecision.job_id == job.id,
+            db.JobDecision.strategy_id == run.strategy_id,
+            db.JobDecision.strategy_version == strategy.version,
+            db.JobDecision.profile_version == profile.version,
+            db.JobDecision.effective_job_status == "OPEN",
         )
-        .order_by(db.JobScore.created_at.desc())
+        .order_by(db.JobDecision.created_at.desc())
         .limit(1)
     )
 
@@ -874,7 +855,7 @@ def _discovery_event(
     )
 
 
-def _inbound_scoring_event(
+def _inbound_decision_event(
     session: Session,
     run: db.AgentRun,
     conversation: db.Conversation,

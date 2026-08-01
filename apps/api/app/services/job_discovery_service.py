@@ -10,22 +10,21 @@ from adapters.browser.job_discovery import DiscoveredJob, JobDiscoveryBatch
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.config import get_settings
 from apps.api.app.models import entities as db
+from apps.api.app.schemas.decision import DecisionRequest
 from apps.api.app.schemas.job import JobImportPayload
-from apps.api.app.schemas.score import ScoreRequest
 from apps.api.app.services.action_service import PREWRITE_RETRYABLE_FAILURES
 from apps.api.app.services.automation_service import (
     _effective_rules,
     dispatch_proactive_greeting,
 )
 from apps.api.app.services.conversation_service import create_greeting_draft
+from apps.api.app.services.decision_service import create_decision
 from apps.api.app.services.job_service import import_job
 from apps.api.app.services.llm_circuit_service import open_llm_circuit
 from apps.api.app.services.llm_config_service import runtime_settings
-from apps.api.app.services.score_service import create_score
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
 from packages.policy_engine.state_machine import ActionType
-from packages.scoring.llm_engine import LlmScoreValidationError
 
 RETRYABLE_LLM_CODES = {
     "LLM_NOT_CONFIGURED",
@@ -56,11 +55,11 @@ def process_job_discovery_batch(
     if blocked:
         _event(session, run, "JOB_SCAN_BLOCKED", blocked)
         session.commit()
-        return {"discovered": len(batch.items), "scored": 0, "contacted": 0, "skipped": len(batch.items)}
+        return {"discovered": len(batch.items), "decided": 0, "contacted": 0, "skipped": len(batch.items)}
     strategy = session.get(db.JobStrategy, run.strategy_id)
     if strategy is None:
         raise ValueError("Agent 策略不存在")
-    counts = {"discovered": len(batch.items), "scored": 0, "contacted": 0, "skipped": 0}
+    counts = {"discovered": len(batch.items), "decided": 0, "contacted": 0, "skipped": 0}
     retry_backoff_until: datetime | None = None
     for index, item in enumerate(batch.items):
         _state_event(session, run, item, "READING_CARD")
@@ -152,48 +151,48 @@ def process_job_discovery_batch(
                 draft_id = retry_action.draft_id
             else:
                 _state_event(session, run, item, "PARSING")
-                _state_event(session, run, item, "SCORING")
-                score = create_score(
+                _state_event(session, run, item, "DECIDING")
+                decision = create_decision(
                     session,
                     job.id,
-                    ScoreRequest(
+                    DecisionRequest(
                         strategy_id=run.strategy_id,
                         candidate_profile_id=strategy.candidate_profile_id,
                     ),
                     provider=provider,
                 )
-                record.job_score_id = score.id
-                if score.hard_rejected:
+                record.job_decision_id = decision.id
+                if decision.hard_rejected:
                     _finish(
                         record,
                         "SKIPPED",
                         [
                             item.rule_code
-                            for item in score.rejection_reasons
+                            for item in decision.rejection_reasons
                         ] or ["HARD_FILTERED"],
                     )
                     counts["skipped"] += 1
                     continue
-                counts["scored"] += 1
+                counts["decided"] += 1
                 if (
                     execute_external_actions
                     and source.recruiter_role == "HEADHUNTER"
                 ):
                     _finish(
                         record,
-                        "SCORED",
+                        "DECIDED",
                         ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"],
                     )
                     continue
                 if not execute_external_actions:
                     contact_candidate = (
-                        score.automation_eligible
+                        decision.automation_eligible
                         and source.recruiter_role != "HEADHUNTER"
                     )
                     reasons = (
                         ["PROACTIVE_CONTACT_CANDIDATE"]
                         if contact_candidate
-                        else list(score.action_blockers)
+                        else list(decision.action_blockers)
                         or ["PROACTIVE_CONTACT_NOT_ELIGIBLE"]
                     )
                     if (
@@ -201,9 +200,16 @@ def process_job_discovery_batch(
                         and "HEADHUNTER_PROACTIVE_CONTACT_BLOCKED" not in reasons
                     ):
                         reasons.append("HEADHUNTER_PROACTIVE_CONTACT_BLOCKED")
-                    _finish(record, "SCORED", reasons)
+                    _finish(record, "DECIDED", reasons)
                     continue
-                draft_id = create_greeting_draft(session, score.id, provider).id
+                if not decision.automation_eligible:
+                    _finish(
+                        record,
+                        "DECIDED",
+                        list(decision.action_blockers) or ["LLM_DOES_NOT_RECOMMEND_CONTACT"],
+                    )
+                    continue
+                draft_id = create_greeting_draft(session, decision.id, provider).id
             _state_event(session, run, item, "AUTHORIZING")
             _state_event(session, run, item, "CONTACTING")
             result = dispatch_proactive_greeting(
@@ -235,10 +241,6 @@ def process_job_discovery_batch(
             if retry_backoff_until is not None:
                 counts["skipped"] += len(batch.items[index + 1:])
                 break
-            continue
-        except LlmScoreValidationError:
-            _schedule_retry(record, "INVALID_SCORING_OUTPUT", current)
-            counts["skipped"] += 1
             continue
         record.action_id = (
             UUID(str(result["action_id"])) if result.get("action_id") else None

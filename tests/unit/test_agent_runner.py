@@ -439,7 +439,7 @@ def test_liepin_message_discovery_runs_l4_action_preparation(
         consents,
     )
     monkeypatch.setattr(
-        "scripts.run_agent_worker.process_next_inbound_job_score",
+        "scripts.run_agent_worker.process_next_inbound_job_decision",
         score,
     )
     monkeypatch.setattr(

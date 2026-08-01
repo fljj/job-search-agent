@@ -8,18 +8,15 @@ from packages.llm.models import (
     ConversationEvaluationRequest,
     GeneratedMessage,
     GreetingRequest,
-    JobScoreOutput,
+    JobContactDecisionOutput,
+    JobContactDecisionRequest,
     LlmCallMetadata,
     LlmResult,
     MessageClassification,
     MessageClassificationRequest,
     ReplyContext,
     ReplyRequest,
-    ScoreDimension,
 )
-from packages.scoring.engine import score_job
-from packages.scoring.evidence import evidence_catalog
-from packages.scoring.models import ScoringContext
 
 
 class FakeLlmJobParser:
@@ -53,35 +50,39 @@ class FakeLlmProvider:
     def parse_job(self, request: JobInput) -> LlmResult[ParsedJob]:
         return self._result(FakeLlmJobParser().parse(request), "job-parse-fake-v1")
 
-    def score_job(self, request: ScoringContext) -> LlmResult[JobScoreOutput]:
-        legacy = score_job(request)
-        catalog = evidence_catalog(request)
-        dimensions = [
-            ScoreDimension(
-                dimension=detail.dimension,
-                score=detail.score,
-                max_score=detail.max_score,
-                reason=detail.explanation,
-                evidence_refs=[
-                    next(
-                        item.id
-                        for item in catalog.values()
-                        if detail.dimension in item.dimensions
-                    )
-                ],
-            )
-            for detail in legacy.details
+    def decide_job_contact(
+        self, request: JobContactDecisionRequest
+    ) -> LlmResult[JobContactDecisionOutput]:
+        title = str(request.job.get("title") or "")
+        requirement_items: list[str] = []
+        for key in ("required_skills", "preferred_skills", "responsibilities"):
+            values = request.requirements.get(key)
+            if isinstance(values, list):
+                requirement_items.extend(str(item) for item in values)
+        requirements = " ".join(requirement_items)
+        candidate_skills = request.candidate.get("skills")
+        skill_names = [
+            str(item.get("name") or "")
+            for item in candidate_skills
+            if isinstance(item, dict)
+        ] if isinstance(candidate_skills, list) else []
+        relevant_text = f"{title} {requirements}".lower()
+        matched = [
+            skill for skill in skill_names if skill.lower() in relevant_text
         ]
+        decision = "CONTACT" if matched else "SKIP"
         return self._result(
-            JobScoreOutput(
-                dimensions=dimensions,
-                total_score=legacy.total_score,
-                match_reasons=legacy.match_reasons[:5],
-                risk_notes=legacy.risk_notes[:5],
-                recommends_proactive_contact=legacy.total_score >= 80,
-                contact_reason="FAKE_PROVIDER_TEST_RESULT",
+            JobContactDecisionOutput(
+                decision=decision,
+                confidence=Decimal("1"),
+                matched_evidence=matched[:3],
+                reason=(
+                    "候选人技能与岗位要求存在明确交集"
+                    if matched
+                    else "候选人技能与岗位要求没有明确交集"
+                ),
             ),
-            "job-score-fake-v1",
+            "job-contact-decision-fake-v1",
         )
 
     def classify_message(

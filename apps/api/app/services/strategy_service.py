@@ -5,15 +5,14 @@ from apps.api.app.models import entities as db
 from apps.api.app.schemas.strategy import StrategyPayload, StrategyResponse
 from apps.api.app.services.errors import ResourceNotFoundError, VersionConflictError
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
-from packages.job_parser.normalizers import normalize_company, normalize_location, normalize_text
-from packages.scoring.models import (
+from packages.job_matching.models import (
     IndustryRule,
-    SalaryBand,
     SalaryRule,
     Strategy,
     TitleRule,
     WorkModeRule,
 )
+from packages.job_parser.normalizers import normalize_company, normalize_location, normalize_text
 
 
 def create_strategy(session: Session, payload: StrategyPayload) -> StrategyResponse:
@@ -89,36 +88,28 @@ def _apply(strategy: db.JobStrategy, payload: StrategyPayload) -> None:
     strategy.accept_outsourcing = payload.accept_outsourcing
     strategy.accept_part_time = payload.accept_part_time
     strategy.accept_headhunter = payload.accept_headhunter
-    strategy.headhunter_score_cap = payload.headhunter_score_cap
     strategy.core_required_skills = payload.core_required_skills
     strategy.arrival_time_reply = payload.arrival_time_reply
     strategy.reject_full_time_bachelor_required = (
         payload.reject_full_time_bachelor_required
     )
     strategy.title_rules = [db.JobTitleRule(rule_type=item.rule_type.value, pattern=item.pattern,
-                                            normalized_pattern=normalize_text(item.pattern), score=item.score,
-                                            is_hard_requirement=item.is_hard_requirement)
+                                            normalized_pattern=normalize_text(item.pattern))
                             for item in payload.title_rules]
     strategy.work_mode_rules = [db.WorkModeRule(
         work_mode=item.work_mode.value, enabled=item.enabled,
-        location_restricted=item.location_restricted, location_score=item.score,
-        unknown_score=item.unknown_score,
+        location_restricted=item.location_restricted,
         locations=[db.WorkModeLocation(location_code=normalize_location(location) or location,
                                        location_name=location) for location in item.allowed_locations],
     ) for item in payload.work_mode_rules]
     strategy.salary_rules = [db.SalaryRule(
         work_mode=item.work_mode.value, currency=item.currency,
         minimum_monthly_k=item.minimum_monthly_k, expected_monthly_k=item.expected_monthly_k,
-        negotiable_score=item.negotiable_score, unknown_score=item.unknown_score,
         exchange_rate=item.exchange_rate, exchange_rate_version=item.exchange_rate_version,
-        bands=[db.SalaryScoreBand(lower_bound_k=band.lower_bound_k,
-                                  upper_bound_k=band.upper_bound_k, min_score=band.min_score,
-                                  max_score=band.max_score, interpolation=band.interpolation.value,
-                                  sort_order=index) for index, band in enumerate(item.bands)],
     ) for item in payload.salary_rules]
     strategy.industry_rules = [db.IndustryRule(industry_code=normalize_text(item.industry),
                                                industry_name=item.industry,
-                                               rule_type=item.rule_type.value, score=item.score)
+                                               rule_type=item.rule_type.value)
                                for item in payload.industry_rules]
     strategy.blacklist = [db.CompanyBlacklist(company_name=item,
                                                normalized_name=normalize_company(item))
@@ -134,29 +125,23 @@ def _response(strategy: db.JobStrategy) -> StrategyResponse:
         accept_outsourcing=strategy.accept_outsourcing,
         accept_part_time=strategy.accept_part_time,
         accept_headhunter=strategy.accept_headhunter,
-        headhunter_score_cap=strategy.headhunter_score_cap,
         core_required_skills=strategy.core_required_skills,
         arrival_time_reply=strategy.arrival_time_reply,
         reject_full_time_bachelor_required=(
             strategy.reject_full_time_bachelor_required
         ),
-        title_rules=[TitleRule(rule_type=item.rule_type, pattern=item.pattern, score=item.score,
-                               is_hard_requirement=item.is_hard_requirement) for item in strategy.title_rules],
+        title_rules=[TitleRule(rule_type=item.rule_type, pattern=item.pattern)
+                     for item in strategy.title_rules],
         work_mode_rules=[WorkModeRule(work_mode=item.work_mode, enabled=item.enabled,
                                       allowed_locations=[location.location_name for location in item.locations],
-                                      location_restricted=item.location_restricted,
-                                      score=item.location_score, unknown_score=item.unknown_score)
+                                      location_restricted=item.location_restricted)
                          for item in strategy.work_mode_rules],
         salary_rules=[SalaryRule(
             work_mode=item.work_mode, currency=item.currency,
             minimum_monthly_k=item.minimum_monthly_k, expected_monthly_k=item.expected_monthly_k,
-            negotiable_score=item.negotiable_score, unknown_score=item.unknown_score,
             exchange_rate=item.exchange_rate, exchange_rate_version=item.exchange_rate_version,
-            bands=[SalaryBand(lower_bound_k=band.lower_bound_k, upper_bound_k=band.upper_bound_k,
-                              min_score=band.min_score, max_score=band.max_score,
-                              interpolation=band.interpolation) for band in sorted(item.bands, key=lambda band: band.sort_order)],
         ) for item in strategy.salary_rules],
-        industry_rules=[IndustryRule(industry=item.industry_name, rule_type=item.rule_type,
-                                     score=item.score) for item in strategy.industry_rules],
+        industry_rules=[IndustryRule(industry=item.industry_name, rule_type=item.rule_type)
+                        for item in strategy.industry_rules],
         company_blacklist=[item.company_name for item in strategy.blacklist],
     )

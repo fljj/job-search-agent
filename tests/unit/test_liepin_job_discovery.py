@@ -215,7 +215,7 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
         prefilter_state="UNKNOWN",
         prefilter_reason=None,
         job_id=None,
-        job_score_id=None,
+        job_decision_id=None,
         content_hash=None,
     )
     job_id = uuid4()
@@ -227,7 +227,7 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
         content_hash="c" * 64,
     )
     strategy = SimpleNamespace(candidate_profile_id=uuid4())
-    score = SimpleNamespace(
+    decision = SimpleNamespace(
         id=uuid4(),
         hard_rejected=False,
         rejection_reasons=[],
@@ -276,8 +276,8 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
         lambda *_args: None,
     )
     monkeypatch.setattr(
-        "apps.api.app.services.job_discovery_service.create_score",
-        lambda *_args, **_kwargs: score,
+        "apps.api.app.services.job_discovery_service.create_decision",
+        lambda *_args, **_kwargs: decision,
     )
     monkeypatch.setattr(
         "apps.api.app.services.job_discovery_service.create_greeting_draft", greet
@@ -307,11 +307,11 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
 
     assert counts == {
         "discovered": 1,
-        "scored": 1,
+        "decided": 1,
         "contacted": expected_contacted,
         "skipped": 0,
     }
-    assert record.status == ("CONTACTED" if expected_contacted else "SCORED")
+    assert record.status == ("CONTACTED" if expected_contacted else "DECIDED")
     assert record.reason_codes == expected_reasons
     if expected_contacted:
         greet.assert_called_once()

@@ -79,7 +79,7 @@ class DraftResponse(BaseModel):
 
 
 class GreetingRequest(BaseModel):
-    job_score_id: UUID
+    job_decision_id: UUID
 
 
 class ReplyRequest(BaseModel):

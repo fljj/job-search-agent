@@ -6,15 +6,15 @@ interface Strategy { id: string; name: string; version: number; [key: string]: u
 
 const template = JSON.stringify({
   candidate_profile_id: '请填写候选人资料 ID', name: 'Java 后端岗位', enabled: true, priority: 100,
-  title_rules: [{ rule_type: 'INCLUDE', pattern: 'Java后端', score: 15 }],
+  title_rules: [{ rule_type: 'INCLUDE', pattern: 'Java后端' }],
   accepted_seniority_levels: ['SENIOR', 'LEAD', 'ARCHITECT'],
   work_mode_rules: [
-    { work_mode: 'REMOTE', enabled: true, allowed_locations: [], location_restricted: false, score: 15, unknown_score: 8 },
-    { work_mode: 'ONSITE', enabled: true, allowed_locations: ['济南'], location_restricted: true, score: 15, unknown_score: 8 },
+    { work_mode: 'REMOTE', enabled: true, allowed_locations: [], location_restricted: false },
+    { work_mode: 'ONSITE', enabled: true, allowed_locations: ['济南'], location_restricted: true },
   ],
   salary_rules: [], industry_rules: [], company_blacklist: [], accept_outsourcing: false,
   accept_part_time: false,
-  accept_headhunter: true, headhunter_score_cap: null, max_posted_days: 30,
+  accept_headhunter: true, max_posted_days: 30,
   reject_full_time_bachelor_required: false,
   core_required_skills: ['Java'], version: 1,
 }, null, 2)

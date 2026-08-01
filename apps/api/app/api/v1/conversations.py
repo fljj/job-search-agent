@@ -104,7 +104,7 @@ def reply(payload: ReplyRequest, session: Session = Depends(get_session)) -> dic
 
 @router.post("/drafts/greeting")
 def greeting(payload: GreetingRequest, session: Session = Depends(get_session)) -> dict[str, object]:
-    return response(create_greeting_draft(session, payload.job_score_id))
+    return response(create_greeting_draft(session, payload.job_decision_id))
 
 
 @router.post("/drafts/resume")

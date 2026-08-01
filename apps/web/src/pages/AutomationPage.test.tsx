@@ -38,7 +38,7 @@ function mockAutomationApi() {
     if (path === '/strategies?enabled=true') return { items: [{ id: 'strategy-1', name: '主策略', enabled: true }] }
     if (path === '/automation/settings') return { items: [{
       scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: true, paused: true,
-      auto_greet_enabled: true, auto_greet_min_score: 80, auto_reply_enabled: true,
+      auto_greet_enabled: true, auto_reply_enabled: true,
       auto_resume_enabled: true, maimai_recommendation_enabled: true,
       maimai_recommendation_resume_enabled: true, emergency_stop: true,
       job_scan_enabled: true, company_cooldown_hours: 24, recruiter_cooldown_hours: 24,

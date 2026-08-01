@@ -12,8 +12,7 @@ from packages.policy_engine.automation import (
 
 def context(**changes: object) -> AutomationContext:
     values: dict[str, object] = {
-        "action_type": "GREETING", "score": 80, "grade": "A",
-        "eligible": True, "job_open": True,
+        "action_type": "GREETING", "eligible": True, "job_open": True,
     }
     values.update(changes)
     return AutomationContext.model_validate(values)
@@ -29,20 +28,18 @@ def rules(**changes: object) -> AutomationRules:
 
 
 @pytest.mark.parametrize("changes", [
-    {"eligible": False}, {"job_open": False}, {"grade": "C", "score": 59},
+    {"eligible": False}, {"job_open": False},
 ])
-def test_ineligible_closed_and_c_grade_never_auto(changes: dict[str, object]) -> None:
+def test_ineligible_or_closed_job_never_auto(changes: dict[str, object]) -> None:
     decision, _ = evaluate_automation(context(**changes), rules())
     assert decision is not AutomationDecision.ALLOW_AUTO
 
 
-def test_greeting_requires_fixed_80_threshold() -> None:
+def test_greeting_uses_prevalidated_contact_decision() -> None:
     assert evaluate_automation(context(), rules())[0] is AutomationDecision.ALLOW_AUTO
     assert evaluate_automation(
-        context(score=79), rules()
+        context(eligible=False), rules()
     )[0] is AutomationDecision.DENY
-    with pytest.raises(ValueError):
-        rules(auto_greet_min_score=79)
 
 
 def test_only_specific_time_reply_requires_confirmation() -> None:
@@ -113,21 +110,9 @@ def test_automation_rules_have_no_hourly_or_daily_quotas() -> None:
 
 
 def test_emergency_stop_overrides_all_automatic_permissions() -> None:
-    decision, reasons = evaluate_automation(
-        context(score=100), rules(emergency_stop=True)
-    )
+    decision, reasons = evaluate_automation(context(), rules(emergency_stop=True))
     assert decision is AutomationDecision.DENY
     assert reasons == ["EMERGENCY_STOP_ACTIVE"]
-
-
-def test_historical_low_score_decline_cannot_be_created() -> None:
-    decline = context(
-        action_type="LOW_SCORE_DECLINE",
-        score=59,
-        grade="C",
-        eligible=False,
-    )
-    assert evaluate_automation(decline, rules())[0] is AutomationDecision.DENY
 
 
 def test_normal_reply_is_denied_after_qualification_becomes_mismatch() -> None:

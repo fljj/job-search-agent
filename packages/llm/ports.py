@@ -6,13 +6,13 @@ from packages.llm.models import (
     ConversationEvaluationRequest,
     GeneratedMessage,
     GreetingRequest,
-    JobScoreOutput,
+    JobContactDecisionOutput,
+    JobContactDecisionRequest,
     LlmResult,
     MessageClassification,
     MessageClassificationRequest,
     ReplyRequest,
 )
-from packages.scoring.models import ScoringContext
 
 
 class LlmProvider(Protocol):
@@ -28,7 +28,9 @@ class LlmProvider(Protocol):
 
     def parse_job(self, request: JobInput) -> LlmResult[ParsedJob]: ...
 
-    def score_job(self, request: ScoringContext) -> LlmResult[JobScoreOutput]: ...
+    def decide_job_contact(
+        self, request: JobContactDecisionRequest
+    ) -> LlmResult[JobContactDecisionOutput]: ...
 
     def classify_message(
         self, request: MessageClassificationRequest

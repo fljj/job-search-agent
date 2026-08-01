@@ -15,7 +15,6 @@ class AutomationRules(BaseModel):
     enabled: bool = False
     paused: bool = False
     auto_greet_enabled: bool = False
-    auto_greet_min_score: int = Field(default=80, ge=80, le=100)
     auto_reply_enabled: bool = False
     auto_resume_enabled: bool = False
     maimai_recommendation_enabled: bool = False
@@ -36,8 +35,6 @@ class AutomationRules(BaseModel):
 
 class AutomationContext(BaseModel):
     action_type: str
-    score: int
-    grade: str
     eligible: bool
     job_open: bool
     confidence: float = 1
@@ -61,12 +58,8 @@ def evaluate_automation(
     if context.action_type == ActionType.GREETING.value:
         if not context.eligible or not context.job_open:
             return AutomationDecision.DENY, ["JOB_NOT_ELIGIBLE_OR_OPEN"]
-        if context.grade == "C":
-            return AutomationDecision.DENY, ["C_GRADE_NO_AUTO"]
         if not rules.auto_greet_enabled:
             return AutomationDecision.DENY, ["AUTO_GREETING_DISABLED"]
-        if context.score < rules.auto_greet_min_score:
-            return AutomationDecision.DENY, ["GREETING_SCORE_BELOW_THRESHOLD"]
         return AutomationDecision.ALLOW_AUTO, ["GREETING_POLICY_MATCHED"]
 
     if context.action_type in {ActionType.REPLY.value, ActionType.MISMATCH_DECLINE.value}:

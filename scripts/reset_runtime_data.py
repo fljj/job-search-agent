@@ -18,7 +18,6 @@ PRESERVED_TABLES = {
     "work_mode_rules",
     "work_mode_locations",
     "salary_rules",
-    "salary_score_bands",
     "industry_rules",
     "company_blacklists",
     "knowledge_items",

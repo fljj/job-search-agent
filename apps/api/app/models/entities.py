@@ -93,7 +93,6 @@ class JobStrategy(TimestampMixin, Base):
         Boolean, default=False, server_default=text("false")
     )
     accept_headhunter: Mapped[bool] = mapped_column(Boolean, default=True)
-    headhunter_score_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     core_required_skills: Mapped[list[str]] = mapped_column(JSONB, default=list)
     arrival_time_reply: Mapped[str | None] = mapped_column(
         String(200), nullable=True
@@ -117,8 +116,6 @@ class JobTitleRule(Base):
     rule_type: Mapped[str] = mapped_column(String(20))
     pattern: Mapped[str] = mapped_column(String(150))
     normalized_pattern: Mapped[str] = mapped_column(String(150))
-    score: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=15)
-    is_hard_requirement: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -130,8 +127,6 @@ class WorkModeRule(TimestampMixin, Base):
     work_mode: Mapped[str] = mapped_column(String(20))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     location_restricted: Mapped[bool] = mapped_column(Boolean, default=False)
-    location_score: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=15)
-    unknown_score: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=8)
     locations: Mapped[list["WorkModeLocation"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 
@@ -154,23 +149,8 @@ class SalaryRule(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(10), default="CNY")
     minimum_monthly_k: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     expected_monthly_k: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    negotiable_score: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=8)
-    unknown_score: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=8)
     exchange_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     exchange_rate_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    bands: Mapped[list["SalaryScoreBand"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
-
-
-class SalaryScoreBand(Base):
-    __tablename__ = "salary_score_bands"
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    salary_rule_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("salary_rules.id", ondelete="CASCADE"))
-    lower_bound_k: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    upper_bound_k: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
-    min_score: Mapped[Decimal] = mapped_column(Numeric(4, 2))
-    max_score: Mapped[Decimal] = mapped_column(Numeric(4, 2))
-    interpolation: Mapped[str] = mapped_column(String(20))
-    sort_order: Mapped[int] = mapped_column(Integer)
 
 
 class IndustryRule(Base):
@@ -181,7 +161,6 @@ class IndustryRule(Base):
     industry_code: Mapped[str] = mapped_column(String(100))
     industry_name: Mapped[str] = mapped_column(String(100))
     rule_type: Mapped[str] = mapped_column(String(20))
-    score: Mapped[Decimal] = mapped_column(Numeric(4, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -301,8 +280,8 @@ class LlmInvocation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class JobScore(Base):
-    __tablename__ = "job_scores"
+class JobDecision(Base):
+    __tablename__ = "job_decisions"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
     strategy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_strategies.id", ondelete="CASCADE"))
@@ -310,68 +289,30 @@ class JobScore(Base):
     parsed_job_detail_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("parsed_job_details.id"))
     strategy_version: Mapped[int] = mapped_column(Integer)
     profile_version: Mapped[int] = mapped_column(Integer)
-    scoring_version: Mapped[str] = mapped_column(String(50))
+    decision_version: Mapped[str] = mapped_column(String(50))
     prompt_version: Mapped[str] = mapped_column(
-        String(50), default="legacy-rules-v1", server_default="legacy-rules-v1"
+        String(50), default="job-contact-decision-v1", server_default="job-contact-decision-v1"
     )
     llm_invocation_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("llm_invocations.id", ondelete="SET NULL", name="fk_job_scores_llm_invocation"),
+        ForeignKey("llm_invocations.id", ondelete="SET NULL", name="fk_job_decisions_llm_invocation"),
         nullable=True,
     )
     input_fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
     effective_job_status: Mapped[str] = mapped_column(String(20))
     action_blockers: Mapped[list[str]] = mapped_column(JSONB)
-    title_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    skill_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    experience_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    location_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    salary_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    industry_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    management_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    total_score: Mapped[int] = mapped_column(Integer)
-    grade: Mapped[str] = mapped_column(String(1))
-    eligibility: Mapped[str] = mapped_column(String(20))
+    decision: Mapped[str] = mapped_column(String(20))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2))
     hard_rejected: Mapped[bool] = mapped_column(Boolean)
-    llm_recommends_proactive_contact: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default=text("false")
-    )
-    llm_contact_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
     automation_eligible: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
-    match_reasons: Mapped[list[str]] = mapped_column(JSONB)
-    risk_notes: Mapped[list[str]] = mapped_column(JSONB)
-    input_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    details: Mapped[list["JobScoreDetail"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
-    rejections: Mapped[list["JobRejection"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
-
-
-class JobScoreDetail(Base):
-    __tablename__ = "job_score_details"
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_score_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_scores.id", ondelete="CASCADE"))
-    dimension: Mapped[str] = mapped_column(String(30))
-    rule_code: Mapped[str] = mapped_column(String(100))
-    score_awarded: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    max_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    evidence_refs: Mapped[list[str]] = mapped_column(
+    matched_evidence: Mapped[list[str]] = mapped_column(JSONB)
+    uncertainties: Mapped[list[str]] = mapped_column(JSONB)
+    rejection_reasons: Mapped[list[dict[str, object]]] = mapped_column(
         JSONB, default=list, server_default=text("'[]'::jsonb")
     )
-    matched_facts: Mapped[dict[str, object]] = mapped_column(JSONB)
-    explanation: Mapped[str] = mapped_column(Text)
-    sort_order: Mapped[int] = mapped_column(Integer)
-
-
-class JobRejection(Base):
-    __tablename__ = "job_rejections"
-    __table_args__ = (UniqueConstraint("job_score_id", "rule_code"),)
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_score_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_scores.id", ondelete="CASCADE"))
-    rule_code: Mapped[str] = mapped_column(String(100))
-    message: Mapped[str] = mapped_column(Text)
-    evidence: Mapped[dict[str, object]] = mapped_column(JSONB)
-    sort_order: Mapped[int] = mapped_column(Integer)
+    input_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -415,8 +356,8 @@ class Conversation(TimestampMixin, Base):
     strategy_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_strategies.id", ondelete="SET NULL"), nullable=True
     )
-    latest_job_score_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("job_scores.id", ondelete="SET NULL"), nullable=True
+    latest_job_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("job_decisions.id", ondelete="SET NULL"), nullable=True
     )
     platform: Mapped[str] = mapped_column(String(30), default="MOCK")
     external_conversation_id: Mapped[str] = mapped_column(String(200))
@@ -502,7 +443,7 @@ class GeneratedDraft(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), nullable=True)
-    job_score_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("job_scores.id", ondelete="CASCADE"), nullable=True)
+    job_decision_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("job_decisions.id", ondelete="CASCADE"), nullable=True)
     draft_type: Mapped[str] = mapped_column(String(30))
     content: Mapped[str] = mapped_column(Text)
     intents: Mapped[list[str]] = mapped_column(JSONB, default=list)
@@ -662,13 +603,7 @@ class ActionQueue(TimestampMixin, Base):
 
 class AutomationSetting(TimestampMixin, Base):
     __tablename__ = "automation_settings"
-    __table_args__ = (
-        UniqueConstraint("user_id", "scope_type", "scope_key"),
-        CheckConstraint(
-            "auto_greet_min_score BETWEEN 80 AND 100",
-            name="ck_automation_greet_min_score",
-        ),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "scope_type", "scope_key"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     scope_type: Mapped[str] = mapped_column(String(20))
@@ -676,7 +611,6 @@ class AutomationSetting(TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_greet_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    auto_greet_min_score: Mapped[int] = mapped_column(Integer, default=80, server_default="80")
     auto_reply_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_resume_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     maimai_recommendation_enabled: Mapped[bool] = mapped_column(
@@ -864,8 +798,8 @@ class JobDiscoveryRecord(Base):
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
     )
-    job_score_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("job_scores.id", ondelete="SET NULL"), nullable=True
+    job_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("job_decisions.id", ondelete="SET NULL"), nullable=True
     )
     action_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("action_queue.id", ondelete="SET NULL"), nullable=True

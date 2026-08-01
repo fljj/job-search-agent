@@ -12,13 +12,13 @@ from apps.api.app.api.v1 import (
     automation,
     browser,
     conversations,
+    decisions,
     jobs,
     knowledge,
     profiles,
     recommendations,
     resumes,
     scheduling,
-    scores,
     strategies,
     system,
 )
@@ -51,7 +51,7 @@ async def enforce_local_access(
             return _error("LOCAL_ACCESS_DENIED", "本地访问令牌无效", 401)
     return await call_next(request)
 
-for router in (profiles.router, strategies.router, jobs.router, scores.router,
+for router in (profiles.router, strategies.router, jobs.router, decisions.router,
                knowledge.router, resumes.router, conversations.router, browser.router,
                actions.router, automation.router, recommendations.router,
                scheduling.router, system.router):

@@ -127,51 +127,48 @@ def list_jobs(
     page_size: int,
     job_id: object | None = None,
     strategy_id: object | None = None,
-    grade: str | None = None,
-    eligibility: str | None = None,
+    decision: str | None = None,
     effective_job_status: str | None = None,
     work_mode: str | None = None,
     hard_rejected: bool | None = None,
 ) -> tuple[list[JobResponse], int]:
-    score_rank = (
+    decision_rank = (
         select(
-            db.JobScore.id.label("score_id"),
-            db.JobScore.job_id.label("job_id"),
+            db.JobDecision.id.label("decision_id"),
+            db.JobDecision.job_id.label("job_id"),
             func.row_number().over(
-                partition_by=db.JobScore.job_id,
-                order_by=(db.JobScore.created_at.desc(), db.JobScore.id.desc()),
+                partition_by=db.JobDecision.job_id,
+                order_by=(db.JobDecision.created_at.desc(), db.JobDecision.id.desc()),
             ).label("rank"),
         )
-        .where(db.JobScore.strategy_id == strategy_id)
+        .where(db.JobDecision.strategy_id == strategy_id)
         .subquery()
         if strategy_id is not None
         else None
     )
-    latest_score = aliased(db.JobScore)
+    latest_decision = aliased(db.JobDecision)
     query = (
-        select(db.Job, latest_score)
-        if score_rank is not None
+        select(db.Job, latest_decision)
+        if decision_rank is not None
         else select(db.Job)
     ).where(db.Job.user_id == DEFAULT_USER_ID)
-    if score_rank is not None:
+    if decision_rank is not None:
         query = query.join(
-            score_rank,
-            and_(score_rank.c.job_id == db.Job.id, score_rank.c.rank == 1),
-        ).join(latest_score, latest_score.id == score_rank.c.score_id)
+            decision_rank,
+            and_(decision_rank.c.job_id == db.Job.id, decision_rank.c.rank == 1),
+        ).join(latest_decision, latest_decision.id == decision_rank.c.decision_id)
     if job_id is not None:
         query = query.where(db.Job.id == job_id)
     if work_mode:
         query = query.where(db.Job.work_mode == work_mode)
-    if grade:
-        query = query.where(latest_score.grade == grade)
-    if eligibility:
-        query = query.where(latest_score.eligibility == eligibility)
+    if decision:
+        query = query.where(latest_decision.decision == decision)
     if effective_job_status:
-        query = query.where(latest_score.effective_job_status == effective_job_status)
+        query = query.where(latest_decision.effective_job_status == effective_job_status)
     if hard_rejected is not None:
-        query = query.where(latest_score.hard_rejected == hard_rejected)
-    if strategy_id is None and any((grade, eligibility, effective_job_status, hard_rejected is not None)):
-        raise ValueError("评分结果筛选必须同时提供 strategy_id")
+        query = query.where(latest_decision.hard_rejected == hard_rejected)
+    if strategy_id is None and any((decision, effective_job_status, hard_rejected is not None)):
+        raise ValueError("职位沟通决策筛选必须同时提供 strategy_id")
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = session.execute(
         query.order_by(db.Job.created_at.desc(), db.Job.id.desc())
@@ -183,19 +180,24 @@ def list_jobs(
     items: list[JobResponse] = []
     for row in rows:
         job = row[0]
-        score = row[1] if score_rank is not None else None
-        summary = None if score is None else {
-            "id": str(score.id), "total_score": score.total_score,
-            "grade": score.grade, "eligibility": score.eligibility,
-            "hard_rejected": score.hard_rejected,
-            "effective_job_status": score.effective_job_status,
+        decision_record = row[1] if decision_rank is not None else None
+        summary = None if decision_record is None else {
+            "id": str(decision_record.id),
+            "decision": decision_record.decision,
+            "confidence": float(decision_record.confidence),
+            "hard_rejected": decision_record.hard_rejected,
+            "effective_job_status": decision_record.effective_job_status,
+            "reason": decision_record.reason,
+            "matched_evidence": decision_record.matched_evidence,
+            "uncertainties": decision_record.uncertainties,
+            "automation_eligible": decision_record.automation_eligible,
         }
         items.append(
             _response(
                 job,
                 summary,
                 _build_communication_summary(
-                    score,
+                    decision_record,
                     communication_rows[0].get(job.id),
                     communication_rows[1].get(job.id),
                     communication_rows[2].get(job.id),
@@ -426,13 +428,13 @@ def _domain_job(job: db.Job) -> JobInput:
 
 def _response(
     job: db.Job,
-    latest_score: dict[str, object] | None = None,
+    latest_decision: dict[str, object] | None = None,
     communication: dict[str, object] | None = None,
 ) -> JobResponse:
     return JobResponse(
         id=job.id,
         content_hash=job.content_hash,
-        latest_score=latest_score,
+        latest_decision=latest_decision,
         communication=communication,
         **_domain_job(job).model_dump(),
     )
@@ -441,7 +443,7 @@ def _response(
 def _communication_summary(
     session: Session,
     job: db.Job,
-    latest_score: db.JobScore | None,
+    latest_decision: db.JobDecision | None,
 ) -> dict[str, object]:
     conversation = session.scalar(
         select(db.Conversation)
@@ -464,7 +466,7 @@ def _communication_summary(
         .order_by(db.JobDiscoveryRecord.updated_at.desc())
         .limit(1)
     )
-    return _build_communication_summary(latest_score, conversation, action, record)
+    return _build_communication_summary(latest_decision, conversation, action, record)
 
 
 def _communication_rows(
@@ -504,7 +506,7 @@ def _communication_rows(
 
 
 def _build_communication_summary(
-    latest_score: db.JobScore | None,
+    latest_decision: db.JobDecision | None,
     conversation: db.Conversation | None,
     action: db.ActionQueue | None,
     record: db.JobDiscoveryRecord | None,
@@ -527,7 +529,7 @@ def _build_communication_summary(
         status = "GREETING_FAILED"
     elif record is not None and record.status == "SKIPPED":
         status = "NOT_CONTACTED"
-    elif latest_score is not None and latest_score.automation_eligible:
+    elif latest_decision is not None and latest_decision.automation_eligible:
         status = "READY_TO_CONTACT"
     else:
         status = "NOT_CONTACTED"

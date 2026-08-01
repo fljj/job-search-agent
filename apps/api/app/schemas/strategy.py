@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from packages.scoring.models import Strategy
+from packages.job_matching.models import Strategy
 
 
 class StrategyPayload(Strategy):

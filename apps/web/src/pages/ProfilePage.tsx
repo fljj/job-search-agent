@@ -101,7 +101,7 @@ export function ProfilePage() {
   }
   return <Tabs items={[
     {
-      key: 'profile', label: '基础资料与评分事实', children:
+      key: 'profile', label: '基础资料与匹配事实', children:
         <Card><Form form={profileForm} layout="vertical" onFinish={(value) => void saveProfile(value)}
           initialValues={{ total_years: 0, management_years: 0,
             has_architecture_experience: false, has_core_system_experience: false,

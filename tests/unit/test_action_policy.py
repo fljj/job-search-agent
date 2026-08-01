@@ -23,10 +23,6 @@ def test_edited_sensitive_content_is_rejected() -> None:
     assert validate_edited_content("我有 8 年 Java 经验") == []
 
 
-def test_low_score_decline_has_a_stable_action_type() -> None:
-    assert ActionType.LOW_SCORE_DECLINE.value == "LOW_SCORE_DECLINE"
-
-
 def test_mismatch_decline_has_a_stable_action_type() -> None:
     assert ActionType.MISMATCH_DECLINE.value == "MISMATCH_DECLINE"
 

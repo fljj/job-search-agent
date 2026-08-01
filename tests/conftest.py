@@ -11,17 +11,14 @@ from packages.job_parser.models import (
     SourceJobStatus,
     WorkMode,
 )
-from packages.scoring.evidence import with_evidence_catalog
-from packages.scoring.models import (
+from packages.job_matching.models import (
     CandidateProfile,
     CandidateSkill,
     IndustryRule,
     IndustryRuleType,
-    InterpolationType,
     RuleType,
-    SalaryBand,
     SalaryRule,
-    ScoringContext,
+    JobDecisionContext,
     Strategy,
     TitleRule,
     WorkModeRule,
@@ -43,46 +40,28 @@ def candidate() -> CandidateProfile:
 def strategy() -> Strategy:
     return Strategy(
         name="Java 后端", title_rules=[
-            TitleRule(rule_type=RuleType.INCLUDE, pattern="Java后端", score=Decimal(15)),
-            TitleRule(rule_type=RuleType.EXCLUDE, pattern="Android", score=Decimal(0)),
+            TitleRule(rule_type=RuleType.INCLUDE, pattern="Java后端"),
+            TitleRule(rule_type=RuleType.EXCLUDE, pattern="Android"),
         ],
         accepted_seniority_levels=[SeniorityLevel.MIDDLE, SeniorityLevel.SENIOR,
                                    SeniorityLevel.LEAD, SeniorityLevel.ARCHITECT],
         work_mode_rules=[
-            WorkModeRule(work_mode=WorkMode.REMOTE, enabled=True, score=Decimal(15)),
+            WorkModeRule(work_mode=WorkMode.REMOTE, enabled=True),
             WorkModeRule(work_mode=WorkMode.ONSITE, enabled=True, location_restricted=True,
-                         allowed_locations=["济南"], score=Decimal(15)),
+                         allowed_locations=["济南"]),
             WorkModeRule(work_mode=WorkMode.HYBRID, enabled=True, location_restricted=True,
-                         allowed_locations=["济南"], score=Decimal(13)),
-            WorkModeRule(work_mode=WorkMode.UNKNOWN, enabled=True, unknown_score=Decimal(8)),
+                         allowed_locations=["济南"]),
+            WorkModeRule(work_mode=WorkMode.UNKNOWN, enabled=True),
         ],
         salary_rules=[
             SalaryRule(work_mode=WorkMode.REMOTE, minimum_monthly_k=Decimal(35),
-                       expected_monthly_k=Decimal(40), bands=[
-                           SalaryBand(lower_bound_k=Decimal(0), upper_bound_k=Decimal(30),
-                                      min_score=Decimal(0), max_score=Decimal(4), interpolation=InterpolationType.LINEAR),
-                           SalaryBand(lower_bound_k=Decimal(30), upper_bound_k=Decimal(35),
-                                      min_score=Decimal(5), max_score=Decimal(9), interpolation=InterpolationType.LINEAR),
-                           SalaryBand(lower_bound_k=Decimal(35), upper_bound_k=Decimal(40),
-                                      min_score=Decimal(10), max_score=Decimal(14), interpolation=InterpolationType.LINEAR),
-                           SalaryBand(lower_bound_k=Decimal(40), upper_bound_k=None,
-                                      min_score=Decimal(15), max_score=Decimal(15)),
-                       ]),
+                       expected_monthly_k=Decimal(40)),
             SalaryRule(work_mode=WorkMode.ONSITE, minimum_monthly_k=Decimal(13),
-                       expected_monthly_k=Decimal(15), bands=[
-                           SalaryBand(lower_bound_k=Decimal(0), upper_bound_k=Decimal(10),
-                                      min_score=Decimal(0), max_score=Decimal(2), interpolation=InterpolationType.LINEAR),
-                           SalaryBand(lower_bound_k=Decimal(10), upper_bound_k=Decimal(13),
-                                      min_score=Decimal(3), max_score=Decimal(8), interpolation=InterpolationType.LINEAR),
-                           SalaryBand(lower_bound_k=Decimal(13), upper_bound_k=Decimal(15),
-                                      min_score=Decimal(9), max_score=Decimal(13), interpolation=InterpolationType.LINEAR),
-                           SalaryBand(lower_bound_k=Decimal(15), upper_bound_k=None,
-                                      min_score=Decimal(15), max_score=Decimal(15)),
-                       ]),
+                       expected_monthly_k=Decimal(15)),
         ],
         industry_rules=[
-            IndustryRule(industry="互联网", rule_type=IndustryRuleType.PREFERRED, score=Decimal(10)),
-            IndustryRule(industry="培训", rule_type=IndustryRuleType.EXCLUDED, score=Decimal(0)),
+            IndustryRule(industry="互联网", rule_type=IndustryRuleType.PREFERRED),
+            IndustryRule(industry="培训", rule_type=IndustryRuleType.EXCLUDED),
         ],
         company_blacklist=["黑名单公司"], core_required_skills=["Java"],
         accept_outsourcing=False, accept_headhunter=False, max_posted_days=30,
@@ -110,10 +89,5 @@ def parsed() -> ParsedJob:
 
 @pytest.fixture
 def context(job: JobInput, parsed: ParsedJob, candidate: CandidateProfile,
-            strategy: Strategy) -> ScoringContext:
-    return ScoringContext(job=job, parsed_job=parsed, candidate=candidate, strategy=strategy)
-
-
-@pytest.fixture
-def evidence_context(context: ScoringContext) -> ScoringContext:
-    return with_evidence_catalog(context)
+            strategy: Strategy) -> JobDecisionContext:
+    return JobDecisionContext(job=job, parsed_job=parsed, candidate=candidate, strategy=strategy)

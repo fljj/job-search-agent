@@ -55,7 +55,7 @@ from apps.api.app.services.llm_config_service import (
 from apps.api.app.services.message_discovery_service import (
     execute_pending_platform_consents,
     persist_discovery_batch,
-    process_next_inbound_job_score,
+    process_next_inbound_job_decision,
     record_platform_session_failure,
     record_ready_platform_session,
 )
@@ -263,10 +263,10 @@ def _discover_messages(
         if executor is not None and execute_external_actions
         else []
     )
-    inbound_score_status = "SKIPPED"
+    inbound_decision_status = "SKIPPED"
     if executor is not None and not llm_circuit_is_open(session):
         try:
-            inbound_score_status = process_next_inbound_job_score(
+            inbound_decision_status = process_next_inbound_job_decision(
                 session,
                 run,
                 build_runtime_llm_provider(session),
@@ -274,7 +274,7 @@ def _discover_messages(
         except LlmProviderError as exc:
             open_llm_circuit(session, get_settings(), exc.code)
             session.commit()
-            inbound_score_status = "WAITING_FOR_LLM"
+            inbound_decision_status = "WAITING_FOR_LLM"
     runtime_event(
         logger,
         "MESSAGE_SCAN_COMPLETED",
@@ -284,7 +284,7 @@ def _discover_messages(
         scanned_count=len(batch.items),
         imported_count=counts["imported"],
         paused_count=counts["paused"],
-        inbound_score_status=inbound_score_status,
+        inbound_decision_status=inbound_decision_status,
         consent_action_statuses=consent_statuses,
         exhausted=batch.exhausted,
         cursor=batch.scroll_position,

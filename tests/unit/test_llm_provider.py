@@ -1,5 +1,4 @@
 import json
-from decimal import Decimal
 from typing import cast
 from uuid import uuid4
 
@@ -16,19 +15,17 @@ from adapters.llm.http import JsonTransport
 from adapters.llm.qwen import (
     PROMPTS,
     QwenLlmProvider,
-    _compact_scoring_input,
 )
 from adapters.llm.zhipu import ZhipuLlmProvider
 from apps.api.app.core.config import Settings
 from apps.api.app.core.llm import build_llm_provider
 from packages.llm.models import (
+    JobContactDecisionRequest,
     MessageClassificationRequest,
     ReplyContext,
     ReplyRequest,
     TrustedFact,
 )
-from packages.scoring.llm_engine import validate_llm_score
-from packages.scoring.models import ScoringContext
 
 
 class StubTransport:
@@ -202,187 +199,28 @@ def test_authorization_key_is_not_in_payload() -> None:
     assert "secret-test-key" not in payload_text
 
 
-def test_score_prompt_lists_exact_evidence_contract() -> None:
-    version, prompt = PROMPTS["score_job"]
-    assert version == "job-score-v11"
-    assert "title=15，skills=25" in prompt
-    assert "industry=10，management=5" in prompt
-    assert "total_score必须等于七项score之和" in prompt
-    assert "input.evidence_groups.items中的id" in prompt
-    assert "具体条目id" in prompt
-    assert "不得创造、缩写或修改证据id" in prompt
-    assert "title维度表示岗位方向匹配" in prompt
-    assert "不能仅因标题未出现Java等关键词直接给0分" in prompt
+def test_job_decision_prompt_returns_only_contact_decision() -> None:
+    version, prompt = PROMPTS["decide_job_contact"]
+    assert version == "job-contact-decision-v1"
+    assert all(value in prompt for value in ("CONTACT", "SKIP", "REVIEW"))
+    assert "硬性排除" in prompt
 
 
-def test_compact_scoring_input_keeps_values_and_replaces_hash_ids(
-    evidence_context: ScoringContext,
-) -> None:
-    compact, aliases = _compact_scoring_input(evidence_context)
-
-    groups = cast(list[dict[str, object]], compact["evidence_groups"])
-    items = [item for group in groups for item in cast(list[list[object]], group["items"])]
-    assert len(items) == len(evidence_context.evidence_items)
-    assert items[0][0] == "e1"
-    assert aliases["e1"] == evidence_context.evidence_items[0].id
-    assert items[0][1] == evidence_context.evidence_items[0].value
-    assert "candidate" not in compact
-    assert "strategy" not in compact
-
-
-def test_score_request_restores_compact_evidence_ids(
-    evidence_context: ScoringContext,
-) -> None:
-    compact, aliases = _compact_scoring_input(evidence_context)
-    groups = cast(list[dict[str, object]], compact["evidence_groups"])
-    items = [item for group in groups for item in cast(list[list[object]], group["items"])]
-    item_dimensions = {
-        cast(str, item[0]): cast(list[str], group["dimensions"])
-        for group in groups
-        for item in cast(list[list[object]], group["items"])
+def test_job_decision_retries_invalid_structure_once() -> None:
+    valid = {
+        "decision": "CONTACT", "confidence": 0.9,
+        "matched_evidence": ["Java经验满足"], "uncertainties": [],
+        "reason": "核心方向匹配",
     }
-    references = {
-        dimension: next(
-            cast(str, item[0])
-            for item in items
-            if dimension in item_dimensions[cast(str, item[0])]
-        )
-        for dimension in ("title", "skills", "experience", "location", "salary", "industry", "management")
-    }
-    maximums = {
-        "title": 15,
-        "skills": 25,
-        "experience": 15,
-        "location": 15,
-        "salary": 15,
-        "industry": 10,
-        "management": 5,
-    }
-    output = {
-        "dimensions": [
-            {
-                "dimension": dimension,
-                "score": 0,
-                "max_score": maximum,
-                "reason": "测试",
-                "evidence_refs": [references[dimension]],
-            }
-            for dimension, maximum in maximums.items()
-        ],
-        "total_score": 0,
-        "match_reasons": [],
-        "risk_notes": [],
-        "recommends_proactive_contact": False,
-        "contact_reason": "测试",
-    }
-    transport = StubTransport(response(json.dumps(output, ensure_ascii=False)))
-
-    result = qwen(transport).score_job(evidence_context)
-
-    payload = cast(dict[str, object], transport.calls[0]["payload"])
-    messages = cast(list[dict[str, str]], payload["messages"])
-    sent = json.loads(messages[1]["content"])
-    assert set(sent["input"]) == {"evidence_groups"}
-    assert sent["input"]["evidence_groups"][0]["items"][0][0] == "e1"
-    assert result.data.dimensions[0].evidence_refs == [aliases[references["title"]]]
-
-
-def test_score_request_retries_invalid_structure_once(
-    evidence_context: ScoringContext,
-) -> None:
-    compact, _ = _compact_scoring_input(evidence_context)
-    groups = cast(list[dict[str, object]], compact["evidence_groups"])
-    references = {
-        dimension: next(
-            cast(str, item[0])
-            for group in groups
-            if dimension in cast(list[str], group["dimensions"])
-            for item in cast(list[list[object]], group["items"])
-        )
-        for dimension in (
-            "title", "skills", "experience", "location", "salary", "industry", "management"
-        )
-    }
-    maximums = {
-        "title": 15, "skills": 25, "experience": 15, "location": 15,
-        "salary": 15, "industry": 10, "management": 5,
-    }
-    valid_output = {
-        "dimensions": [
-            {
-                "dimension": dimension,
-                "score": 0,
-                "max_score": maximum,
-                "reason": "测试",
-                "evidence_refs": [references[dimension]],
-            }
-            for dimension, maximum in maximums.items()
-        ],
-        "total_score": 0,
-        "match_reasons": [],
-        "risk_notes": [],
-        "recommends_proactive_contact": False,
-        "contact_reason": "测试",
-    }
-    transport = SequenceTransport(
-        [response("{}"), response(json.dumps(valid_output, ensure_ascii=False))]
+    transport = SequenceTransport([response("{}"), response(json.dumps(valid, ensure_ascii=False))])
+    request = JobContactDecisionRequest(
+        job={"title": "Java开发"}, requirements={}, candidate={}, strategy={}
     )
 
-    result = qwen(transport).score_job(evidence_context)
+    result = qwen(transport).decide_job_contact(request)
 
+    assert result.data.decision == "CONTACT"
     assert len(transport.calls) == 2
-    assert result.metadata.input_tokens == 20
-    second_payload = cast(dict[str, object], transport.calls[1]["payload"])
-    second_messages = cast(list[dict[str, str]], second_payload["messages"])
-    assert "上次JSON未通过结构校验" in second_messages[-1]["content"]
-
-
-def test_score_request_normalizes_fixed_fields_and_dimension_evidence(
-    evidence_context: ScoringContext,
-) -> None:
-    maximums = {
-        "title": 15,
-        "skills": 25,
-        "experience": 15,
-        "location": 15,
-        "salary": 15,
-        "industry": 10,
-        "management": 5,
-    }
-    output = {
-        "dimensions": [
-            {
-                "dimension": dimension,
-                "score": 1,
-                "max_score": 999,
-                "reason": "测试",
-                "evidence_refs": ["e1", "不存在的证据"],
-            }
-            for dimension in maximums
-        ],
-        "total_score": 99,
-        "match_reasons": [],
-        "risk_notes": [],
-        "recommends_proactive_contact": False,
-        "contact_reason": "测试",
-    }
-    transport = StubTransport(response(json.dumps(output, ensure_ascii=False)))
-
-    result = qwen(transport).score_job(evidence_context)
-
-    assert result.data.total_score == 7
-    assert {
-        item.dimension: item.max_score for item in result.data.dimensions
-    } == {dimension: Decimal(value) for dimension, value in maximums.items()}
-    validate_llm_score(evidence_context, result.data)
-
-    payload = cast(dict[str, object], transport.calls[0]["payload"])
-    messages = cast(list[dict[str, str]], payload["messages"])
-    contract = json.loads(messages[1]["content"])["output_schema"]
-    for dimension in contract["dimensions"]:
-        assert set(dimension["evidence_refs"]).issubset(
-            dimension["allowed_evidence_refs"]
-        )
 
 
 def test_greeting_prompt_requires_candidate_perspective() -> None:
@@ -411,8 +249,8 @@ def test_fake_reply_uses_strategy_context_without_treating_it_as_candidate_fact(
                 job_title="Java 开发",
                 job_location="杭州",
                 work_mode="UNKNOWN",
-                total_score=82,
-                dimension_scores={"location": Decimal("8")},
+                contact_decision="CONTACT",
+                decision_reason="方向匹配",
                 enabled_work_modes=["REMOTE", "ONSITE"],
                 allowed_onsite_locations=["山东省济南市"],
                 remote_preferred=True,

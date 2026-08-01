@@ -16,14 +16,14 @@ from apps.api.app.schemas.conversation import (
     MessagePayload,
     MessageResponse,
 )
-from apps.api.app.schemas.score import ScoreRequest
+from apps.api.app.schemas.decision import DecisionRequest
+from apps.api.app.services.decision_service import create_decision
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.job_service import get_job_entity, get_parsed_entity
 from apps.api.app.services.knowledge_service import get_knowledge_entities
 from apps.api.app.services.llm_config_service import build_runtime_llm_provider
 from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.qualification_service import refresh_qualification
-from apps.api.app.services.score_service import create_score
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.conversation_agent.intents import classify_intents, normalize_intents
 from packages.conversation_agent.knowledge.profile_answer import CandidateKnowledge
@@ -274,9 +274,9 @@ def list_conversations(
     items: list[dict[str, object]] = []
     for conversation in conversations:
         job = session.get(db.Job, conversation.job_id) if conversation.job_id else None
-        score = (
-            session.get(db.JobScore, conversation.latest_job_score_id)
-            if conversation.latest_job_score_id
+        job_decision = (
+            session.get(db.JobDecision, conversation.latest_job_decision_id)
+            if conversation.latest_job_decision_id
             else None
         )
         draft = session.scalar(
@@ -323,8 +323,7 @@ def list_conversations(
                 "job_id": conversation.job_id,
                 "job_title": (job.title if job else conversation.observed_job_title),
                 "strategy_id": conversation.strategy_id,
-                "latest_score": score.total_score if score else None,
-                "latest_grade": score.grade if score else None,
+                "latest_decision": job_decision.decision if job_decision else None,
                 "latest_draft_type": draft.draft_type if draft else None,
                 "latest_draft_content": draft.content if draft else None,
                 "latest_reply_source": draft.reply_source if draft else None,
@@ -479,19 +478,19 @@ def create_reply_draft(
         if allow_provider_lookup
         else provider
     )
-    score = _current_score(session, conversation)
+    job_decision = _current_decision(session, conversation)
     if (
-        score is None
+        job_decision is None
         and qualification.value == "FULL_MATCH"
         and conversation.job_id
         and llm_provider is not None
     ):
-        score = _bind_current_score(session, conversation, llm_provider)
+        job_decision = _bind_current_decision(session, conversation, llm_provider)
     draft_type = "REPLY"
     fingerprint = _fingerprint(
         draft_type,
         message.id,
-        score.input_fingerprint if score else None,
+        job_decision.input_fingerprint if job_decision else None,
         conversation.qualification_version,
         _knowledge_versions(session),
     )
@@ -502,13 +501,13 @@ def create_reply_draft(
         return _draft_response(session, existing)
     if llm_provider is None:
         raise LlmConfigurationError("当前消息需要大模型，但模型暂不可用")
-    if score is None:
-        raise ValueError("当前消息缺少可用于大模型回复的职位评分")
-    result = _build_scored_reply(
+    if job_decision is None:
+        raise ValueError("当前消息缺少可用于大模型回复的职位沟通决策")
+    result = _build_decision_reply(
         session,
         conversation,
         message,
-        score,
+        job_decision,
         llm_provider,
     )
     return _persist_draft(
@@ -518,29 +517,29 @@ def create_reply_draft(
         draft_type,
         conversation.id,
         message.id,
-        score.id if score else None,
+        job_decision.id,
         reply_source=ReplySource.LLM,
     )
 
 
 def create_greeting_draft(
     session: Session,
-    job_score_id: object,
+    job_decision_id: object,
     provider: LlmProvider | None = None,
 ) -> DraftResponse:
-    score = session.get(db.JobScore, job_score_id)
-    if score is None:
-        raise ResourceNotFoundError("评分不存在")
-    job = get_job_entity(session, score.job_id)
-    parsed = get_parsed_entity(session, score.parsed_job_detail_id)
-    profile = session.get(db.CandidateProfile, score.candidate_profile_id)
+    job_decision = session.get(db.JobDecision, job_decision_id)
+    if job_decision is None:
+        raise ResourceNotFoundError("职位沟通决策不存在")
+    job = get_job_entity(session, job_decision.job_id)
+    parsed = get_parsed_entity(session, job_decision.parsed_job_detail_id)
+    profile = session.get(db.CandidateProfile, job_decision.candidate_profile_id)
     if profile is None:
         raise ResourceNotFoundError("候选人资料不存在")
     fingerprint = _fingerprint(
         "GREETING",
         GENERATOR_VERSION,
-        score.id,
-        score.input_fingerprint,
+        job_decision.id,
+        job_decision.input_fingerprint,
         _knowledge_versions(session),
         profile.version,
     )
@@ -587,7 +586,11 @@ def create_greeting_draft(
         get_conversation_policy(),
         now=datetime.now(UTC),
     )
-    if score.hard_rejected or score.effective_job_status != "OPEN" or not score.automation_eligible:
+    if (
+        job_decision.hard_rejected
+        or job_decision.effective_job_status != "OPEN"
+        or not job_decision.automation_eligible
+    ):
         result.decision = Decision.DENY
         result.reason_codes = ["JOB_NOT_ELIGIBLE_OR_OPEN"]
     return _persist_draft(
@@ -597,7 +600,7 @@ def create_greeting_draft(
         "GREETING",
         None,
         None,
-        score.id,
+        job_decision.id,
         reply_source=ReplySource.LLM,
     )
 
@@ -616,9 +619,9 @@ def create_resume_draft(
     qualification, qualification_evidence = refresh_qualification(
         session, conversation, message=message
     )
-    score = (
-        session.get(db.JobScore, conversation.latest_job_score_id)
-        if conversation.latest_job_score_id
+    job_decision = (
+        session.get(db.JobDecision, conversation.latest_job_decision_id)
+        if conversation.latest_job_decision_id
         else None
     )
     messages = session.scalars(
@@ -745,7 +748,7 @@ def create_resume_draft(
         "RESUME",
         conversation.id,
         message.id,
-        score.id if score else None,
+        job_decision.id if job_decision else None,
         resume_id=selected.id if selected else None,
         decision_metadata={
             "authorization_basis": authorization_basis,
@@ -789,7 +792,7 @@ def edit_draft(session: Session, draft_id: object, content: str) -> DraftRespons
         user_id=DEFAULT_USER_ID,
         conversation_id=original.conversation_id,
         message_id=original.message_id,
-        job_score_id=original.job_score_id,
+        job_decision_id=original.job_decision_id,
         draft_type=original.draft_type,
         content=content,
         intents=original.intents,
@@ -888,7 +891,7 @@ def _persist_draft(
     draft_type: str,
     conversation_id: object | None,
     message_id: object | None,
-    score_id: object | None,
+    job_decision_id: object | None,
     resume_id: object | None = None,
     decision_metadata: dict[str, object] | None = None,
     reply_source: ReplySource = ReplySource.LLM,
@@ -897,7 +900,7 @@ def _persist_draft(
         user_id=DEFAULT_USER_ID,
         conversation_id=conversation_id,
         message_id=message_id,
-        job_score_id=score_id,
+        job_decision_id=job_decision_id,
         draft_type=draft_type,
         content=result.content,
         intents=[intent.value for intent in result.intents],
@@ -1060,7 +1063,7 @@ def _reply_route_context(
 def _reply_context(
     job: db.Job,
     parsed: db.ParsedJobDetail,
-    score: db.JobScore,
+    job_decision: db.JobDecision,
     strategy: db.JobStrategy,
 ) -> ReplyContext:
     enabled_modes = [item.work_mode for item in strategy.work_mode_rules if item.enabled]
@@ -1077,29 +1080,15 @@ def _reply_context(
         work_mode=job.work_mode,
         required_skills=parsed.required_skills,
         preferred_skills=parsed.preferred_skills,
-        total_score=score.total_score,
-        dimension_scores={
-            "title": score.title_score,
-            "skills": score.skill_score,
-            "experience": score.experience_score,
-            "location": score.location_score,
-            "salary": score.salary_score,
-            "industry": score.industry_score,
-            "management": score.management_score,
-        },
-        match_reasons=score.match_reasons,
-        risk_notes=score.risk_notes,
+        contact_decision=job_decision.decision,
+        decision_reason=job_decision.reason,
+        matched_evidence=job_decision.matched_evidence,
+        uncertainties=job_decision.uncertainties,
         enabled_work_modes=enabled_modes,
         allowed_onsite_locations=onsite_locations,
         remote_preferred=any(
             item.enabled
             and item.work_mode == "REMOTE"
-            and all(
-                not other.enabled
-                or other.work_mode == "REMOTE"
-                or item.location_score >= other.location_score
-                for other in strategy.work_mode_rules
-            )
             for item in strategy.work_mode_rules
         ),
     )
@@ -1199,17 +1188,17 @@ def _safe_job_detail_clarification(
     )
 
 
-def _build_scored_reply(
+def _build_decision_reply(
     session: Session,
     conversation: db.Conversation,
     message: db.Message,
-    score: db.JobScore,
+    job_decision: db.JobDecision,
     provider: LlmProvider,
 ) -> DraftResult:
     job = get_job_entity(session, conversation.job_id)
-    parsed = get_parsed_entity(session, score.parsed_job_detail_id)
-    strategy = session.get(db.JobStrategy, score.strategy_id)
-    profile = session.get(db.CandidateProfile, score.candidate_profile_id)
+    parsed = get_parsed_entity(session, job_decision.parsed_job_detail_id)
+    strategy = session.get(db.JobStrategy, job_decision.strategy_id)
+    profile = session.get(db.CandidateProfile, job_decision.candidate_profile_id)
     if strategy is None or profile is None:
         raise ValueError("回复上下文缺少策略或候选人资料")
     facts = _profile_facts(profile, parsed.required_skills + parsed.preferred_skills) + [
@@ -1256,7 +1245,7 @@ def _build_scored_reply(
                     facts=[
                         TrustedFact(id=fact.id, content=fact.fact) for fact in usable if fact.id
                     ],
-                    context=_reply_context(job, parsed, score, strategy),
+                    context=_reply_context(job, parsed, job_decision, strategy),
                 )
             ),
         ).data
@@ -1412,32 +1401,32 @@ def _optional_llm_provider(
         return None
 
 
-def _current_score(
+def _current_decision(
     session: Session,
     conversation: db.Conversation,
-) -> db.JobScore | None:
-    if conversation.latest_job_score_id is None:
+) -> db.JobDecision | None:
+    if conversation.latest_job_decision_id is None:
         return None
-    score = session.get(db.JobScore, conversation.latest_job_score_id)
-    if score is None:
+    decision = session.get(db.JobDecision, conversation.latest_job_decision_id)
+    if decision is None:
         return None
-    strategy = session.get(db.JobStrategy, score.strategy_id)
-    profile = session.get(db.CandidateProfile, score.candidate_profile_id)
+    strategy = session.get(db.JobStrategy, decision.strategy_id)
+    profile = session.get(db.CandidateProfile, decision.candidate_profile_id)
     if (
         strategy is None
         or profile is None
-        or score.strategy_version != strategy.version
-        or score.profile_version != profile.version
+        or decision.strategy_version != strategy.version
+        or decision.profile_version != profile.version
     ):
         return None
-    return score
+    return decision
 
 
-def _bind_current_score(
+def _bind_current_decision(
     session: Session,
     conversation: db.Conversation,
     provider: LlmProvider,
-) -> db.JobScore:
+) -> db.JobDecision:
     strategies = session.scalars(
         select(db.JobStrategy).where(
             db.JobStrategy.user_id == DEFAULT_USER_ID,
@@ -1446,48 +1435,47 @@ def _bind_current_score(
     ).all()
     if conversation.strategy_id:
         strategies = [item for item in strategies if item.id == conversation.strategy_id]
-    candidates: list[tuple[db.JobScore, int]] = []
+    candidates: list[tuple[db.JobDecision, int]] = []
     for strategy in strategies:
         profile = session.get(db.CandidateProfile, strategy.candidate_profile_id)
         if profile is None:
             continue
-        score = session.scalar(
-            select(db.JobScore)
+        decision = session.scalar(
+            select(db.JobDecision)
             .where(
-                db.JobScore.job_id == conversation.job_id,
-                db.JobScore.strategy_id == strategy.id,
-                db.JobScore.scoring_version.like("llm:%"),
+                db.JobDecision.job_id == conversation.job_id,
+                db.JobDecision.strategy_id == strategy.id,
             )
-            .order_by(db.JobScore.created_at.desc())
+            .order_by(db.JobDecision.created_at.desc())
             .limit(1)
         )
         if (
-            score is None
-            or score.strategy_version != strategy.version
-            or score.profile_version != profile.version
+            decision is None
+            or decision.strategy_version != strategy.version
+            or decision.profile_version != profile.version
         ):
-            response = create_score(
+            response = create_decision(
                 session,
                 conversation.job_id,
-                ScoreRequest(
+                DecisionRequest(
                     strategy_id=strategy.id,
                     candidate_profile_id=profile.id,
                 ),
                 provider=provider,
             )
-            score = session.get(db.JobScore, response.id)
-        if score is not None:
-            candidates.append((score, strategy.priority))
+            decision = session.get(db.JobDecision, response.id)
+        if decision is not None:
+            candidates.append((decision, strategy.priority))
     if not candidates:
-        raise ValueError("当前对话没有可用的启用策略评分")
+        raise ValueError("当前对话没有可用的职位沟通决策")
     eligible = [item for item in candidates if not item[0].hard_rejected]
     selected = (
-        min(eligible, key=lambda item: (-item[0].total_score, item[1]))
+        min(eligible, key=lambda item: item[1])
         if eligible
         else min(candidates, key=lambda item: item[1])
     )[0]
     conversation.strategy_id = selected.strategy_id
-    conversation.latest_job_score_id = selected.id
+    conversation.latest_job_decision_id = selected.id
     session.flush()
     return selected
 
@@ -1549,7 +1537,7 @@ def _conversation_response(conversation: db.Conversation) -> dict[str, object]:
         "id": conversation.id,
         "job_id": conversation.job_id,
         "strategy_id": conversation.strategy_id,
-        "latest_job_score_id": conversation.latest_job_score_id,
+        "latest_job_decision_id": conversation.latest_job_decision_id,
         "observed_company_name": conversation.observed_company_name,
         "observed_job_title": conversation.observed_job_title,
         "observed_external_job_id": conversation.observed_external_job_id,

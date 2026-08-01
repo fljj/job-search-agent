@@ -11,7 +11,7 @@ import { businessLabel } from './business-labels'
 interface SettingForm {
   scope_type: 'GLOBAL' | 'PLATFORM' | 'STRATEGY'; scope_key: string
   enabled: boolean; paused: boolean; auto_greet_enabled: boolean
-  auto_greet_min_score: number; auto_reply_enabled: boolean
+  auto_reply_enabled: boolean
   auto_resume_enabled: boolean
   maimai_recommendation_enabled: boolean
   maimai_recommendation_resume_enabled: boolean
@@ -158,7 +158,7 @@ export function AutomationPage() {
   }
   return <Space direction="vertical" style={{ width: '100%' }} size="large">
     <Alert type="info" showIcon message="无人值守运行仍受服务端安全门禁控制"
-      description="Agent 启用后直接按正式配置自动发现职位和消息、评分、沟通及按条件发送简历；平台验证异常、未知结果和电话面试时间仍按安全规则处理。" />
+      description="Agent 启用后直接按正式配置自动发现职位和消息、判断是否沟通并按条件发送简历；平台验证异常、未知结果和电话面试时间仍按安全规则处理。" />
 
     <Card title="LLM 配置状态">
       <Descriptions items={[
@@ -275,7 +275,7 @@ export function AutomationPage() {
     <Card title="自动化范围配置"><Form form={form} layout="vertical"
       onFinish={(value) => void save(value).catch(showRequestError)}
       initialValues={{ scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
-        auto_greet_enabled: false, auto_greet_min_score: 80, auto_reply_enabled: false,
+        auto_greet_enabled: false, auto_reply_enabled: false,
         auto_resume_enabled: false, maimai_recommendation_enabled: false,
         maimai_recommendation_resume_enabled: false,
         emergency_stop: false, job_scan_enabled: false, company_cooldown_hours: 24,
@@ -299,7 +299,6 @@ export function AutomationPage() {
         </Form.Item>
       </Space>
       <Space wrap>
-        <Form.Item name="auto_greet_min_score" label="招呼最低分"><InputNumber min={80} max={100} /></Form.Item>
         <Form.Item name="company_cooldown_hours" label="公司冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
         <Form.Item name="recruiter_cooldown_hours" label="招聘人冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
         <Form.Item name="work_start_hour" label="工作开始小时"><InputNumber min={0} max={23} /></Form.Item>

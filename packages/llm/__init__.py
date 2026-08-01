@@ -3,13 +3,13 @@ from packages.llm.models import (
     ConversationEvaluationRequest,
     GeneratedMessage,
     GreetingRequest,
-    JobScoreOutput,
+    JobContactDecisionOutput,
+    JobContactDecisionRequest,
     LlmCallMetadata,
     LlmResult,
     MessageClassification,
     MessageClassificationRequest,
     ReplyRequest,
-    ScoreDimension,
 )
 from packages.llm.ports import LlmProvider
 
@@ -18,12 +18,12 @@ __all__ = [
     "ConversationEvaluationRequest",
     "GeneratedMessage",
     "GreetingRequest",
-    "JobScoreOutput",
+    "JobContactDecisionOutput",
+    "JobContactDecisionRequest",
     "LlmCallMetadata",
     "LlmProvider",
     "LlmResult",
     "MessageClassification",
     "MessageClassificationRequest",
     "ReplyRequest",
-    "ScoreDimension",
 ]

@@ -113,7 +113,7 @@ class PlaywrightActionExecutor:
             "LOCATION_CONSENT_ACCEPT",
         }:
             return self._execute_platform_consent_over_raw_cdp(cdp_url, command)
-        if command.action_type in {"REPLY", "LOW_SCORE_DECLINE", "MISMATCH_DECLINE"}:
+        if command.action_type in {"REPLY", "MISMATCH_DECLINE"}:
             return self._execute_reply_over_raw_cdp(cdp_url, command)
         if command.action_type == "RESUME":
             return self._execute_resume_over_raw_cdp(cdp_url, command)
@@ -1178,7 +1178,6 @@ class PlaywrightActionExecutor:
             return self._observe_platform_consent_over_raw_cdp(cdp_url, command)
         if command.action_type not in {
             "REPLY",
-            "LOW_SCORE_DECLINE",
             "MISMATCH_DECLINE",
         }:
             return ExecutionResult(

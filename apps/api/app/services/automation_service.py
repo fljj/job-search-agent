@@ -161,18 +161,18 @@ def dispatch(
     if job is None and not inbound_action:
         raise ResourceNotFoundError("职位不存在")
     if inbound_action:
-        score = (
-            session.get(db.JobScore, conversation.latest_job_score_id)
-            if conversation.latest_job_score_id
+        job_decision = (
+            session.get(db.JobDecision, conversation.latest_job_decision_id)
+            if conversation.latest_job_decision_id
             else None
         )
     else:
         if job is None:
-            raise RuntimeError("评分动作缺少职位")
-        score = _score_for_draft(session, draft, job.id)
+            raise RuntimeError("职位沟通决策动作缺少职位")
+        job_decision = _decision_for_draft(session, draft, job.id)
     strategy_id = (
-        score.strategy_id
-        if score
+        job_decision.strategy_id
+        if job_decision
         else conversation.strategy_id
     )
     if strategy_id is None:
@@ -195,21 +195,22 @@ def dispatch(
         resume = None
     context = AutomationContext(
         action_type=payload.action_type,
-        score=score.total_score if score else 0,
-        grade=score.grade if score else "UNKNOWN",
         eligible=(
             conversation.qualification_status != "MISMATCH"
             or payload.action_type == ActionType.MISMATCH_DECLINE.value
         ) if inbound_action else (
-            score is not None
-            and not score.hard_rejected
-            and score.eligibility == "ELIGIBLE"
+            job_decision is not None
+            and not job_decision.hard_rejected
+            and job_decision.decision == "CONTACT"
             and (
                 payload.action_type != ActionType.GREETING.value
-                or score.automation_eligible
+                or job_decision.automation_eligible
             )
         ),
-        job_open=(score.effective_job_status == "OPEN") if score else True,
+        job_open=(
+            job_decision.effective_job_status == "OPEN"
+            if job_decision else True
+        ),
         confidence=float(draft.confidence),
         original_decision=original.decision,
         intents=draft.intents,
@@ -296,8 +297,8 @@ def dispatch_proactive_greeting(
         raise ResourceNotFoundError("职位不存在")
     if draft is None or draft.user_id != DEFAULT_USER_ID:
         raise ResourceNotFoundError("招呼草稿不存在")
-    score = _score_for_draft(session, draft, job.id)
-    rules = _effective_rules(session, platform, score.strategy_id)
+    job_decision = _decision_for_draft(session, draft, job.id)
+    rules = _effective_rules(session, platform, job_decision.strategy_id)
     original = session.scalar(
         select(db.PolicyDecision)
         .where(db.PolicyDecision.draft_id == draft.id)
@@ -307,14 +308,12 @@ def dispatch_proactive_greeting(
         raise ValueError("招呼草稿缺少原始策略决策")
     context = AutomationContext(
         action_type=ActionType.GREETING.value,
-        score=score.total_score,
-        grade=score.grade,
         eligible=(
-            score.automation_eligible
-            and not score.hard_rejected
-            and score.eligibility == "ELIGIBLE"
+            job_decision.automation_eligible
+            and not job_decision.hard_rejected
+            and job_decision.decision == "CONTACT"
         ),
-        job_open=score.effective_job_status == "OPEN",
+        job_open=job_decision.effective_job_status == "OPEN",
         confidence=float(draft.confidence),
         original_decision=original.decision,
         has_verified_facts=bool(draft.fact_ids),
@@ -375,7 +374,7 @@ def dispatch_proactive_greeting(
     action = db.ActionQueue(
         user_id=DEFAULT_USER_ID,
         policy_decision_id=policy.id,
-        strategy_id=score.strategy_id,
+        strategy_id=job_decision.strategy_id,
         authorization_source="AUTO",
         agent_run_id=agent_run_id,
         job_id=job.id,
@@ -473,7 +472,6 @@ def effective_rules(session: Session, platform: str, strategy_id: UUID) -> Autom
             bool(merged["maimai_recommendation_resume_enabled"])
             and row.maimai_recommendation_resume_enabled
         )
-        merged["auto_greet_min_score"] = max(int(merged["auto_greet_min_score"]), row.auto_greet_min_score)
         merged["emergency_stop"] = bool(merged["emergency_stop"]) or row.emergency_stop
         merged["job_scan_enabled"] = bool(merged["job_scan_enabled"]) and row.job_scan_enabled
         merged["company_cooldown_hours"] = max(
@@ -493,7 +491,7 @@ _effective_rules = effective_rules
 def _rules(row: db.AutomationSetting) -> AutomationRules:
     return AutomationRules(
         enabled=row.enabled, paused=row.paused,
-        auto_greet_enabled=row.auto_greet_enabled, auto_greet_min_score=row.auto_greet_min_score,
+        auto_greet_enabled=row.auto_greet_enabled,
         auto_reply_enabled=row.auto_reply_enabled,
         auto_resume_enabled=row.auto_resume_enabled,
         maimai_recommendation_enabled=row.maimai_recommendation_enabled,
@@ -507,20 +505,28 @@ def _rules(row: db.AutomationSetting) -> AutomationRules:
     )
 
 
-def _score_for_draft(session: Session, draft: db.GeneratedDraft, job_id: UUID) -> db.JobScore:
-    score = session.get(db.JobScore, draft.job_score_id) if draft.job_score_id else None
-    if score is None:
-        score = session.scalar(select(db.JobScore).where(db.JobScore.job_id == job_id)
-                               .order_by(db.JobScore.created_at.desc()))
-    if score is None:
-        raise ValueError("职位缺少评分结果")
-    strategy = session.get(db.JobStrategy, score.strategy_id)
-    if strategy is None or score.strategy_version != strategy.version:
-        raise ValueError("评分使用的策略版本已过期，必须重新评分")
-    profile = session.get(db.CandidateProfile, score.candidate_profile_id)
-    if profile is None or score.profile_version != profile.version:
-        raise ValueError("评分使用的候选人资料版本已过期，必须重新评分")
-    return score
+def _decision_for_draft(
+    session: Session, draft: db.GeneratedDraft, job_id: UUID
+) -> db.JobDecision:
+    decision = (
+        session.get(db.JobDecision, draft.job_decision_id)
+        if draft.job_decision_id else None
+    )
+    if decision is None:
+        decision = session.scalar(
+            select(db.JobDecision)
+            .where(db.JobDecision.job_id == job_id)
+            .order_by(db.JobDecision.created_at.desc())
+        )
+    if decision is None:
+        raise ValueError("职位缺少沟通决策")
+    strategy = session.get(db.JobStrategy, decision.strategy_id)
+    if strategy is None or decision.strategy_version != strategy.version:
+        raise ValueError("职位沟通决策使用的策略版本已过期，必须重新决策")
+    profile = session.get(db.CandidateProfile, decision.candidate_profile_id)
+    if profile is None or decision.profile_version != profile.version:
+        raise ValueError("职位沟通决策使用的候选人资料版本已过期，必须重新决策")
+    return decision
 
 
 def _resume(session: Session, resume_id: UUID | None, platform: str) -> db.Resume:

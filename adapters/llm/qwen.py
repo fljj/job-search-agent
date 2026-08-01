@@ -1,5 +1,4 @@
 import json
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from time import monotonic
 from typing import TypeVar, cast
 
@@ -13,14 +12,14 @@ from packages.llm.models import (
     ConversationEvaluationRequest,
     GeneratedMessage,
     GreetingRequest,
-    JobScoreOutput,
+    JobContactDecisionOutput,
+    JobContactDecisionRequest,
     LlmCallMetadata,
     LlmResult,
     MessageClassification,
     MessageClassificationRequest,
     ReplyRequest,
 )
-from packages.scoring.models import ScoringContext
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
@@ -34,28 +33,13 @@ PROMPTS: dict[str, tuple[str, str]] = {
         "JD中的年龄限制如需写入warnings，必须明确标注为岗位合规提示，"
         "不得在没有候选人出生信息时推断年龄不匹配。",
     ),
-    "score_job": (
-        "job-score-v11",
-        "仅按输入评分契约输出JSON。必须返回title/skills/experience/location/salary/"
-        "industry/management七维且每个维度恰好出现一次。固定满分为："
-        "title=15，skills=25，experience=15，location=15，salary=15，"
-        "industry=10，management=5；每项score不得超过对应max_score，"
-        "total_score必须等于七项score之和。每个维度的evidence_refs必须引用1至4个"
-        "input.evidence_groups.items中的id，只能引用dimensions包含当前维度的分组；"
-        "涉及技能、行业、规则或解析列表时必须引用实际使用的具体条目id，不得只引用"
-        "集合路径。理由、匹配点、风险和联系建议必须简洁，不重复罗列JD。"
-        "不得创造、缩写或修改证据id；不得解除硬性排除或修改阈值。"
-        "title维度表示岗位方向匹配，不是标题关键词机械匹配。标题明确时优先依据标题；"
-        "标题宽泛、使用业务名称或未出现目标技术词时，必须结合职责、必需技能和加分技能"
-        "判断方向。兼职不等于远程：work_mode为UNKNOWN时不得擅自套用REMOTE或ONSITE规则，"
-        "应提示确认办公方式；strategy.accept_part_time为true时不得再把“是否接受兼职”列为风险，"
-        "只能提示兼职岗位尚未明确的具体安排。"
-        "candidate.bachelor_full_time=false表示候选人具有非全日制本科学历；当"
-        "parsed_job.full_time_bachelor_required=false时，不得把普通本科要求列为不匹配或风险，"
-        "也不得主动提示候选人的学历形式。"
-        "判断其与策略目标方向的语义匹配，不能仅因标题未出现Java等关键词直接给0分；"
-        "正文明确属于无关岗位方向时仍应给0分。"
-        "JD年龄限制只能作为岗位合规提示，不得在输入没有候选人出生信息时表述为年龄不匹配。"
+    "decide_job_contact": (
+        "job-contact-decision-v1",
+        "程序已经依据策略完成薪资、地点、工作模式、学历、黑名单等硬性排除，当前职位已通过；"
+        "不得重新以这些条件判定SKIP。仅比较岗位技术或业务方向与候选人的可信履历并输出JSON。"
+        "CONTACT表示方向匹配且核心能力大体满足，值得沟通；SKIP只用于岗位方向明显无关，或候选人"
+        "明确缺少不可替代的核心能力；REVIEW表示岗位信息不足以判断。职位薪资高于候选人最低或期望"
+        "薪资不是冲突，远程岗位的公司所在地不是地点冲突。不得虚构候选人经历，理由和证据保持简短。"
         "不调用工具。",
     ),
     "classify_message": (
@@ -152,8 +136,12 @@ class QwenLlmProvider:
     def parse_job(self, request: JobInput) -> LlmResult[ParsedJob]:
         return self._complete("parse_job", request, ParsedJob)
 
-    def score_job(self, request: ScoringContext) -> LlmResult[JobScoreOutput]:
-        return self._complete("score_job", request, JobScoreOutput)
+    def decide_job_contact(
+        self, request: JobContactDecisionRequest
+    ) -> LlmResult[JobContactDecisionOutput]:
+        return self._complete(
+            "decide_job_contact", request, JobContactDecisionOutput
+        )
 
     def classify_message(
         self, request: MessageClassificationRequest
@@ -177,10 +165,6 @@ class QwenLlmProvider:
         prompt_version, system_prompt = PROMPTS[purpose]
         serialized_input: object = request.model_dump(mode="json")
         output_schema: object = output_type.model_json_schema()
-        evidence_aliases: dict[str, str] = {}
-        if purpose == "score_job" and isinstance(request, ScoringContext):
-            serialized_input, evidence_aliases = _compact_scoring_input(request)
-            output_schema = _compact_score_output_contract(request, evidence_aliases)
         payload: dict[str, object] = {
             "model": self._model,
             "stream": False,
@@ -234,14 +218,10 @@ class QwenLlmProvider:
             content = self._extract_content(response)
             try:
                 raw_output = json.loads(_strip_code_fence(content))
-                if purpose == "score_job" and isinstance(request, ScoringContext):
-                    raw_output = _normalize_score_output(
-                        raw_output, request, evidence_aliases
-                    )
                 parsed = output_type.model_validate(raw_output)
                 break
             except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-                if purpose != "score_job" or structured_retry >= 1:
+                if purpose != "decide_job_contact" or structured_retry >= 1:
                     detail = _validation_error_summary(exc)
                     raise LlmInvalidResponseError(
                         f"模型返回内容不符合结构化契约：{detail}"
@@ -257,14 +237,13 @@ class QwenLlmProvider:
                                 "上次JSON未通过结构校验（"
                                 f"{_validation_error_summary(exc)}）。"
                                 "请依据原输入修正后，仅重新输出完整JSON；"
-                                "必须包含七个维度、分数、理由、允许的证据ID、总分和联系建议。"
+                                "必须包含decision、confidence、matched_evidence、"
+                                "uncertainties和reason。"
                             ),
                         },
                     ]
                 )
                 continue
-        if isinstance(parsed, JobScoreOutput):
-            parsed = cast(OutputT, _restore_score_evidence_refs(parsed, evidence_aliases))
         response_id = response.get("id")
         return LlmResult[OutputT](
             data=parsed,
@@ -301,138 +280,6 @@ def _strip_code_fence(content: str) -> str:
     return stripped
 
 
-def _compact_scoring_input(context: ScoringContext) -> tuple[dict[str, object], dict[str, str]]:
-    """只向模型发送评分所需证据，并用短 ID 避免重复传输完整哈希。"""
-    aliases: dict[str, str] = {}
-    groups: dict[tuple[str, tuple[str, ...]], list[list[object]]] = {}
-    for index, item in enumerate(context.evidence_items, start=1):
-        alias = f"e{index}"
-        aliases[alias] = item.id
-        key = (item.source_path, tuple(item.dimensions))
-        groups.setdefault(key, []).append([alias, item.value])
-    return {
-        "evidence_groups": [
-            {
-                "path": path,
-                "dimensions": list(dimensions),
-                "items": items,
-            }
-            for (path, dimensions), items in groups.items()
-        ]
-    }, aliases
-
-
-def _compact_score_output_contract(
-    context: ScoringContext, aliases: dict[str, str]
-) -> dict[str, object]:
-    allowed_refs = _allowed_score_evidence_refs(context, aliases)
-    return {
-        "dimensions": [
-            {
-                "dimension": dimension,
-                "score": 0,
-                "max_score": max_score,
-                "reason": "不超过100字",
-                "evidence_refs": allowed_refs[dimension][:1],
-                "allowed_evidence_refs": allowed_refs[dimension],
-            }
-            for dimension, max_score in (
-                ("title", 15),
-                ("skills", 25),
-                ("experience", 15),
-                ("location", 15),
-                ("salary", 15),
-                ("industry", 10),
-                ("management", 5),
-            )
-        ],
-        "total_score": 0,
-        "match_reasons": ["最多3条，每条不超过100字"],
-        "risk_notes": ["最多3条，每条不超过100字"],
-        "recommends_proactive_contact": False,
-        "contact_reason": "不超过100字",
-    }
-
-
-def _allowed_score_evidence_refs(
-    context: ScoringContext, aliases: dict[str, str]
-) -> dict[str, list[str]]:
-    reverse_aliases = {evidence_id: alias for alias, evidence_id in aliases.items()}
-    return {
-        dimension: [
-            reverse_aliases[item.id]
-            for item in context.evidence_items
-            if dimension in item.dimensions
-        ]
-        for dimension in (
-            "title", "skills", "experience", "location", "salary", "industry", "management"
-        )
-    }
-
-
-def _normalize_score_output(
-    output: object,
-    context: ScoringContext,
-    aliases: dict[str, str],
-) -> object:
-    """修正供应商常见的结构偏差，评分值仍完全来自模型。"""
-    if not isinstance(output, dict):
-        return output
-    dimensions = output.get("dimensions")
-    if isinstance(dimensions, dict):
-        dimensions = [
-            {"dimension": dimension, **value}
-            for dimension, value in dimensions.items()
-            if isinstance(dimension, str) and isinstance(value, dict)
-        ]
-        output["dimensions"] = dimensions
-    if not isinstance(dimensions, list):
-        return output
-
-    output.setdefault("match_reasons", [])
-    output.setdefault("risk_notes", [])
-    output.setdefault("recommends_proactive_contact", False)
-    output.setdefault("contact_reason", "根据职位匹配情况综合判断")
-
-    maximums = {
-        "title": 15, "skills": 25, "experience": 15, "location": 15,
-        "salary": 15, "industry": 10, "management": 5,
-    }
-    allowed_refs = _allowed_score_evidence_refs(context, aliases)
-    scores: list[Decimal] = []
-    for item in dimensions:
-        if not isinstance(item, dict):
-            continue
-        dimension = item.get("dimension")
-        if not isinstance(dimension, str) or dimension not in maximums:
-            continue
-        item["max_score"] = maximums[dimension]
-        allowed = allowed_refs[dimension]
-        references = item.get("evidence_refs")
-        valid_references: list[str] = []
-        if isinstance(references, list):
-            for reference in references:
-                if (
-                    isinstance(reference, str)
-                    and reference in allowed
-                    and reference not in valid_references
-                ):
-                    valid_references.append(reference)
-        if not valid_references and allowed:
-            valid_references.append(allowed[0])
-        item["evidence_refs"] = valid_references[:4]
-        try:
-            scores.append(Decimal(str(item.get("score"))))
-        except (InvalidOperation, ValueError):
-            return output
-
-    if len(scores) == len(maximums):
-        output["total_score"] = int(
-            sum(scores, start=Decimal(0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        )
-    return output
-
-
 def _validation_error_summary(error: Exception) -> str:
     if isinstance(error, json.JSONDecodeError):
         return "JSON语法错误"
@@ -443,28 +290,6 @@ def _validation_error_summary(error: Exception) -> str:
             issues.append(f"{location}:{item['type']}")
         return "；".join(issues) or "字段校验失败"
     return "字段校验失败"
-
-
-def _restore_score_evidence_refs(
-    output: JobScoreOutput, aliases: dict[str, str]
-) -> JobScoreOutput:
-    if not aliases:
-        return output
-    return output.model_copy(
-        update={
-            "dimensions": [
-                item.model_copy(
-                    update={
-                        "evidence_refs": [
-                            aliases.get(reference, reference)
-                            for reference in item.evidence_refs
-                        ]
-                    }
-                )
-                for item in output.dimensions
-            ]
-        }
-    )
 
 
 def _optional_int(value: object) -> int | None:

@@ -49,7 +49,7 @@ class JobPrefilterState(StrEnum):
 
 
 class BossJobDiscoveryAdapter:
-    """读取搜索列表并打开职位详情；不执行沟通或评分决策。"""
+    """读取搜索列表并打开职位详情；不执行沟通决策。"""
 
     def __init__(self, config: BrowserSelectorsConfig) -> None:
         self.config = config

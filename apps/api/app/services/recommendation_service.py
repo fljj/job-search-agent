@@ -282,8 +282,6 @@ def _create_action(
         return existing
     context = AutomationContext(
         action_type=action_type,
-        score=0,
-        grade="UNKNOWN",
         eligible=True,
         job_open=True,
         original_decision="ALLOW_AUTO",

@@ -49,28 +49,28 @@
 策略包含岗位方向、地点、工作模式、薪资、行业、公司黑名单、兼职、学历和到岗口径。服务端
 校验规则冲突和版本，不接受前端计算结果。
 
-## 4. 职位、解析和评分
+## 4. 职位、解析和沟通决策
 
 | 方法与路径 | 用途 |
 | --- | --- |
 | `POST /jobs/import` | 导入单个模拟或适配器 JD |
 | `POST /jobs/import/batch` | 批量导入，逐项返回结果 |
-| `GET /jobs` | SQL 筛选和稳定分页，可按策略评分字段过滤 |
+| `GET /jobs` | SQL 筛选和稳定分页，可按策略及沟通决策过滤 |
 | `GET /jobs/{id}` | 获取职位 |
 | `POST /jobs/{id}/parse` | 执行 RULE 或 LLM 解析 |
 | `GET /jobs/{id}/parsed-details` | 分页查看解析版本 |
 | `GET /jobs/{id}/parsed-details/{detail_id}` | 获取解析快照 |
-| `POST /jobs/{id}/scores` | 硬过滤后创建评分 |
-| `POST /jobs/{id}/scores/re-evaluate` | 显式重新评估 |
-| `POST /jobs/scores/batch` | 批量评分 |
-| `GET /jobs/{id}/scores` | 获取评分历史 |
-| `GET /scores/{id}` | 获取评分详情、证据和风险 |
+| `POST /jobs/{id}/decisions` | 硬过滤后创建沟通决策 |
+| `POST /jobs/{id}/decisions/re-evaluate` | 使用幂等键显式重新决策 |
+| `POST /jobs/decisions/batch` | 批量创建沟通决策 |
+| `GET /jobs/{id}/decisions` | 获取沟通决策历史 |
+| `GET /decisions/{id}` | 获取决策、依据、不确定项和硬排除信息 |
 
 职位导入可携带可选 `source_url`。服务端根据 `source` 校验平台域名并规范化链接；
 `POST /jobs/import`、`GET /jobs` 和 `GET /jobs/{id}` 的职位响应均返回可选
 `source_url`。非对应招聘平台的链接返回 `400 VALIDATION_ERROR`。
 
-硬性排除在调用 LLM 前执行。LLM 分数必须通过维度、总和、证据、模型及提示版本校验。
+硬性排除在调用 LLM 前执行。LLM 决策必须通过枚举、置信度、字段长度、模型及提示版本校验。
 
 ## 5. 对话、资格和草稿
 
@@ -84,7 +84,7 @@
 | `GET /conversations/{id}/qualification` | 获取资格快照 |
 | `POST /conversations/{id}/qualification/evaluate` | 基于当前证据重新评估资格 |
 | `POST /drafts/reply` | 经 Reply Router 创建回复草稿 |
-| `POST /drafts/greeting` | 基于有效评分创建招呼草稿 |
+| `POST /drafts/greeting` | 基于有效 `CONTACT` 决策创建招呼草稿 |
 | `POST /drafts/resume` | 基于明确入站请求创建简历草稿 |
 | `PATCH /drafts/{id}` | 人工编辑尚未执行的草稿 |
 
@@ -128,7 +128,7 @@
 自动化设置不包含小时/每日投递配额、低分婉拒开关、回复置信度或简历最低分。公司和招聘人
 冷却仅用于防重复。
 
-猎聘 Run 先执行消息发现、Reply Router 和获授权动作，再执行首页职位发现、硬过滤、评分及
+猎聘 Run 先执行消息发现、Reply Router 和获授权动作，再执行首页职位发现、硬过滤、沟通决策及
 获授权的主动招呼。API 可以
 创建、暂停、恢复猎聘 Run；现有消息、职位和总览接口的 `platform/source` 筛选直接支持
 `LIEPIN`，不增加平台专用 API。L3 生成的猎聘草稿持久化为不可派发，直接派发、编辑后派发

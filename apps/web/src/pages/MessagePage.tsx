@@ -6,7 +6,7 @@ import { businessLabel } from './business-labels'
 
 interface ConversationSummary {
   id: string; platform: string; recruiter_name: string; state: string; company_name?: string
-  job_id?: string; job_title?: string; latest_score?: number; latest_grade?: string
+  job_id?: string; job_title?: string; latest_decision?: string
   qualification_status: 'UNKNOWN' | 'ROUGH_MATCH' | 'FULL_MATCH' | 'MISMATCH'
   qualification_evidence: string[]
   latest_draft_type?: string; latest_draft_content?: string
@@ -126,12 +126,13 @@ export function MessagePage() {
           }}>查看职位</Button>
           : <Tag>职位未绑定</Tag> },
       { title: '招聘人', dataIndex: 'recruiter_name', width: 120, ellipsis: true },
-      { title: '评分', width: 110, render: (_: unknown, item: ConversationSummary) =>
+      { title: '职位决策', width: 130, render: (_: unknown, item: ConversationSummary) =>
         !item.job_id
           ? <Tag>职位未绑定</Tag>
-          : item.latest_score === undefined || item.latest_score === null
-          ? <Tag>待评分</Tag> : <Tag color={item.latest_score >= 80 ? 'green' : 'blue'}>
-            {item.latest_score} / {item.latest_grade}</Tag> },
+          : !item.latest_decision
+          ? <Tag>待决策</Tag> : <Tag color={item.latest_decision === 'CONTACT' ? 'green'
+            : item.latest_decision === 'FILTERED_OUT' ? 'red' : 'default'}>
+            {businessLabel(item.latest_decision)}</Tag> },
       { title: '入站资格', width: 260, render: (_: unknown, item: ConversationSummary) =>
         <Space direction="vertical" size={0} style={{ width: '100%' }}>
           <Tag color={item.qualification_status === 'FULL_MATCH' ? 'green'

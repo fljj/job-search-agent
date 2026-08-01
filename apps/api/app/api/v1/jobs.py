@@ -47,11 +47,11 @@ def import_batch(payload: BatchJobImportPayload,
 @router.get("")
 def list_all(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
              job_id: UUID | None = None,
-             strategy_id: UUID | None = None, grade: str | None = None,
-             eligibility: str | None = None, effective_job_status: str | None = None,
+             strategy_id: UUID | None = None, decision: str | None = None,
+             effective_job_status: str | None = None,
              work_mode: str | None = None, hard_rejected: bool | None = None,
              session: Session = Depends(get_session)) -> dict[str, object]:
-    items, total = list_jobs(session, page, page_size, job_id, strategy_id, grade, eligibility,
+    items, total = list_jobs(session, page, page_size, job_id, strategy_id, decision,
                              effective_job_status, work_mode, hard_rejected)
     return response({"items": items, "page": page, "page_size": page_size, "total": total})
 

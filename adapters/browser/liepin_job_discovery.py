@@ -331,7 +331,7 @@ class LiepinJobDiscoveryAdapter:
             return
 
     def close_details(self, cdp_url: str, batch: JobDiscoveryBatch) -> None:
-        """评分和已授权动作完成后关闭本批次创建的详情页。"""
+        """职位沟通决策和已授权动作完成后关闭本批次创建的详情页。"""
 
         for item in batch.items:
             if item.detail_target_id and item.detail_target_url:
