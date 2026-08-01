@@ -77,7 +77,7 @@ def test_reads_job_detail_with_platform_selector_version() -> None:
 
     assert result.status is SessionStatus.SESSION_READY
     assert result.page_type is PageType.JOB
-    assert result.selector_version == "2026-08-01-v2"
+    assert result.selector_version == "2026-08-01-v7"
     assert result.job is not None
     assert result.job.external_job_id == "job-liepin-1"
     assert result.job.company_name == "示例科技"

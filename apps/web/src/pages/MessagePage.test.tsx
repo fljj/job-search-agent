@@ -39,6 +39,7 @@ describe('MessagePage', () => {
     expect(screen.getByText('不会执行')).toBeTruthy()
     expect(screen.getByText('规则回复')).toBeTruthy()
     expect(screen.queryByText('默认简历.pdf')).toBeNull()
+    expect(screen.queryByText('猎聘写入需完成 L5 授权')).toBeNull()
   })
 
   it('可以从消息跳转到对应职位', async () => {

@@ -50,6 +50,8 @@ class JobDetailSelectors(SelectorModel):
 
 
 class ConversationSelectors(SelectorModel):
+    conversation_entry_button: str | None = None
+    conversation_dialog_close_button: str | None = None
     conversation_drawer_close_button: str | None = None
     conversation_list_root: str
     conversation_list_items: str
@@ -130,6 +132,8 @@ class PlatformSelectors(SelectorModel):
     job_closed_marker: str
     platform_greeting_dialog: str
     platform_greeting_message: str
+    conversation_entry_button: str | None = None
+    conversation_dialog_close_button: str | None = None
     conversation_drawer_close_button: str | None = None
     conversation_list_root: str
     conversation_list_items: str

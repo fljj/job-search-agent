@@ -32,6 +32,27 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
 
         self._hold_drawer_for_actions = True
 
+    def _prepare_conversation_detail(self, page: RawCdpPageReader) -> None:
+        """从猎聘 React 消息对象提取平台 ID、时间和方向供通用读取器使用。"""
+        page._evaluate(
+            "(() => { let annotated = 0;"
+            "for (const wrapper of document.querySelectorAll('.im-ui-message-item-wrapper')) {"
+            "const fiberKey = Object.getOwnPropertyNames(wrapper)"
+            ".find(key => key.startsWith('__reactInternalInstance') || "
+            "key.startsWith('__reactFiber'));"
+            "let fiber = fiberKey ? wrapper[fiberKey] : null; let message = null;"
+            "for (let depth = 0; fiber && depth < 8; depth += 1, fiber = fiber.return) {"
+            "if (fiber.memoizedProps?.message) { message = fiber.memoizedProps.message; break; }"
+            "}"
+            "const target = wrapper.querySelector('.im-ui-message-item-body');"
+            "if (!target || !message?.msgId || !message?.msgTime) continue;"
+            "target.setAttribute('data-message-id', String(message.msgId));"
+            "target.setAttribute('data-sent-at', new Date(Number(message.msgTime)).toISOString());"
+            "target.setAttribute('data-direction', String(message.direction) === '0' ? 'outbound' : 'inbound');"
+            "annotated += 1;"
+            "} return annotated; })()"
+        )
+
     def finish_actions(self) -> None:
         """动作批次结束后只收起本适配器打开的抽屉。"""
 
@@ -128,10 +149,13 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
                     raise ValueError(
                         f"猎聘首页不能安全打开消息抽屉: {reason}"
                     )
+                entry_selector = self.selectors.conversation_entry_button
+                if not entry_selector:
+                    raise ValueError("猎聘消息入口缺少选择器")
                 opened_by_agent = bool(
                     page._evaluate(
                         "(() => { const matches = Array.from(document.querySelectorAll("
-                        f"{json.dumps(self.selectors.login_marker)}"
+                        f"{json.dumps(entry_selector)}"
                         ")).filter(item => item.getClientRects().length > 0);"
                         "if (matches.length !== 1) return false;"
                         "matches[0].click(); return true; })()"
@@ -193,6 +217,29 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
                 raise LiepinHomeRestoreError(
                     f"猎聘页面存在用户交互，不能关闭消息抽屉: {reason}"
                 )
+            if page.exists(self.selectors.conversation_root):
+                dialog_close_selector = (
+                    self.selectors.conversation_dialog_close_button
+                )
+                if not dialog_close_selector:
+                    raise LiepinHomeRestoreError("猎聘会话弹窗缺少关闭选择器")
+                dialog_closed = page._evaluate(
+                    "(() => { const matches = Array.from(document.querySelectorAll("
+                    f"{json.dumps(dialog_close_selector)}"
+                    ")).filter(item => item.getClientRects().length > 0);"
+                    "if (matches.length !== 1) return false; "
+                    "matches[0].click(); return true; })()"
+                )
+                if not dialog_closed:
+                    raise LiepinHomeRestoreError(
+                        "猎聘会话弹窗关闭按钮不唯一或不可见"
+                    )
+                for _ in range(30):
+                    if not page.exists(self.selectors.conversation_root):
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise LiepinHomeRestoreError("猎聘会话弹窗关闭后仍然可见")
             closed = page._evaluate(
                 "(() => { const matches = Array.from(document.querySelectorAll("
                 f"{json.dumps(close_selector)}"

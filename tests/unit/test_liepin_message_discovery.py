@@ -168,3 +168,62 @@ def test_open_drawer_requires_safe_job_list_home(
         adapter._ensure_drawer_open("ws://home")
 
     page._evaluate.assert_not_called()
+
+
+def test_liepin_message_metadata_is_normalized_before_reading() -> None:
+    adapter = LiepinMessageDiscoveryAdapter(get_browser_selectors())
+    page = MagicMock()
+
+    adapter._prepare_conversation_detail(page)
+
+    expression = page._evaluate.call_args.args[0]
+    assert "__reactInternalInstance" in expression
+    assert "__reactFiber" in expression
+    assert "message.msgId" in expression
+    assert "message.msgTime" in expression
+    assert "data-message-id" in expression
+    assert "data-sent-at" in expression
+    assert "data-direction" in expression
+
+
+def test_restore_closes_active_conversation_before_drawer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = LiepinMessageDiscoveryAdapter(get_browser_selectors())
+    page = MagicMock()
+    page.__enter__.return_value = page
+    page.__exit__.return_value = False
+    conversation_checks = iter([True, False])
+
+    def exists(selector: str) -> bool:
+        if selector == adapter.selectors.conversation_root:
+            return next(conversation_checks)
+        if selector == adapter.selectors.conversation_list_root:
+            return False
+        return selector == adapter.selectors.job_list_root
+
+    page.exists.side_effect = exists
+    page._evaluate.return_value = True
+    monkeypatch.setattr(
+        "adapters.browser.liepin_message_discovery.RawCdpPageReader",
+        lambda _target: page,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.liepin_message_discovery.extract_current_page",
+        lambda *_args, **_kwargs: ReadResult(
+            platform=Platform.LIEPIN,
+            status=SessionStatus.SESSION_READY,
+            page_type=PageType.CONVERSATION,
+            page_url="https://c.liepin.com/",
+            page_title="猎聘会话",
+            content_hash="c" * 64,
+            selector_version="fixture",
+        ),
+    )
+
+    adapter._restore_home("ws://home")
+
+    expressions = [call.args[0] for call in page._evaluate.call_args_list]
+    assert len(expressions) == 2
+    assert adapter.selectors.conversation_dialog_close_button in expressions[0]
+    assert adapter.selectors.conversation_drawer_close_button in expressions[1]

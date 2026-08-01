@@ -84,7 +84,6 @@ export function MessagePage() {
   return <Card title="招聘沟通监控" extra={<Space>
     {linkedJobId && <Button onClick={() => { window.location.hash = 'messages' }}>显示全部消息</Button>}
     <Tag color="blue">普通沟通由 Agent 自动处理</Tag>
-    <Tag color="orange">猎聘写入需完成 L5 授权</Tag>
   </Space>}>
     <Space style={{ marginBottom: 16 }}>
       <Select allowClear placeholder="全部平台" value={platform}

@@ -212,6 +212,7 @@ class MessageDiscoveryAdapter:
                 reason_codes=["CONVERSATION_LIST_ITEM_NOT_UNIQUE_OR_VISIBLE"],
             )
         for _ in range(30):
+            self._prepare_conversation_detail(page)
             detail = extract_current_page(
                 page,
                 self.platform,
@@ -272,6 +273,9 @@ class MessageDiscoveryAdapter:
             summary=summary,
             reason_codes=["CONVERSATION_DETAIL_NOT_READY"],
         )
+
+    def _prepare_conversation_detail(self, _page: RawCdpPageReader) -> None:
+        """允许平台适配器在读取前补充只读标准化属性。"""
 
     def _read_linked_job(
         self,
