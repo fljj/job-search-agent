@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -51,6 +52,7 @@ class MessagePayload(BaseModel):
     content: str = Field(min_length=1, max_length=10000)
     received_at: datetime
     identity_reliable: bool = True
+    direction: Literal["INBOUND", "OUTBOUND"] = "INBOUND"
 
 
 class MessageResponse(BaseModel):

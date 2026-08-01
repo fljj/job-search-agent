@@ -19,6 +19,7 @@ from apps.api.app.core.database import Base
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AutomationDispatchRequest
 from apps.api.app.schemas.conversation import MessagePayload
+from apps.api.app.services.agent_service import _pending_drafts
 from apps.api.app.services.automation_service import dispatch
 from apps.api.app.services.conversation_service import (
     create_reply_draft,
@@ -596,3 +597,101 @@ def test_rediscovery_upgrades_identity_and_queues_resume_consent_once(
     assert conversation.identity_reliable is True
     assert len(actions) == 1
     assert actions[0].status == "APPROVED"
+
+
+def test_platform_outbound_message_blocks_historical_draft_dispatch(
+    session: Session,
+) -> None:
+    session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    session.flush()
+    profile = db.CandidateProfile(
+        user_id=DEFAULT_USER_ID,
+        name="测试候选人",
+        total_years=10,
+        management_years=0,
+        has_architecture_experience=True,
+        has_core_system_experience=True,
+    )
+    session.add(profile)
+    session.flush()
+    strategy = db.JobStrategy(
+        user_id=DEFAULT_USER_ID,
+        candidate_profile_id=profile.id,
+        name="默认策略",
+        enabled=True,
+        priority=1,
+    )
+    session.add(strategy)
+    session.flush()
+    conversation = db.Conversation(
+        user_id=DEFAULT_USER_ID,
+        strategy_id=strategy.id,
+        platform="BOSS",
+        external_conversation_id="answered-conversation",
+        recruiter_name="招聘人",
+        state="ACTIVE",
+    )
+    run = db.AgentRun(
+        user_id=DEFAULT_USER_ID,
+        strategy_id=strategy.id,
+        platform="BOSS",
+        executor_type="REAL_CDP",
+        status="RUNNING",
+        cursor={},
+    )
+    session.add_all([conversation, run])
+    session.commit()
+    received_at = datetime.now(UTC)
+    inbound = import_message(
+        session,
+        conversation.id,
+        MessagePayload(
+            external_message_id="inbound-1",
+            content="最快多久到岗？",
+            received_at=received_at,
+        ),
+    )
+    outbound = import_message(
+        session,
+        conversation.id,
+        MessagePayload(
+            external_message_id="outbound-1",
+            content="我最快可以在一周内到岗。",
+            # 平台时间可能只有分钟精度；相同展示时间也必须按入库顺序对账。
+            received_at=received_at,
+            direction="OUTBOUND",
+        ),
+    )
+    draft = db.GeneratedDraft(
+        user_id=DEFAULT_USER_ID,
+        conversation_id=conversation.id,
+        message_id=inbound.id,
+        draft_type="REPLY",
+        content="我最快可以在一周内到岗。",
+        intents=[],
+        fact_ids=[],
+        confidence=1,
+        risk_codes=[],
+        input_fingerprint="historical-draft-after-platform-reply",
+        generator_version="test",
+        reply_source="RULE_TEMPLATE",
+    )
+    session.add(draft)
+    session.flush()
+    session.add(
+        db.PolicyDecision(
+            user_id=DEFAULT_USER_ID,
+            draft_id=draft.id,
+            action_type="REPLY",
+            decision="ALLOW_AUTO",
+            reason_codes=[],
+            policy_version="test",
+            input_snapshot={},
+        )
+    )
+    session.commit()
+
+    stored_outbound = session.get(db.Message, outbound.id)
+    assert stored_outbound is not None
+    assert stored_outbound.direction == "OUTBOUND"
+    assert _pending_drafts(session, run, 10) == []

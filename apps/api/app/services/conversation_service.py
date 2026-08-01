@@ -186,13 +186,27 @@ def import_message(
     )
     if existing:
         return _message_response(existing)
+    message_values = payload.model_dump(exclude={"direction"})
+    if payload.direction == "OUTBOUND":
+        message = db.Message(
+            conversation_id=conversation.id,
+            direction="OUTBOUND",
+            intents=[],
+            status="COMPLETED",
+            episode_number=conversation.episode_number,
+            **message_values,
+        )
+        session.add(message)
+        session.commit()
+        session.refresh(message)
+        return _message_response(message)
     if _is_ignored_platform_event(payload.content):
         message = db.Message(
             conversation_id=conversation.id,
             direction="INBOUND",
             intents=[],
             status="PLATFORM_EVENT_IGNORED",
-            **payload.model_dump(),
+            **message_values,
         )
         session.add(message)
         session.commit()
@@ -217,7 +231,7 @@ def import_message(
         intents=[intent.value for intent in intents],
         episode_number=conversation.episode_number,
         status=("RECEIVED" if payload.identity_reliable else "AWAITING_IDENTITY"),
-        **payload.model_dump(),
+        **message_values,
     )
     session.add(message)
     session.flush()

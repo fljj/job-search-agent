@@ -271,8 +271,6 @@ def persist_discovery_batch(
             conversation.state = "ACTIVE"
         _record_state_sequence(session, run, item, ["DECIDING"])
         for message in detail.messages:
-            if message.direction is not MessageDirection.INBOUND:
-                continue
             before = session.scalar(
                 select(db.Message.id).where(
                     db.Message.conversation_id == conversation.id,
@@ -287,6 +285,7 @@ def persist_discovery_batch(
                     content=message.content,
                     received_at=message.received_at,
                     identity_reliable=message.identity_reliable,
+                    direction=message.direction.value,
                 ),
             )
             if before is None:

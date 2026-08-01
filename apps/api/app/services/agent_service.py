@@ -536,6 +536,8 @@ def _pending_drafts(
             continue
         if conversation.strategy_id != run.strategy_id:
             continue
+        if _draft_has_later_platform_reply(session, draft):
+            continue
         raw_resume_id = decision.input_snapshot.get("resume_id")
         resume_id = UUID(str(raw_resume_id)) if raw_resume_id else None
         equivalent_action_id = session.scalar(
@@ -553,6 +555,32 @@ def _pending_drafts(
             continue
         result.append((draft, conversation, resume_id))
     return result
+
+
+def _draft_has_later_platform_reply(
+    session: Session, draft: db.GeneratedDraft
+) -> bool:
+    if draft.message_id is None:
+        return False
+    source = session.get(db.Message, draft.message_id)
+    if source is None or source.direction != "INBOUND":
+        return False
+    return bool(
+        session.scalar(
+            select(db.Message.id).where(
+                db.Message.conversation_id == source.conversation_id,
+                db.Message.direction == "OUTBOUND",
+                db.Message.episode_number == source.episode_number,
+                or_(
+                    db.Message.received_at > source.received_at,
+                    (
+                        (db.Message.received_at == source.received_at)
+                        & (db.Message.created_at > source.created_at)
+                    ),
+                ),
+            )
+        )
+    )
 
 
 def _has_unknown_outcome(session: Session, conversation_id: UUID) -> bool:

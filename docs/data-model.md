@@ -72,6 +72,8 @@ provider/model/prompt/schema 版本及 `llm_invocation_id`。只有输入和全�
 
 会话绑定平台、招聘人、可空职位、当前策略/评分、资格状态、episode、终态证据和身份可靠性。
 消息绑定会话和外部消息 ID，保存方向、正文、接收时间、处理状态、重试、错误和身份快照。
+平台发现同时持久化 `INBOUND` 与 `OUTBOUND`；同一会话和 episode 中，源入站消息之后的
+`OUTBOUND` 记录是抑制历史草稿再次调度的对账证据。
 
 `(conversation_id, external_message_id)` 唯一。消息状态数据库约束为：
 
