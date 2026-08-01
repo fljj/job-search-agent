@@ -960,7 +960,13 @@ class LlmCircuitBreaker(TimestampMixin, Base):
 
 class LlmRuntimeSetting(TimestampMixin, Base):
     __tablename__ = "llm_runtime_settings"
-    __table_args__ = (UniqueConstraint("user_id"),)
+    __table_args__ = (
+        UniqueConstraint("user_id"),
+        CheckConstraint(
+            "timeout_seconds BETWEEN 1 AND 300",
+            name="ck_llm_runtime_settings_timeout_seconds",
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
@@ -969,6 +975,9 @@ class LlmRuntimeSetting(TimestampMixin, Base):
     )
     provider: Mapped[str] = mapped_column(String(30))
     model: Mapped[str] = mapped_column(String(100))
+    timeout_seconds: Mapped[int] = mapped_column(
+        Integer, default=120, server_default="120"
+    )
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 

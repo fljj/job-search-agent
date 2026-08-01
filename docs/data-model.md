@@ -144,7 +144,8 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
   主动条件的记录使用 `SCORED + PROACTIVE_CONTACT_CANDIDATE`，不创建 Action Queue；
 - `platform_recommendations`：脉脉推荐卡片、简化判断、动作和回读证据；
 - `llm_circuit_breakers`：用户级模型能力状态、探测和失败信息；
-- `llm_runtime_settings`：当前 provider/model 和版本，不保存 API Key。
+- `llm_runtime_settings`：当前 provider/model、`timeout_seconds`（1～300）和版本，不保存
+  API Key；更新后由 API 与 Worker 在后续 LLM 调用中动态读取。
 
 Run、Worker、平台会话和能力是四种独立状态，不能用其中一种替代其他状态。
 

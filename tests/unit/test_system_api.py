@@ -9,6 +9,7 @@ def test_llm_status_never_exposes_secret(monkeypatch: pytest.MonkeyPatch) -> Non
         lambda _: {
             "provider": "QWEN",
             "model": "qwen-test",
+            "timeout_seconds": 180,
             "configured": True,
             "options": [
                 {"provider": "QWEN", "model": "qwen-test", "configured": True}
@@ -21,6 +22,7 @@ def test_llm_status_never_exposes_secret(monkeypatch: pytest.MonkeyPatch) -> Non
     assert result["data"] == {
         "provider": "QWEN",
         "model": "qwen-test",
+        "timeout_seconds": 180,
         "configured": True,
         "options": [
             {"provider": "QWEN", "model": "qwen-test", "configured": True}

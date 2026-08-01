@@ -26,7 +26,7 @@ const operations = {
 function mockAutomationApi() {
   vi.mocked(api).mockImplementation(async (path) => {
     if (path === '/system/llm-status') return {
-      provider: 'ZHIPU', model: 'glm-5.2', configured: true,
+      provider: 'ZHIPU', model: 'glm-5.2', timeout_seconds: 120, configured: true,
       options: [
         { provider: 'ZHIPU', model: 'glm-5.2', configured: true },
         { provider: 'QWEN', model: 'qwen-plus', configured: true },
@@ -89,13 +89,17 @@ describe('AutomationPage', () => {
     await user.click(await screen.findByTitle('QWEN'))
     await user.clear(screen.getByLabelText('LLM 模型'))
     await user.type(screen.getByLabelText('LLM 模型'), 'qwen-max-latest')
-    await user.click(screen.getByRole('button', { name: '切换模型' }))
+    await user.clear(screen.getByLabelText('LLM 超时时间'))
+    await user.type(screen.getByLabelText('LLM 超时时间'), '240')
+    await user.click(screen.getByRole('button', { name: '应用 LLM 配置' }))
 
     await waitFor(() => expect(api).toHaveBeenCalledWith(
       '/system/llm-status',
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ provider: 'QWEN', model: 'qwen-max-latest' }),
+        body: JSON.stringify({
+          provider: 'QWEN', model: 'qwen-max-latest', timeout_seconds: 240,
+        }),
       }),
     ))
   })
@@ -109,7 +113,7 @@ describe('AutomationPage', () => {
         consecutive_failure_count: 0, pause_reason_codes: [], cursor: {},
       }] }
       if (path === '/system/llm-status') return {
-        provider: 'ZHIPU', model: 'glm-5.2', configured: true,
+        provider: 'ZHIPU', model: 'glm-5.2', timeout_seconds: 120, configured: true,
         options: [{ provider: 'ZHIPU', model: 'glm-5.2', configured: true }],
       }
       if (path === '/automation/actions') return { items: [] }

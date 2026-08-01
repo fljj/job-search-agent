@@ -16,6 +16,7 @@ router = APIRouter(prefix="/system", tags=["system"])
 class LlmSelectionPayload(BaseModel):
     provider: str = Field(min_length=1, max_length=30)
     model: str = Field(min_length=1, max_length=100)
+    timeout_seconds: int = Field(ge=1, le=300)
 
 
 @router.get("/llm-status")
@@ -31,7 +32,9 @@ def save_llm_selection(
 ) -> dict[str, object]:
     """保存当前模型选择；API Key 始终只从环境变量读取。"""
     return response(
-        select_llm_configuration(session, payload.provider, payload.model)
+        select_llm_configuration(
+            session, payload.provider, payload.model, payload.timeout_seconds
+        )
     )
 
 

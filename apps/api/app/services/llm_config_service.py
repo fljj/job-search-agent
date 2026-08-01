@@ -30,7 +30,12 @@ def runtime_settings(
         if selected is not None
         else base.configured_model_for(provider)
     )
-    return base.with_llm_selection(provider, model)
+    selected_settings = base.with_llm_selection(provider, model)
+    if selected is not None:
+        selected_settings = selected_settings.model_copy(
+            update={"llm_timeout_seconds": selected.timeout_seconds}
+        )
+    return selected_settings
 
 
 def build_runtime_llm_provider(
@@ -58,6 +63,7 @@ def llm_configuration(session: Session) -> dict[str, object]:
     return {
         "provider": selected.llm_provider,
         "model": selected.llm_model,
+        "timeout_seconds": selected.llm_timeout_seconds,
         "configured": selected.llm_configured,
         "options": options,
     }
@@ -67,6 +73,7 @@ def select_llm_configuration(
     session: Session,
     provider: str,
     model: str,
+    timeout_seconds: int,
 ) -> dict[str, object]:
     base = get_settings()
     normalized = provider.upper()
@@ -75,6 +82,8 @@ def select_llm_configuration(
     normalized_model = model.strip()
     if not normalized_model:
         raise ValueError("模型名称不能为空")
+    if not 1 <= timeout_seconds <= 300:
+        raise ValueError("模型超时时间必须在 1 到 300 秒之间")
     selected = base.with_llm_selection(normalized, normalized_model)
     if not selected.llm_configured:
         raise ValueError("该模型尚未配置 API Key")
@@ -89,11 +98,13 @@ def select_llm_configuration(
             user_id=DEFAULT_USER_ID,
             provider=normalized,
             model=normalized_model,
+            timeout_seconds=timeout_seconds,
         )
         session.add(row)
     else:
         row.provider = normalized
         row.model = normalized_model
+        row.timeout_seconds = timeout_seconds
         row.version += 1
     circuit = session.scalar(
         select(db.LlmCircuitBreaker).where(

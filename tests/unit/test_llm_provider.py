@@ -12,7 +12,12 @@ from adapters.llm.errors import (
     LlmNetworkError,
 )
 from adapters.llm.fake import FakeLlmProvider
-from adapters.llm.qwen import PROMPTS, QwenLlmProvider
+from adapters.llm.qwen import (
+    PROMPTS,
+    QWEN_MAX_OUTPUT_TOKENS,
+    QwenLlmProvider,
+    _compact_scoring_input,
+)
 from adapters.llm.zhipu import ZhipuLlmProvider
 from apps.api.app.core.config import Settings
 from apps.api.app.core.llm import build_llm_provider
@@ -22,6 +27,7 @@ from packages.llm.models import (
     ReplyRequest,
     TrustedFact,
 )
+from packages.scoring.models import ScoringContext
 
 
 class StubTransport:
@@ -73,6 +79,8 @@ def test_qwen_accepts_structured_json_and_code_fence(content: str) -> None:
     assert isinstance(payload, dict)
     assert payload["stream"] is False
     assert payload["response_format"] == {"type": "json_object"}
+    assert payload["enable_thinking"] is False
+    assert payload["max_tokens"] == 1024
     assert "tools" not in payload
 
 
@@ -110,8 +118,20 @@ def test_health_check_uses_one_minimal_request_without_business_schema() -> None
 
     payload = cast(dict[str, object], transport.calls[0]["payload"])
     assert payload["max_tokens"] == 1
+    assert payload["enable_thinking"] is False
     assert "response_format" not in payload
     assert len(transport.calls) == 1
+
+
+def test_qwen_uses_task_specific_output_limit() -> None:
+    assert QWEN_MAX_OUTPUT_TOKENS == {
+        "parse_job": 3072,
+        "score_job": 6144,
+        "classify_message": 1024,
+        "generate_greeting": 2048,
+        "generate_reply": 2048,
+        "evaluate_conversation": 2048,
+    }
 
 
 @pytest.mark.parametrize("error", [LlmAuthenticationError("auth"), LlmInvalidResponseError("bad")])
@@ -182,15 +202,80 @@ def test_authorization_key_is_not_in_payload() -> None:
 
 def test_score_prompt_lists_exact_evidence_contract() -> None:
     version, prompt = PROMPTS["score_job"]
-    assert version == "job-score-v8"
+    assert version == "job-score-v9"
     assert "title=15，skills=25" in prompt
     assert "industry=10，management=5" in prompt
     assert "total_score必须等于七项score之和" in prompt
-    assert "input.evidence_items中的完整id" in prompt
+    assert "input.evidence_items中的id" in prompt
     assert "具体条目id" in prompt
     assert "不得创造、缩写或修改证据id" in prompt
     assert "title维度表示岗位方向匹配" in prompt
     assert "不能仅因标题未出现Java等关键词直接给0分" in prompt
+
+
+def test_compact_scoring_input_keeps_values_and_replaces_hash_ids(
+    evidence_context: ScoringContext,
+) -> None:
+    compact, aliases = _compact_scoring_input(evidence_context)
+
+    items = cast(list[dict[str, object]], compact["evidence_items"])
+    assert len(items) == len(evidence_context.evidence_items)
+    assert items[0]["id"] == "e1"
+    assert aliases["e1"] == evidence_context.evidence_items[0].id
+    assert items[0]["value"] == evidence_context.evidence_items[0].value
+    assert "candidate" not in compact
+    assert "strategy" not in compact
+
+
+def test_score_request_restores_compact_evidence_ids(
+    evidence_context: ScoringContext,
+) -> None:
+    compact, aliases = _compact_scoring_input(evidence_context)
+    items = cast(list[dict[str, object]], compact["evidence_items"])
+    references = {
+        dimension: next(
+            cast(str, item["id"])
+            for item in items
+            if dimension in cast(list[str], item["dimensions"])
+        )
+        for dimension in ("title", "skills", "experience", "location", "salary", "industry", "management")
+    }
+    maximums = {
+        "title": 15,
+        "skills": 25,
+        "experience": 15,
+        "location": 15,
+        "salary": 15,
+        "industry": 10,
+        "management": 5,
+    }
+    output = {
+        "dimensions": [
+            {
+                "dimension": dimension,
+                "score": 0,
+                "max_score": maximum,
+                "reason": "测试",
+                "evidence_refs": [references[dimension]],
+            }
+            for dimension, maximum in maximums.items()
+        ],
+        "total_score": 0,
+        "match_reasons": [],
+        "risk_notes": [],
+        "recommends_proactive_contact": False,
+        "contact_reason": "测试",
+    }
+    transport = StubTransport(response(json.dumps(output, ensure_ascii=False)))
+
+    result = qwen(transport).score_job(evidence_context)
+
+    payload = cast(dict[str, object], transport.calls[0]["payload"])
+    messages = cast(list[dict[str, str]], payload["messages"])
+    sent = json.loads(messages[1]["content"])
+    assert set(sent["input"]) == {"evidence_items"}
+    assert sent["input"]["evidence_items"][0]["id"] == "e1"
+    assert result.data.dimensions[0].evidence_refs == [aliases[references["title"]]]
 
 
 def test_greeting_prompt_requires_candidate_perspective() -> None:

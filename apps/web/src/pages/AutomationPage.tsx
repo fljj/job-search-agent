@@ -22,7 +22,8 @@ interface SettingForm {
 
 interface LlmOption { provider: string; model: string; configured: boolean }
 interface LlmStatus {
-  provider: string; model: string; configured: boolean; options: LlmOption[]
+  provider: string; model: string; timeout_seconds: number
+  configured: boolean; options: LlmOption[]
 }
 interface AgentRun {
   id: string; platform: string; strategy_id: string; status: string; heartbeat_at?: string
@@ -48,6 +49,7 @@ export function AutomationPage() {
   const [llm, setLlm] = useState<LlmStatus>()
   const [selectedProvider, setSelectedProvider] = useState<string>()
   const [modelInput, setModelInput] = useState('')
+  const [timeoutInput, setTimeoutInput] = useState(120)
   const [savingLlm, setSavingLlm] = useState(false)
   const [runs, setRuns] = useState<AgentRun[]>([])
   const [actions, setActions] = useState<AutomaticAction[]>([])
@@ -70,6 +72,7 @@ export function AutomationPage() {
       api<{ items: SettingForm[] }>('/automation/settings'),
     ])
     setLlm(llmStatus); setSelectedProvider(llmStatus.provider); setModelInput(llmStatus.model)
+    setTimeoutInput(llmStatus.timeout_seconds)
     setRuns(runList.items); setActions(actionList.items)
     setOperations(operationStatus)
     setStrategies(strategyList.items)
@@ -86,6 +89,7 @@ export function AutomationPage() {
     ]).then(([llmStatus, runList, actionList, operationStatus, strategyList, settingList]) => {
       setLlm(llmStatus); setRuns(runList.items); setActions(actionList.items)
       setSelectedProvider(llmStatus.provider); setModelInput(llmStatus.model)
+      setTimeoutInput(llmStatus.timeout_seconds)
       setOperations(operationStatus)
       setStrategies(strategyList.items)
       setSettings(settingList.items)
@@ -124,12 +128,13 @@ export function AutomationPage() {
     try {
       const updated = await api<LlmStatus>('/system/llm-status', {
         method: 'PUT',
-        body: JSON.stringify({ provider, model }),
+        body: JSON.stringify({ provider, model, timeout_seconds: timeoutInput }),
       })
       setLlm(updated)
       setSelectedProvider(updated.provider)
       setModelInput(updated.model)
-      message.success(`已切换到 ${updated.provider} / ${updated.model}，后续调用立即生效`)
+      setTimeoutInput(updated.timeout_seconds)
+      message.success('LLM 配置已更新，后续调用立即生效')
     } finally {
       setSavingLlm(false)
     }
@@ -159,6 +164,7 @@ export function AutomationPage() {
       <Descriptions items={[
         { key: 'provider', label: '供应商', children: llm?.provider ?? '-' },
         { key: 'model', label: '模型', children: llm?.model ?? '-' },
+        { key: 'timeout', label: '超时', children: llm ? `${llm.timeout_seconds} 秒` : '-' },
         { key: 'configured', label: '状态', children: <Tag color={llm?.configured ? 'green' : 'red'}>
           {llm?.configured ? '已配置' : '未配置'}
         </Tag> },
@@ -178,11 +184,14 @@ export function AutomationPage() {
         <Input aria-label="LLM 模型" style={{ width: 280 }} value={modelInput}
           placeholder="输入模型名称"
           onChange={(event) => setModelInput(event.target.value)} />
+        <InputNumber aria-label="LLM 超时时间" min={1} max={300} value={timeoutInput}
+          addonAfter="秒" onChange={(value) => value !== null && setTimeoutInput(value)} />
         <Button type="primary" loading={savingLlm}
           disabled={!selectedProvider || !modelInput.trim()
-            || (selectedProvider === llm?.provider && modelInput.trim() === llm?.model)}
+            || (selectedProvider === llm?.provider && modelInput.trim() === llm?.model
+              && timeoutInput === llm?.timeout_seconds)}
           onClick={() => void saveLlm().catch(showRequestError)}>
-          切换模型
+          应用 LLM 配置
         </Button>
         <span>API Key 仅从环境变量读取，不会保存到数据库。</span>
       </Space>
