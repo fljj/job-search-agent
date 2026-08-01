@@ -35,6 +35,7 @@
     "platform_greeting_message": ".im-ui-message-item-send .im-ui-message-item-normal-message-wrapper"
   },
   "conversation": {
+    "conversation_drawer_close_button": ".im-ui-drawer-close, .ant-drawer-close",
     "conversation_list_root": ".im-ui-contact-list-wrapper",
     "conversation_list_items": ".im-ui-contact-list-item[data-tlg-ext]",
     "conversation_list_item_id_attribute": "data-tlg-ext",

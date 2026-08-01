@@ -93,6 +93,8 @@ def test_reads_encoded_conversation_ids_and_message_directions() -> None:
     assert listing.page_type is PageType.CONVERSATION_LIST
     assert listing.conversations[0].external_conversation_id == "liepin-chat-1"
     assert listing.conversations[0].unread_count == 1
+    assert listing.conversations[0].company_name == "示例科技"
+    assert listing.conversations[0].job_title == "Java 后端工程师"
     assert detail.page_type is PageType.CONVERSATION
     assert detail.conversation is not None
     assert detail.conversation.external_conversation_id == "liepin-chat-1"

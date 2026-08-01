@@ -171,9 +171,12 @@ def tick_run(
     provider: LlmProvider | None = None,
     executor: ActionExecutor | None = None,
     now: datetime | None = None,
+    execute_external_actions: bool = True,
 ) -> dict[str, object]:
     current = now or datetime.now(UTC)
     requested_run = _get_run(session, run_id)
+    if requested_run.platform == "LIEPIN" and execute_external_actions:
+        raise ValueError("猎聘 L3 只允许生成草稿和确认任务，禁止外部写动作")
     if executor is None and requested_run.platform != "MOCK":
         raise ValueError("真实平台 Agent 必须显式提供真实执行器")
     run = _acquire_lease(session, run_id, worker_id, current)
@@ -260,6 +263,8 @@ def tick_run(
                     llm_provider,
                     allow_provider_lookup=False,
                 )
+                if not execute_external_actions:
+                    _disable_message_draft_dispatch(session, message.id)
                 processed += 1
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
                 _complete_message(session, message)
@@ -270,6 +275,8 @@ def tick_run(
                 llm_provider,
                 allow_provider_lookup=False,
             )
+            if not execute_external_actions:
+                _disable_message_draft_dispatch(session, message.id)
             processed += 1
             _event(session, run.id, "DRAFT_CREATED", "draft", draft.id)
             intent_values = [intent.value for intent in draft.intents]
@@ -301,6 +308,8 @@ def tick_run(
                     allow_provider_lookup=False,
                 )
                 _event(session, run.id, "RESUME_DECIDED", "draft", resume.id)
+            if not execute_external_actions:
+                _disable_message_draft_dispatch(session, message.id)
             _complete_message(session, message)
         except LlmProviderError as exc:
             open_llm_circuit(session, settings, exc.code, now=current)
@@ -348,7 +357,11 @@ def tick_run(
             )
             session.commit()
 
-    drafts = _pending_drafts(session, run, settings.agent_tick_batch_size)
+    drafts = (
+        _pending_drafts(session, run, settings.agent_tick_batch_size)
+        if execute_external_actions
+        else []
+    )
     for generated_draft, conversation, resume_id in drafts:
         if _has_unknown_outcome(session, conversation.id):
             _event(
@@ -498,6 +511,7 @@ def _pending_drafts(
         .join(db.Conversation, db.Conversation.id == db.GeneratedDraft.conversation_id)
         .where(
             db.Conversation.platform == run.platform,
+            db.GeneratedDraft.dispatch_enabled.is_(True),
             ~db.Conversation.state.in_(
                 ["ENDED", "DECLINED", "PAUSED", "OUTCOME_UNKNOWN"]
             ),
@@ -555,6 +569,16 @@ def _pending_drafts(
             continue
         result.append((draft, conversation, resume_id))
     return result
+
+
+def _disable_message_draft_dispatch(session: Session, message_id: UUID) -> None:
+    """持久化 L3 只读边界，避免未来启用写动作时补发历史草稿。"""
+
+    session.execute(
+        update(db.GeneratedDraft)
+        .where(db.GeneratedDraft.message_id == message_id)
+        .values(dispatch_enabled=False)
+    )
 
 
 def _draft_has_later_platform_reply(

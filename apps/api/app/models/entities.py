@@ -508,6 +508,9 @@ class GeneratedDraft(Base):
     input_fingerprint: Mapped[str] = mapped_column(String(64))
     generator_version: Mapped[str] = mapped_column(String(50))
     reply_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    dispatch_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

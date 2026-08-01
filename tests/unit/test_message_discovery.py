@@ -13,6 +13,7 @@ from adapters.browser.message_discovery import (
     MessageDiscoveryAdapter,
     MessageDiscoveryBatch,
     _attempted_message_keys,
+    _job_id_from_href,
     _matches_partition,
     _message_key,
     _normalize_duplicate_conversation_ids,
@@ -106,6 +107,24 @@ def test_linked_job_close_does_not_close_message_page(
     )
 
     assert calls == ["http://127.0.0.1:9222/json/list"]
+
+
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        ("https://www.zhipin.com/job_detail/boss-1.html", "boss-1"),
+        (
+            "https://www.liepin.com/job/1983664515.shtml?job_id=liepin-1",
+            "liepin-1",
+        ),
+        ("https://www.liepin.com/a/7823456789.shtml", "7823456789"),
+    ],
+)
+def test_linked_job_id_supports_boss_and_liepin(
+    href: str,
+    expected: str,
+) -> None:
+    assert _job_id_from_href(href) == expected
 
 
 def test_boss_message_page_is_reopened_when_missing(

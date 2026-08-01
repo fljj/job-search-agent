@@ -83,7 +83,7 @@ export function MessagePage() {
   }, [linkedJobId])
   return <Card title="招聘沟通监控" extra={<Space>
     {linkedJobId && <Button onClick={() => { window.location.hash = 'messages' }}>显示全部消息</Button>}
-    <Tag color="blue">普通沟通由 Agent 自动处理</Tag>
+    <Tag color="blue">BOSS/脉脉自动处理；猎聘当前只生成草稿</Tag>
   </Space>}>
     <Space style={{ marginBottom: 16 }}>
       <Select allowClear placeholder="全部平台" value={platform}
@@ -91,6 +91,7 @@ export function MessagePage() {
         options={[
           { value: 'BOSS', label: 'BOSS直聘' },
           { value: 'MAIMAI', label: '脉脉' },
+          { value: 'LIEPIN', label: '猎聘' },
         ]}
         onChange={(value) => {
           setPlatform(value)
@@ -154,8 +155,10 @@ export function MessagePage() {
                 ? '不发送简历'
                 : businessLabel(item.latest_draft_type)}
             </Tag>
-            {item.latest_draft_decision
-              && <Tag>{businessLabel(item.latest_draft_decision)}</Tag>}
+            {item.platform === 'LIEPIN'
+              ? <Tag>只读准备</Tag>
+              : item.latest_draft_decision
+                && <Tag>{businessLabel(item.latest_draft_decision)}</Tag>}
             <Tag>{item.latest_reply_source
               ? businessLabel(item.latest_reply_source)
               : '历史未记录来源'}</Tag>
@@ -163,7 +166,9 @@ export function MessagePage() {
           <span>{decisionContent(item)}</span>
         </Space> },
       { title: '简历发送', render: (_: unknown, item: ConversationSummary) =>
-        item.resume_action_status
+        item.platform === 'LIEPIN'
+          ? 'L3 尚未启用发送'
+          : item.resume_action_status
           ? `${item.resume_attachment_name ?? '-'} / ${
             businessLabel(item.resume_action_status)
           }` : '尚未创建发送动作' },

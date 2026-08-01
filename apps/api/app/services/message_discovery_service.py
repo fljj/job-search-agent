@@ -211,7 +211,7 @@ def persist_discovery_batch(
                 external_conversation_id=item.summary.external_conversation_id,
                 recruiter_name=item.summary.recruiter_name,
                 platform=batch.platform.value,
-                recruiter_role=_recruiter_role(item),
+                recruiter_role=_recruiter_role(item, job),
                 identity_reliable=(
                     item.summary.identity_reliable
                     and bool(item.detail.conversation and item.detail.conversation.identity_reliable)
@@ -607,7 +607,16 @@ def _starts_new_episode(
     )
 
 
-def _recruiter_role(item: DiscoveredConversation) -> str:
+def _recruiter_role(
+    item: DiscoveredConversation,
+    job: db.Job | None = None,
+) -> str:
+    if job is not None and job.recruiter_role != "UNKNOWN":
+        return job.recruiter_role
+    if item.job_detail and item.job_detail.job:
+        role = item.job_detail.job.recruiter_role
+        if role != "UNKNOWN":
+            return role
     title = "".join((item.summary.job_title or "").split())
     has_actual_job = bool(item.job_detail and item.job_detail.job)
     return "HEADHUNTER" if "猎头" in title and not has_actual_job else "DIRECT_EMPLOYER"
@@ -755,6 +764,7 @@ def _resolve_job(
                 description=source.description,
                 source_status=source.source_status,
                 source=batch.platform.value,
+                recruiter_role=source.recruiter_role,
             ),
         )
         return session.get(db.Job, imported.job.id)

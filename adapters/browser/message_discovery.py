@@ -3,7 +3,7 @@ import json
 import re
 import time
 from datetime import UTC, datetime
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, Field
@@ -201,7 +201,7 @@ class MessageDiscoveryAdapter:
             "if (expected.startsWith('derived:')) return recruiter === expectedRecruiter "
             "&& (!expectedJob || job === expectedJob); "
             "if (!raw) return false; if (!jsonKey) return raw === expected; "
-            "try { return String(JSON.parse(raw)[jsonKey]) === expected; } "
+            "try { return String(JSON.parse(decodeURIComponent(raw))[jsonKey]) === expected; } "
             "catch { return false; } }); "
             "if (matches.length !== 1 || matches[0].getClientRects().length === 0) return false; "
             "matches[0].click(); return true; })()"
@@ -383,7 +383,7 @@ class MessageDiscoveryAdapter:
                 or current is None
                 or current.hostname != expected.hostname
                 or current.path != expected.path
-                or "/job_detail/" not in current.path
+                or not _is_supported_job_detail_path(current.path)
             ):
                 return
             with urlopen(
@@ -516,8 +516,22 @@ def _verify_target(
 def _job_id_from_href(href: str | None) -> str | None:
     if not href:
         return None
-    match = re.search(r"/job_detail/([^/.]+)\.html", href)
-    return match.group(1) if match else None
+    parsed = urlparse(href)
+    query_job_id = parse_qs(parsed.query).get("job_id", [None])[0]
+    if query_job_id:
+        return query_job_id
+    boss_match = re.search(r"/job_detail/([^/.]+)\.html", parsed.path)
+    if boss_match:
+        return boss_match.group(1)
+    liepin_match = re.search(r"/(?:job|a)/([^/.]+)\.shtml", parsed.path)
+    return liepin_match.group(1) if liepin_match else None
+
+
+def _is_supported_job_detail_path(path: str) -> bool:
+    return bool(
+        re.search(r"/job_detail/[^/]+\.html$", path)
+        or re.search(r"/(?:job|a)/[^/]+\.shtml$", path)
+    )
 
 
 def _normalize_duplicate_conversation_ids(

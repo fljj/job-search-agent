@@ -276,14 +276,29 @@ def _extract_conversation_list(
         if selectors.conversation_list_requires_last_message_id and not last_message_id:
             diagnostics.append("REQUIRED_LAST_MESSAGE_ID_MISSING")
             continue
+        job_title = element.text(selectors.conversation_list_item_job_title)
+        company_name = element.text(selectors.conversation_list_item_company)
+        if (
+            selectors.conversation_list_item_job_title
+            == selectors.conversation_list_item_company
+            and selectors.conversation_company_separator
+            and company_name
+        ):
+            parts = [
+                part.strip()
+                for part in company_name.split(
+                    selectors.conversation_company_separator,
+                    1,
+                )
+            ]
+            company_name = parts[0]
+            job_title = parts[1] if len(parts) > 1 else None
         conversations.append(
             BrowserConversationSummary(
                 external_conversation_id=external_id,
                 recruiter_name=recruiter,
-                job_title=element.text(selectors.conversation_list_item_job_title),
-                company_name=_normalize_company_name(
-                    element.text(selectors.conversation_list_item_company)
-                ),
+                job_title=job_title,
+                company_name=_normalize_company_name(company_name),
                 external_job_id=element.attribute(
                     "", selectors.conversation_list_item_job_id_attribute
                 ),

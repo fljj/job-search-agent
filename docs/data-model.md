@@ -85,7 +85,9 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
 ### `generated_drafts`
 
 保存 `GREETING/REPLY/RESUME/MISMATCH_DECLINE` 草稿、内容、事实 ID、输入指纹、版本、决策和
-`RULE_TEMPLATE/KNOWLEDGE_BASE/LLM/HUMAN` 回复来源。相同有效输入不得重复生成草稿。
+`RULE_TEMPLATE/KNOWLEDGE_BASE/LLM/HUMAN` 回复来源。`dispatch_enabled` 是持久化派发边界：
+猎聘 L3 只读流程生成的草稿固定为 `false`，不能在当前或未来阶段进入动作队列；历史数据迁移
+默认保持 `true`。相同有效输入不得重复生成草稿。
 
 ## 5. 决策、动作和审计
 

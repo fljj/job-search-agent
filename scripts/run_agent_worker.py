@@ -19,6 +19,10 @@ from adapters.browser.job_discovery import (
     BossJobDiscoveryAdapter,
 )
 from adapters.browser.liepin_job_discovery import LiepinJobDiscoveryAdapter
+from adapters.browser.liepin_message_discovery import (
+    LiepinHomeRestoreError,
+    LiepinMessageDiscoveryAdapter,
+)
 from adapters.browser.message_discovery import (
     BossMessageDiscoveryAdapter,
     MaimaiMessageDiscoveryAdapter,
@@ -141,6 +145,8 @@ def _discover_messages(
     cdp_url: str,
     adapter: MessageDiscoveryAdapter,
     executor: ActionExecutor | None = None,
+    *,
+    execute_external_actions: bool = True,
 ) -> bool:
     raw_cursor = (run.cursor or {}).get("message_discovery")
     cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
@@ -207,6 +213,9 @@ def _discover_messages(
         record_platform_session_failure(
             session, run, "MESSAGE_DISCOVERY_UNAVAILABLE"
         )
+        if isinstance(exc, LiepinHomeRestoreError):
+            pause_run(session, run.id, ["MESSAGE_DISCOVERY_UNAVAILABLE"])
+            return False
         if isinstance(adapter, BossMessageDiscoveryAdapter):
             try:
                 reopened = adapter.ensure_list_page(cdp_url)
@@ -254,7 +263,7 @@ def _discover_messages(
     counts = persist_discovery_batch(session, run, worker_id, batch)
     consent_statuses = (
         execute_pending_platform_consents(session, run, cdp_url, executor)
-        if executor is not None
+        if executor is not None and execute_external_actions
         else []
     )
     inbound_score_status = "SKIPPED"
@@ -550,12 +559,15 @@ def _tick_and_log(
     run: db.AgentRun,
     worker_id: str,
     executor: ActionExecutor,
+    *,
+    execute_external_actions: bool = True,
 ) -> None:
     result = tick_run(
         session,
         run.id,
         worker_id,
         executor=executor,
+        execute_external_actions=execute_external_actions,
     )
     runtime_event(
         logger,
@@ -640,8 +652,31 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     continue
                 elif run.platform == Platform.LIEPIN.value:
                     run.executor_type = executor_type
-                    record_ready_platform_session(session, run, cdp_url)
-                    session.commit()
+                    message_adapter = LiepinMessageDiscoveryAdapter(
+                        get_browser_selectors()
+                    )
+                    if not _discover_messages(
+                        session,
+                        run,
+                        worker_id,
+                        cdp_url,
+                        message_adapter,
+                        executor,
+                        execute_external_actions=False,
+                    ):
+                        continue
+                    _tick_and_log(
+                        session,
+                        run,
+                        worker_id,
+                        executor,
+                        execute_external_actions=False,
+                    )
+                    if (
+                        run.status != "RUNNING"
+                        or not message_adapter.home_ready_for_job_discovery
+                    ):
+                        continue
                     rules = _effective_rules(
                         session, run.platform, run.strategy_id
                     )

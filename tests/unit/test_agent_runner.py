@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from adapters.browser.fake_actions import FakeActionExecutor
 from adapters.browser.job_discovery import DiscoveredJob, JobDiscoveryBatch
+from adapters.browser.liepin_message_discovery import (
+    LiepinHomeRestoreError,
+    LiepinMessageDiscoveryAdapter,
+)
 from adapters.browser.message_discovery import (
     BossMessageDiscoveryAdapter,
     MessageDiscoveryAdapter,
@@ -20,6 +24,10 @@ from adapters.browser.read_only_actions import ReadOnlyActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import Settings
 from apps.api.app.models import entities as db
+from apps.api.app.services.agent_service import (
+    _disable_message_draft_dispatch,
+    tick_run,
+)
 from packages.browser_worker.actions import (
     ApprovedCommand,
     ExecutionOutcome,
@@ -273,6 +281,37 @@ def test_liepin_job_discovery_forces_read_only_batch_processing(
     )
 
 
+def test_liepin_tick_rejects_external_action_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = db.AgentRun(id=uuid4(), platform="LIEPIN")
+    monkeypatch.setattr(
+        "apps.api.app.services.agent_service._get_run",
+        lambda *_args: run,
+    )
+
+    with pytest.raises(ValueError, match="猎聘 L3 只允许生成草稿"):
+        tick_run(
+            MagicMock(spec=Session),
+            run.id,
+            "worker-1",
+            executor=ReadOnlyActionExecutor(),
+        )
+
+
+def test_liepin_prepare_mode_persists_draft_dispatch_guard() -> None:
+    session = MagicMock(spec=Session)
+    message_id = uuid4()
+
+    _disable_message_draft_dispatch(session, message_id)
+
+    statement = session.execute.call_args.args[0]
+    assert "generated_drafts" in str(statement)
+    assert "dispatch_enabled" in str(statement)
+    assert statement.compile().params["message_id_1"] == message_id
+    assert statement.compile().params["dispatch_enabled"] is False
+
+
 def test_only_one_worker_can_hold_process_lock(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -380,6 +419,107 @@ def test_message_discovery_reuses_platform_cursor(
         )
     assert persisted == [batch]
     assert "message_discovery_health" not in (run.cursor or {})
+
+
+def test_liepin_message_discovery_scores_but_never_executes_consents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    session.scalars.return_value.all.return_value = []
+    session.execute.return_value.all.return_value = []
+    run = db.AgentRun(
+        id=uuid4(),
+        strategy_id=uuid4(),
+        platform="LIEPIN",
+        cursor={},
+    )
+    adapter = MagicMock(spec=MessageDiscoveryAdapter)
+    adapter.scan.return_value = MessageDiscoveryBatch(
+        platform=Platform.LIEPIN,
+        partition="ALL",
+        scroll_position=0,
+        scanned_at=datetime.now(UTC),
+    )
+    consents = MagicMock()
+    score = MagicMock(return_value="NONE")
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.record_ready_platform_session",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.persist_discovery_batch",
+        lambda *_args: {"imported": 0, "paused": 0},
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.execute_pending_platform_consents",
+        consents,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.process_next_inbound_job_score",
+        score,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.llm_circuit_is_open", lambda *_args: False
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.build_runtime_llm_provider", MagicMock()
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_settings",
+        lambda: MagicMock(agent_tick_batch_size=10),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.runtime_event", lambda *_args, **_kwargs: None
+    )
+
+    assert _discover_messages(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        adapter,
+        ReadOnlyActionExecutor(),
+        execute_external_actions=False,
+    )
+    consents.assert_not_called()
+    score.assert_called_once()
+
+
+def test_liepin_home_restore_failure_pauses_run_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    session.scalars.return_value.all.return_value = []
+    session.execute.return_value.all.return_value = []
+    run = db.AgentRun(id=uuid4(), platform="LIEPIN", cursor={})
+    adapter = LiepinMessageDiscoveryAdapter(get_browser_selectors())
+    monkeypatch.setattr(
+        adapter,
+        "scan",
+        MagicMock(side_effect=LiepinHomeRestoreError("无法恢复首页")),
+    )
+    record_failure = MagicMock()
+    pause = MagicMock()
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.record_platform_session_failure",
+        record_failure,
+    )
+    monkeypatch.setattr("scripts.run_agent_worker.pause_run", pause)
+
+    assert not _discover_messages(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        adapter,
+        execute_external_actions=False,
+    )
+    record_failure.assert_called_once_with(
+        session, run, "MESSAGE_DISCOVERY_UNAVAILABLE"
+    )
+    pause.assert_called_once_with(
+        session, run.id, ["MESSAGE_DISCOVERY_UNAVAILABLE"]
+    )
 
 
 def test_message_discovery_pauses_only_after_consecutive_failures(
