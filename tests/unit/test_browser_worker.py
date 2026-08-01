@@ -355,6 +355,16 @@ def test_invalid_message_time_skips_only_invalid_message() -> None:
     assert result.conversation and result.conversation.messages == []
 
 
+def test_job_recruiter_name_excludes_activity_status() -> None:
+    page, selectors = job_page(Platform.BOSS)
+    page.texts[selectors.recruiter_on_job] = "付女士\n\n今日活跃"
+
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+
+    assert result.job is not None
+    assert result.job.recruiter_name == "付女士"
+
+
 @pytest.mark.parametrize(
     ("visible_extra", "expected", "reason"),
     [

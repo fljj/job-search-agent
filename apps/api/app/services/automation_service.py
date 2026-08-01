@@ -354,6 +354,10 @@ def dispatch_proactive_greeting(
             existing.status == ActionStatus.FAILED_RETRYABLE.value
             and existing.failure_code in PREWRITE_RETRYABLE_FAILURES
         ):
+            # 重试前使用本轮重新读取并核验过的职位事实，避免沿用旧页面中的状态文本。
+            existing.target_company = job.company_name
+            existing.target_job_title = job.title
+            existing.target_recruiter = recruiter_name
             approve_retry(session, existing.id)
             result = execute_action(session, existing.id, cdp_url, executor)
             return {

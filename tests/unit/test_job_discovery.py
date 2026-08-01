@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -23,6 +24,7 @@ from apps.api.app.services.automation_service import _proactive_safety_gaps
 from apps.api.app.services.job_discovery_service import (
     _is_prewrite_retryable,
     _job_safety_reasons,
+    _prewrite_retry_action,
     _release_deferred_seen_ids,
     _schedule_retry,
     job_scan_block_reasons,
@@ -690,6 +692,17 @@ def test_only_prewrite_failure_allows_greeting_retry() -> None:
 
     assert _is_prewrite_retryable(retryable)  # type: ignore[arg-type]
     assert not _is_prewrite_retryable(unknown)  # type: ignore[arg-type]
+
+
+def test_prewrite_greeting_retry_reuses_existing_action() -> None:
+    action = SimpleNamespace(
+        status="FAILED_RETRYABLE",
+        failure_code="APPROVED_TARGET_PAGE_NOT_FOUND",
+    )
+    session = MagicMock()
+    session.scalar.return_value = action
+
+    assert _prewrite_retry_action(session, uuid4()) is action  # type: ignore[arg-type]
 
 
 def test_missing_retry_target_advances_backoff(

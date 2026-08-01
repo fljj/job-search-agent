@@ -181,11 +181,23 @@ def _extract_job(
         location=location,
         work_mode=work_mode,
         salary_text=page.text(selectors.salary),
-        recruiter_name=page.text(selectors.recruiter_on_job),
+        recruiter_name=_normalize_recruiter_name(page.text(selectors.recruiter_on_job)),
         description=description,
         source_status=source_status,
     )
     return _success(page, platform, version, PageType.JOB, job=job)
+
+
+def _normalize_recruiter_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = " ".join(value.split())
+    normalized = re.sub(
+        r"\s*(?:刚刚|今日|本周|本月|\d+日内)?活跃$",
+        "",
+        normalized,
+    ).strip()
+    return normalized or None
 
 
 def _extract_conversation_list(

@@ -162,14 +162,6 @@ class BossJobDiscoveryAdapter:
                     )
                 else:
                     opened = self._open_detail(cdp_url, page, summary)
-                    if opened.detail_target_id and opened.detail_target_url:
-                        self._close_target(
-                            cdp_url,
-                            opened.detail_target_id,
-                            opened.detail_target_url,
-                        )
-                        opened.detail_target_id = None
-                        opened.detail_target_url = None
                     items.append(opened)
             page._evaluate(
                 "(() => { const element = document.querySelector("

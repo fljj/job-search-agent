@@ -95,6 +95,9 @@ def process_job_discovery_batch(
                 break
             continue
         source = item.detail.job
+        record.company_name = source.company_name
+        record.job_title = source.title
+        record.recruiter_name = source.recruiter_name
         record.prefilter_state = "RELEVANT"
         record.prefilter_reason = "DETAIL_OBSERVED"
         safety = _job_safety_reasons(source)
@@ -141,37 +144,41 @@ def process_job_discovery_batch(
             counts["skipped"] += 1
             continue
         try:
-            _state_event(session, run, item, "PARSING")
-            _state_event(session, run, item, "SCORING")
-            score = create_score(
-                session,
-                job.id,
-                ScoreRequest(
-                    strategy_id=run.strategy_id,
-                    candidate_profile_id=strategy.candidate_profile_id,
-                ),
-                provider=provider,
-            )
-            record.job_score_id = score.id
-            if score.hard_rejected:
-                _finish(
-                    record,
-                    "SKIPPED",
-                    [
-                        item.rule_code
-                        for item in score.rejection_reasons
-                    ] or ["HARD_FILTERED"],
+            retry_action = _prewrite_retry_action(session, job.id)
+            if retry_action is not None and retry_action.draft_id is not None:
+                draft_id = retry_action.draft_id
+            else:
+                _state_event(session, run, item, "PARSING")
+                _state_event(session, run, item, "SCORING")
+                score = create_score(
+                    session,
+                    job.id,
+                    ScoreRequest(
+                        strategy_id=run.strategy_id,
+                        candidate_profile_id=strategy.candidate_profile_id,
+                    ),
+                    provider=provider,
                 )
-                counts["skipped"] += 1
-                continue
-            counts["scored"] += 1
-            draft = create_greeting_draft(session, score.id, provider)
+                record.job_score_id = score.id
+                if score.hard_rejected:
+                    _finish(
+                        record,
+                        "SKIPPED",
+                        [
+                            item.rule_code
+                            for item in score.rejection_reasons
+                        ] or ["HARD_FILTERED"],
+                    )
+                    counts["skipped"] += 1
+                    continue
+                counts["scored"] += 1
+                draft_id = create_greeting_draft(session, score.id, provider).id
             _state_event(session, run, item, "AUTHORIZING")
             _state_event(session, run, item, "CONTACTING")
             result = dispatch_proactive_greeting(
                 session,
                 job.id,
-                draft.id,
+                draft_id,
                 source.recruiter_name or "",
                 cdp_url,
                 executor=executor,
@@ -372,6 +379,18 @@ def _duplicate_reason(session: Session, job: db.Job) -> str | None:
         if SequenceMatcher(None, other.description, job.description).ratio() >= 0.90:
             return "SIMILAR_JD_ALREADY_CONTACTED"
     return None
+
+
+def _prewrite_retry_action(
+    session: Session, job_id: UUID
+) -> db.ActionQueue | None:
+    action = session.scalar(
+        select(db.ActionQueue).where(
+            db.ActionQueue.action_type == ActionType.GREETING.value,
+            db.ActionQueue.job_id == job_id,
+        )
+    )
+    return action if action is not None and _is_prewrite_retryable(action) else None
 
 
 def _is_prewrite_retryable(action: db.ActionQueue) -> bool:

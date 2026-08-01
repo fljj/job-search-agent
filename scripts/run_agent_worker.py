@@ -460,16 +460,18 @@ def _run_boss_job_discovery(
         )
         pause_run(session, run.id, ["JOB_DISCOVERY_UNAVAILABLE"])
         return
-    # 详情已经完整快照到内存；在 LLM 等慢操作前立即释放 Agent 自建标签页。
-    adapter.close_details(cdp_url, job_batch)
-    process_job_discovery_batch(
-        session,
-        run,
-        job_batch,
-        provider=build_runtime_llm_provider(session),
-        executor=executor,
-        cdp_url=cdp_url,
-    )
+    # 主动招呼执行器需要再次核对当前详情页；处理完成后再释放 Agent 自建标签页。
+    try:
+        process_job_discovery_batch(
+            session,
+            run,
+            job_batch,
+            provider=build_runtime_llm_provider(session),
+            executor=executor,
+            cdp_url=cdp_url,
+        )
+    finally:
+        adapter.close_details(cdp_url, job_batch)
     if retry_record is not None and not job_batch.items:
         mark_retry_target_not_visible(session, retry_record)
     runtime_event(

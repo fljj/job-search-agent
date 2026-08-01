@@ -115,6 +115,8 @@ def test_invisible_retry_target_falls_back_to_normal_job_batch(
     session.get.return_value = MagicMock(title_rules=[])
     marked: list[object] = []
     processed: list[JobDiscoveryBatch] = []
+    lifecycle: list[str] = []
+    adapter.close_details.side_effect = lambda *_: lifecycle.append("closed")
     monkeypatch.setattr(
         "scripts.run_agent_worker.BossJobDiscoveryAdapter",
         lambda _config: adapter,
@@ -128,7 +130,9 @@ def test_invisible_retry_target_falls_back_to_normal_job_batch(
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.process_job_discovery_batch",
-        lambda _session, _run, batch, **_kwargs: processed.append(batch),
+        lambda _session, _run, batch, **_kwargs: (
+            processed.append(batch), lifecycle.append("processed")
+        ),
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.get_settings",
@@ -157,6 +161,7 @@ def test_invisible_retry_target_falls_back_to_normal_job_batch(
     assert adapter.scan.call_args_list[1].kwargs["target_job_ids"] is None
     assert adapter.scan.call_args_list[1].kwargs["limit"] == 5
     assert processed == [normal]
+    assert lifecycle == ["processed", "closed"]
 
 
 def test_fake_executor_is_offline_and_records_commands() -> None:
