@@ -1,7 +1,6 @@
 """单实例短轮询 Worker；真实平台使用本机 CDP，MOCK 保持离线执行。"""
 
 import fcntl
-import hashlib
 import logging
 import os
 import signal
@@ -18,10 +17,6 @@ from sqlalchemy.orm import Session
 from adapters.browser.fake_actions import FakeActionExecutor
 from adapters.browser.job_discovery import (
     BossJobDiscoveryAdapter,
-    DiscoveredJob,
-    JobDiscoveryBatch,
-    JobPrefilterState,
-    classify_job_title,
 )
 from adapters.browser.message_discovery import (
     BossMessageDiscoveryAdapter,
@@ -29,14 +24,12 @@ from adapters.browser.message_discovery import (
     MessageDiscoveryAdapter,
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
-from adapters.browser.telegram_jobs import TelegramJobDiscoveryAdapter
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings, reload_settings
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.core.job_parser_config import get_job_parser_config
 from apps.api.app.core.recommendation_config import get_recommendation_rules
-from apps.api.app.core.telegram_config import get_telegram_policy
 from apps.api.app.models import entities as db
 from apps.api.app.services.action_service import recover_stale_executing_actions
 from apps.api.app.services.agent_service import pause_run, tick_run
@@ -78,7 +71,7 @@ from apps.api.app.services.recommendation_service import (
 from packages.audit.redaction import install_redacting_filter
 from packages.audit.runtime_logging import configure_runtime_logging, runtime_event
 from packages.browser_worker.actions import ActionExecutor
-from packages.browser_worker.models import PageType, Platform, ReadResult, SessionStatus
+from packages.browser_worker.models import Platform
 
 logger = logging.getLogger(__name__)
 LOCK_PATH = "/tmp/job-search-agent-worker.lock"
@@ -124,7 +117,6 @@ def _build_executor(platform: str, mode: str) -> tuple[ActionExecutor, str]:
     if platform in {
         Platform.BOSS.value,
         Platform.MAIMAI.value,
-        Platform.TELEGRAM.value,
     }:
         if mode != "REAL":
             raise ValueError("真实招聘平台正式运行禁止使用 Fake 执行器")
@@ -483,128 +475,6 @@ def _run_boss_job_discovery(
     )
 
 
-def _run_telegram_job_discovery(
-    session: Session,
-    run: db.AgentRun,
-    worker_id: str,
-    cdp_url: str,
-    executor: ActionExecutor,
-    rules: object,
-) -> None:
-    from datetime import timedelta
-
-    policy = get_telegram_policy()
-    raw_cursor = (run.cursor or {}).get("job_discovery")
-    cursor = raw_cursor if isinstance(raw_cursor, dict) else {}
-    raw_seen = cursor.get("seen_job_ids")
-    seen_post_ids = [str(item) for item in (raw_seen if isinstance(raw_seen, list) else [])]
-    retry_record = next_retryable_job(session, run)
-    retryable_ids = (
-        {retry_record.external_job_id} if retry_record is not None else set()
-    )
-    adapter = TelegramJobDiscoveryAdapter(policy)
-    try:
-        discovered = adapter.scan(
-            cdp_url,
-            seen_post_ids=[item for item in seen_post_ids if item not in retryable_ids],
-        )
-    except (OSError, TimeoutError, ValueError) as exc:
-        record_platform_session_failure(
-            session, run, "TELEGRAM_DISCOVERY_UNAVAILABLE"
-        )
-        runtime_event(
-            logger,
-            "TELEGRAM_DISCOVERY_FAILED",
-            worker_id=worker_id,
-            run_id=run.id,
-            error_type=type(exc).__name__,
-            error_message=str(exc),
-        )
-        pause_run(session, run.id, ["TELEGRAM_DISCOVERY_UNAVAILABLE"])
-        return
-    record_ready_platform_session(session, run, cdp_url)
-    parser_config = get_job_parser_config()
-    irrelevant = parser_config.irrelevant_title_keywords
-    strategy = session.get(db.JobStrategy, run.strategy_id)
-    relevant = (
-        [
-            rule.pattern
-            for rule in strategy.title_rules
-            if rule.rule_type == "INCLUDE"
-        ]
-        if strategy is not None
-        else []
-    )
-    items: list[DiscoveredJob] = []
-    for post in discovered.posts:
-        prefilter = classify_job_title(
-            post.job.title,
-            direction_keywords=[*parser_config.relevant_title_keywords, *relevant],
-            irrelevant_keywords=irrelevant,
-            relevant_keywords=relevant,
-        )
-        reasons = (
-            ["TITLE_STRONGLY_IRRELEVANT"]
-            if prefilter is JobPrefilterState.IRRELEVANT
-            else []
-        )
-        items.append(
-            DiscoveredJob(
-                summary={
-                    "external_job_id": str(post.job.external_job_id),
-                    "title": post.job.title,
-                    "company_name": post.job.company_name,
-                },
-                detail=(
-                    None
-                    if reasons
-                    else ReadResult(
-                        platform=Platform.TELEGRAM,
-                        status=SessionStatus.SESSION_READY,
-                        page_type=PageType.JOB,
-                        page_url=(f"https://web.telegram.org/a/#{post.channel_id}"),
-                        page_title=post.channel_name,
-                        content_hash=hashlib.sha256(post.job.description.encode()).hexdigest(),
-                        selector_version="telegram-web-a-v1",
-                        job=post.job,
-                    )
-                ),
-                reason_codes=reasons,
-            )
-        )
-    now = datetime.now(UTC)
-    batch = JobDiscoveryBatch(
-        platform=Platform.TELEGRAM,
-        search_key="TELEGRAM_CHANNELS",
-        scroll_position=len(discovered.seen_post_ids),
-        scanned_at=now,
-        next_scan_at=now + timedelta(seconds=60),
-        items=items,
-        seen_job_ids=discovered.seen_post_ids,
-        exhausted=True,
-    )
-    counts = process_job_discovery_batch(
-        session,
-        run,
-        batch,
-        provider=build_runtime_llm_provider(session),
-        executor=executor,
-        cdp_url=cdp_url,
-    )
-    if retry_record is not None and not any(
-        item.summary.external_job_id == retry_record.external_job_id
-        for item in items
-    ):
-        mark_retry_target_not_visible(session, retry_record, now=now)
-    runtime_event(
-        logger,
-        "TELEGRAM_JOB_SCAN_COMPLETED",
-        worker_id=worker_id,
-        run_id=run.id,
-        **counts,
-    )
-
-
 def _tick_and_log(
     session: Session,
     run: db.AgentRun,
@@ -715,26 +585,6 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                         session, run, worker_id, cdp_url, executor
                     ):
                         continue
-                elif run.platform == Platform.TELEGRAM.value:
-                    rules = _effective_rules(session, run.platform, run.strategy_id)
-                    scan_blockers = job_scan_block_reasons(session, run, rules, datetime.now(UTC))
-                    if scan_blockers:
-                        runtime_event(
-                            logger,
-                            "TELEGRAM_JOB_SCAN_SKIPPED",
-                            worker_id=worker_id,
-                            run_id=run_id,
-                            reason_codes=scan_blockers,
-                        )
-                    else:
-                        _run_telegram_job_discovery(
-                            session,
-                            run,
-                            worker_id,
-                            cdp_url,
-                            executor,
-                            rules,
-                        )
                 run.executor_type = executor_type
                 session.commit()
                 _tick_and_log(session, run, worker_id, executor)

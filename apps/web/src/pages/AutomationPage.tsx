@@ -203,7 +203,6 @@ export function AutomationPage() {
       <Space wrap style={{ marginBottom: 16 }}>
         <Select value={platform} onChange={setPlatform} options={[
           { value: 'BOSS', label: 'BOSS' }, { value: 'MAIMAI', label: '脉脉' },
-          { value: 'TELEGRAM', label: 'Telegram' },
           { value: 'MOCK', label: '本地模拟' },
         ]} />
         <Select style={{ width: 360 }} value={strategyId || undefined} onChange={setStrategyId}

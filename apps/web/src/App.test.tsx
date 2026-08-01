@@ -88,10 +88,9 @@ describe('总览平台运行聚合', () => {
     const runs = [
       run('BOSS', 'RUNNING', 0),
       run('MAIMAI', 'RUNNING', 0),
-      run('TELEGRAM', 'RUNNING', 0),
     ]
 
-    expect(agentStatusText(runs, false)).toBe('Worker 未运行（3 个平台已启用）')
+    expect(agentStatusText(runs, false)).toBe('Worker 未运行（2 个平台已启用）')
     expect(runStatusText(runs[0], false)).toBe('已启用，等待 Worker')
   })
 })

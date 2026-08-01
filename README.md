@@ -1,6 +1,6 @@
 # job-search-agent
 
-面向 BOSS 直聘、脉脉和白名单 Telegram 招聘频道的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
+面向 BOSS 直聘和脉脉的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
 消息，并按规则发送网站内已有简历；电话和面试的具体时间、登录验证、验证码及安全异常
 仍由用户处理。
 
@@ -28,7 +28,7 @@
   “面试确认”页面处理。总览分别统计两类未过期任务。
 
 API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
-状态的平台任务，不需要为 BOSS、脉脉和 Telegram 分别启动 Worker。
+状态的平台任务，不需要为 BOSS 和脉脉分别启动 Worker。
 
 ## 2. 环境要求
 
@@ -287,7 +287,7 @@ BOSS 和脉脉 Run 启用后直接按“系统设置”中的正式自动化配�
 具体推荐规则见
 [config/recommendation-policy.json](config/recommendation-policy.json)。
 
-### 6.3 创建 BOSS、脉脉和 Telegram Run
+### 6.3 创建 BOSS 和脉脉 Run
 
 在“系统设置”底部的“Agent 运行”区域：
 
@@ -295,13 +295,6 @@ BOSS 和脉脉 Run 启用后直接按“系统设置”中的正式自动化配�
 2. 选择已经启用的求职策略。
 3. 点击“启动”。
 4. 再选择平台 `MAIMAI`，使用同一策略点击“启动”。
-5. 登录 Telegram Web A 后，再选择 `TELEGRAM`，使用同一策略点击“启动”。
-
-Telegram 使用同一个 Agent 专用 Chrome，并要求只保留一个
-`https://web.telegram.org/a/` 标签页。系统只扫描
-`config/telegram-policy.json` 中的频道；帖子复用现有求职策略评分，只有 80 分以上且
-明确提供 Telegram 联系人的职位才允许私聊。联系人必须通过 Telegram 全局搜索精确匹配；
-模型限流等暂时性失败按配置延迟重试，不会绕过评分直接发送。
 
 平台显示 `RUNNING` 只表示数据库任务已经启动；必须继续启动 Worker 才会实际扫描页面。
 
@@ -368,7 +361,6 @@ API 和前端用于控制及观察；Worker 才负责持续读取招聘平台和
 | `RUNNING` | 平台 Run 正常轮询 | 无需处理 |
 | `PAUSED (MESSAGE_DISCOVERY_UNAVAILABLE)` | 消息页关闭或暂时无法识别 | 重新打开唯一消息页，点击“重新连接” |
 | `PAUSED (JOB_DISCOVERY_UNAVAILABLE)` | BOSS 职位页关闭或无法识别 | 重新打开唯一职位页，点击“重新连接” |
-| `PAUSED (TELEGRAM_DISCOVERY_UNAVAILABLE)` | Telegram Web A 页面或白名单频道暂时无法识别 | 保留唯一 Telegram Web A 页面，点击“重新连接” |
 | `PAUSED (RESULT_NOT_OBSERVED)` | 写操作结果未能即时回读，平台已安全暂停 | 先执行对账；未知动作清零后点击“重新连接” |
 | `STALE` | Worker 心跳超时 | 检查 Worker 终端，确认旧进程停止后重新启动 |
 | `OUTCOME_UNKNOWN` | 无法确认一次写操作是否成功 | 不要直接重试，先在系统设置执行对账 |

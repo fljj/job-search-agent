@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 class Platform(StrEnum):
     BOSS = "BOSS"
     MAIMAI = "MAIMAI"
-    TELEGRAM = "TELEGRAM"
 
 
 class SessionStatus(StrEnum):

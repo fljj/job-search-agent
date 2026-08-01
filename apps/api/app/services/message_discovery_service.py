@@ -728,8 +728,6 @@ def _page_role(platform: str, url: str) -> str | None:
             return "JOB_LIST"
     if platform == "MAIMAI" and "feed_im" in path:
         return "MESSAGE_LIST"
-    if platform == "TELEGRAM" and url.startswith("https://web.telegram.org/"):
-        return "CHANNEL_LIST"
     return None
 
 

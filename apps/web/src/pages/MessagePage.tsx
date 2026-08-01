@@ -91,7 +91,6 @@ export function MessagePage() {
         options={[
           { value: 'BOSS', label: 'BOSS直聘' },
           { value: 'MAIMAI', label: '脉脉' },
-          { value: 'TELEGRAM', label: 'Telegram' },
         ]}
         onChange={(value) => {
           setPlatform(value)
