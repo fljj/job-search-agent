@@ -24,6 +24,7 @@ PRESERVED_TABLES = {
     "knowledge_items",
     "resumes",
     "automation_settings",
+    "llm_runtime_settings",
     "scheduling_preferences",
 }
 

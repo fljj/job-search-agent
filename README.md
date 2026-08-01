@@ -448,7 +448,8 @@ RESTORE_DATABASE_URL='postgresql+psycopg://.../job_agent_restore_test' \
 [`docs/database-operations.md`](docs/database-operations.md)。生产/真实数据迁移只向前执行；
 失败时从已验证备份恢复到独立数据库并切换连接，不在原库盲目执行 `alembic downgrade`。
 
-清理运行历史会删除职位、评分、会话、动作、审计和排期数据。先预览，确认目标后才执行：
+清理运行历史会删除职位、评分、会话、动作、审计、Worker 状态和排期数据；候选人资料、
+求职策略、知识库、简历、自动化设置、LLM 模型选择及日历偏好会保留。先预览，确认目标后才执行：
 
 ```bash
 python scripts/reset_runtime_data.py --confirm-database job_agent
