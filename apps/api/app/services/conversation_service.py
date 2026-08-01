@@ -474,10 +474,7 @@ def create_reply_draft(
         and conversation.job_id
         and llm_provider is not None
     ):
-        try:
-            score = _bind_current_score(session, conversation, llm_provider)
-        except LlmProviderError:
-            score = None
+        score = _bind_current_score(session, conversation, llm_provider)
     draft_type = "REPLY"
     fingerprint = _fingerprint(
         draft_type,
@@ -494,7 +491,7 @@ def create_reply_draft(
     if llm_provider is None:
         raise LlmConfigurationError("当前消息需要大模型，但模型暂不可用")
     if score is None:
-        raise LlmConfigurationError("当前消息缺少可用于大模型回复的职位评分")
+        raise ValueError("当前消息缺少可用于大模型回复的职位评分")
     result = _build_scored_reply(
         session,
         conversation,
