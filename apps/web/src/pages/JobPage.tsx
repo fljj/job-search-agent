@@ -126,7 +126,7 @@ export function JobPage() {
         setPage(1)
         void load(1, pageSize)
       }}>筛选</Button>
-    </Space><Table rowKey="id" dataSource={jobs} loading={loading}
+    </Space><Table rowKey="id" dataSource={jobs} loading={loading} scroll={{ x: 1500 }}
       pagination={{
         current: page,
         pageSize,
@@ -144,7 +144,8 @@ export function JobPage() {
       columns={[
       { title: '平台', dataIndex: 'source', width: 100,
         render: (source: string) => <Tag>{platformLabels[source] ?? source}</Tag> },
-      { title: '职位', dataIndex: 'title' }, { title: '公司', dataIndex: 'company_name' },
+      { title: '职位', dataIndex: 'title', width: 260, ellipsis: true },
+      { title: '公司', dataIndex: 'company_name', width: 220, ellipsis: true },
       { title: '模式', dataIndex: 'work_mode', render: (mode: string) => <Tag>{mode}</Tag> },
       { title: '地点', dataIndex: 'location' },
       { title: '薪资', dataIndex: 'salary_text', render: (value?: string) => value ?? '-' },
