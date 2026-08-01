@@ -22,6 +22,7 @@ const labels: Record<string, string> = {
   PROHIBITED_OR_FRAUD_DIRECTION: '岗位疑似违规、欺诈或明确不接受',
   COMPANY_BLACKLISTED: '公司在黑名单中', INDUSTRY_EXCLUDED: '行业属于排除范围',
   WORK_MODE_CONFLICT: '工作模式不符合要求', LOCATION_CONFLICT: '工作地点不符合要求',
+  WORK_MODE_UNKNOWN: '办公方式尚未明确',
   SALARY_CONFLICT: '薪资低于要求', JOB_DIRECTION_CONFLICT: '岗位方向不符合求职方向',
   JOB_DIRECTION_UNKNOWN: '岗位方向信息不足',
   FULL_JOB_CONTEXT_AVAILABLE: '岗位信息充分且符合策略',

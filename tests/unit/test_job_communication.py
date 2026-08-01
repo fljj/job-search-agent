@@ -2,7 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from apps.api.app.services.job_service import _communication_summary
+from apps.api.app.services.job_service import (
+    _build_communication_summary,
+    _communication_summary,
+)
 
 
 def test_job_communication_exposes_retryable_greeting_failure() -> None:
@@ -51,3 +54,15 @@ def test_job_communication_links_existing_conversation() -> None:
 
     assert result["status"] == "CONVERSATION_ACTIVE"
     assert result["conversation_id"] == conversation_id
+
+
+def test_skipped_discovery_is_not_presented_as_ready_to_contact() -> None:
+    result = _build_communication_summary(
+        SimpleNamespace(automation_eligible=True),
+        None,
+        None,
+        SimpleNamespace(status="SKIPPED", reason_codes=["WORK_MODE_UNKNOWN"]),
+    )
+
+    assert result["status"] == "NOT_CONTACTED"
+    assert result["reason_codes"] == ["WORK_MODE_UNKNOWN"]

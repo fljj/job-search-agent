@@ -19,6 +19,7 @@ from adapters.browser.job_discovery import (
     verify_job_target,
 )
 from apps.api.app.core.config import Settings
+from apps.api.app.services.automation_service import _proactive_safety_gaps
 from apps.api.app.services.job_discovery_service import (
     _is_prewrite_retryable,
     _job_safety_reasons,
@@ -534,6 +535,16 @@ def test_unknown_work_mode_does_not_skip_scoring_preflight() -> None:
     assert job is not None
     job.work_mode = "UNKNOWN"
     assert "WORK_MODE_UNKNOWN" not in _job_safety_reasons(job)
+
+
+def test_unknown_work_mode_can_be_confirmed_by_proactive_greeting() -> None:
+    job = SimpleNamespace(
+        company_name="示例公司",
+        work_mode="UNKNOWN",
+        external_job_id="job-1",
+    )
+
+    assert _proactive_safety_gaps(job, "招聘人") == []
 
 
 def test_proactive_contact_allows_salary_to_be_confirmed_later() -> None:

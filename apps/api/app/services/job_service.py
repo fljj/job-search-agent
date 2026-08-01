@@ -507,6 +507,8 @@ def _build_communication_summary(
         status = "GREETING_IN_PROGRESS"
     elif action is not None:
         status = "GREETING_FAILED"
+    elif record is not None and record.status == "SKIPPED":
+        status = "NOT_CONTACTED"
     elif latest_score is not None and latest_score.automation_eligible:
         status = "READY_TO_CONTACT"
     else:
