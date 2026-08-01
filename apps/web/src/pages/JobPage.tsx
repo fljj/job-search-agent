@@ -21,6 +21,10 @@ interface ScoreResult {
 }
 interface JobListResult { items: Job[]; total: number }
 const DEFAULT_PAGE_SIZE = 20
+const platformLabels: Record<string, string> = {
+  BOSS: 'BOSS直聘',
+  LIEPIN: '猎聘',
+}
 
 const dimensionLabels: Record<string, string> = {
   title: '岗位方向',
@@ -138,6 +142,8 @@ export function JobPage() {
         void load(nextPage, nextPageSize)
       }}
       columns={[
+      { title: '平台', dataIndex: 'source', width: 100,
+        render: (source: string) => <Tag>{platformLabels[source] ?? source}</Tag> },
       { title: '职位', dataIndex: 'title' }, { title: '公司', dataIndex: 'company_name' },
       { title: '模式', dataIndex: 'work_mode', render: (mode: string) => <Tag>{mode}</Tag> },
       { title: '地点', dataIndex: 'location' },

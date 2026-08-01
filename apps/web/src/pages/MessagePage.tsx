@@ -98,7 +98,7 @@ export function MessagePage() {
           void load(1, pageSize, value)
         }} />
     </Space>
-    <Table rowKey="id" dataSource={items} loading={loading}
+    <Table rowKey="id" dataSource={items} loading={loading} scroll={{ x: 1600 }}
       pagination={{
         current: page,
         pageSize,
@@ -162,7 +162,8 @@ export function MessagePage() {
           </Space>}
           <span>{decisionContent(item)}</span>
         </Space> },
-      { title: '简历发送', render: (_: unknown, item: ConversationSummary) =>
+      { title: '简历发送', width: 280, ellipsis: true,
+        render: (_: unknown, item: ConversationSummary) =>
         item.resume_action_status
           ? `${item.resume_attachment_name ?? '-'} / ${
             businessLabel(item.resume_action_status)

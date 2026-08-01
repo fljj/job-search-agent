@@ -43,6 +43,7 @@ describe('JobPage', () => {
     render(<JobPage />)
 
     await screen.findByText('发送失败，等待重试')
+    expect(screen.getByText('BOSS直聘')).toBeTruthy()
     expect(screen.getByText('发送时没有找到对应职位页')).toBeTruthy()
     expect(screen.queryByText('查看对应消息')).toBeNull()
   })
