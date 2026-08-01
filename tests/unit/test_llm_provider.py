@@ -14,7 +14,6 @@ from adapters.llm.errors import (
 from adapters.llm.fake import FakeLlmProvider
 from adapters.llm.qwen import (
     PROMPTS,
-    QWEN_MAX_OUTPUT_TOKENS,
     QwenLlmProvider,
     _compact_scoring_input,
 )
@@ -80,7 +79,7 @@ def test_qwen_accepts_structured_json_and_code_fence(content: str) -> None:
     assert payload["stream"] is False
     assert payload["response_format"] == {"type": "json_object"}
     assert payload["enable_thinking"] is False
-    assert payload["max_tokens"] == 1024
+    assert "max_tokens" not in payload
     assert "tools" not in payload
 
 
@@ -117,21 +116,10 @@ def test_health_check_uses_one_minimal_request_without_business_schema() -> None
     qwen(transport).health_check()
 
     payload = cast(dict[str, object], transport.calls[0]["payload"])
-    assert payload["max_tokens"] == 1
+    assert "max_tokens" not in payload
     assert payload["enable_thinking"] is False
     assert "response_format" not in payload
     assert len(transport.calls) == 1
-
-
-def test_qwen_uses_task_specific_output_limit() -> None:
-    assert QWEN_MAX_OUTPUT_TOKENS == {
-        "parse_job": 3072,
-        "score_job": 6144,
-        "classify_message": 1024,
-        "generate_greeting": 2048,
-        "generate_reply": 2048,
-        "evaluate_conversation": 2048,
-    }
 
 
 @pytest.mark.parametrize("error", [LlmAuthenticationError("auth"), LlmInvalidResponseError("bad")])
@@ -190,7 +178,7 @@ def test_zhipu_disables_deep_thinking_for_structured_tasks() -> None:
     assert payload["thinking"] == {"type": "disabled"}
     assert payload["reasoning_effort"] == "none"
     assert payload["do_sample"] is False
-    assert payload["max_tokens"] == 4096
+    assert "max_tokens" not in payload
 
 
 def test_authorization_key_is_not_in_payload() -> None:
@@ -202,11 +190,11 @@ def test_authorization_key_is_not_in_payload() -> None:
 
 def test_score_prompt_lists_exact_evidence_contract() -> None:
     version, prompt = PROMPTS["score_job"]
-    assert version == "job-score-v9"
+    assert version == "job-score-v10"
     assert "title=15，skills=25" in prompt
     assert "industry=10，management=5" in prompt
     assert "total_score必须等于七项score之和" in prompt
-    assert "input.evidence_items中的id" in prompt
+    assert "input.evidence_groups.items中的id" in prompt
     assert "具体条目id" in prompt
     assert "不得创造、缩写或修改证据id" in prompt
     assert "title维度表示岗位方向匹配" in prompt
@@ -218,11 +206,12 @@ def test_compact_scoring_input_keeps_values_and_replaces_hash_ids(
 ) -> None:
     compact, aliases = _compact_scoring_input(evidence_context)
 
-    items = cast(list[dict[str, object]], compact["evidence_items"])
+    groups = cast(list[dict[str, object]], compact["evidence_groups"])
+    items = [item for group in groups for item in cast(list[list[object]], group["items"])]
     assert len(items) == len(evidence_context.evidence_items)
-    assert items[0]["id"] == "e1"
+    assert items[0][0] == "e1"
     assert aliases["e1"] == evidence_context.evidence_items[0].id
-    assert items[0]["value"] == evidence_context.evidence_items[0].value
+    assert items[0][1] == evidence_context.evidence_items[0].value
     assert "candidate" not in compact
     assert "strategy" not in compact
 
@@ -231,12 +220,18 @@ def test_score_request_restores_compact_evidence_ids(
     evidence_context: ScoringContext,
 ) -> None:
     compact, aliases = _compact_scoring_input(evidence_context)
-    items = cast(list[dict[str, object]], compact["evidence_items"])
+    groups = cast(list[dict[str, object]], compact["evidence_groups"])
+    items = [item for group in groups for item in cast(list[list[object]], group["items"])]
+    item_dimensions = {
+        cast(str, item[0]): cast(list[str], group["dimensions"])
+        for group in groups
+        for item in cast(list[list[object]], group["items"])
+    }
     references = {
         dimension: next(
-            cast(str, item["id"])
+            cast(str, item[0])
             for item in items
-            if dimension in cast(list[str], item["dimensions"])
+            if dimension in item_dimensions[cast(str, item[0])]
         )
         for dimension in ("title", "skills", "experience", "location", "salary", "industry", "management")
     }
@@ -273,8 +268,8 @@ def test_score_request_restores_compact_evidence_ids(
     payload = cast(dict[str, object], transport.calls[0]["payload"])
     messages = cast(list[dict[str, str]], payload["messages"])
     sent = json.loads(messages[1]["content"])
-    assert set(sent["input"]) == {"evidence_items"}
-    assert sent["input"]["evidence_items"][0]["id"] == "e1"
+    assert set(sent["input"]) == {"evidence_groups"}
+    assert sent["input"]["evidence_groups"][0]["items"][0][0] == "e1"
     assert result.data.dimensions[0].evidence_refs == [aliases[references["title"]]]
 
 

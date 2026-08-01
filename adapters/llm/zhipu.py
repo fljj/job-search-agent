@@ -27,6 +27,5 @@ class ZhipuLlmProvider(QwenLlmProvider):
                 "thinking": {"type": "disabled"},
                 "reasoning_effort": "none",
                 "do_sample": False,
-                "max_tokens": 4096,
             },
         )
