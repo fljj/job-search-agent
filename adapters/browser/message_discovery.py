@@ -532,18 +532,28 @@ def _normalize_duplicate_conversation_ids(
             all(job_ids)
             and len(set(job_ids)) == len(job_ids)
         )
-        for item in group:
-            identity = "|".join(
+        composite_identities = [
+            "|".join(
                 [
                     item.recruiter_name,
                     item.job_title or "",
                     item.company_name or "",
                 ]
             )
+            for item in group
+        ]
+        # BOSS 当前页面可能把同名招聘人的多个列表项暴露为同一个 d-c，且不提供
+        # data-job-id。此时列表中的招聘人、公司和职位摘要仍可唯一定位条目；只有
+        # 复合摘要全部唯一且包含额外身份信息时，才允许把派生身份用于写操作。
+        composites_are_reliable = (
+            len(set(composite_identities)) == len(group)
+            and all(item.job_title or item.company_name for item in group)
+        )
+        for item, identity in zip(group, composite_identities, strict=True):
             item.external_conversation_id = (
                 f"derived:{hashlib.sha256(identity.encode()).hexdigest()}"
             )
-            if not jobs_are_unique:
+            if not jobs_are_unique and not composites_are_reliable:
                 item.identity_reliable = False
 
 

@@ -648,7 +648,7 @@ def test_all_unread_and_new_greeting_partitions_are_distinct() -> None:
     assert not _matches_partition(item, "NEW_GREETING")
 
 
-def test_duplicate_platform_conversation_ids_get_stable_composite_ids() -> None:
+def test_duplicate_platform_ids_use_unique_visible_composite_identity() -> None:
     first = summary(1)
     second = summary(2)
     second.external_conversation_id = first.external_conversation_id
@@ -658,8 +658,8 @@ def test_duplicate_platform_conversation_ids_get_stable_composite_ids() -> None:
     assert first.external_conversation_id.startswith("derived:")
     assert second.external_conversation_id.startswith("derived:")
     assert first.external_conversation_id != second.external_conversation_id
-    assert first.identity_reliable is False
-    assert second.identity_reliable is False
+    assert first.identity_reliable is True
+    assert second.identity_reliable is True
 
 
 def test_duplicate_conversation_ids_remain_reliable_with_unique_job_ids() -> None:
@@ -675,6 +675,45 @@ def test_duplicate_conversation_ids_remain_reliable_with_unique_job_ids() -> Non
     assert first.external_conversation_id != second.external_conversation_id
     assert first.identity_reliable is True
     assert second.identity_reliable is True
+
+
+def test_same_recruiter_duplicate_ids_use_unique_visible_identity() -> None:
+    first = summary(1)
+    first.recruiter_name = "刘女士"
+    first.job_title = "刘女士元合共生网络科技人力资源经理"
+    first.external_job_id = None
+    second = summary(2)
+    second.external_conversation_id = first.external_conversation_id
+    second.recruiter_name = "刘女士"
+    second.job_title = "刘女士中软国际高级HR"
+    second.external_job_id = None
+
+    _normalize_duplicate_conversation_ids([first, second])
+
+    assert first.external_conversation_id.startswith("derived:")
+    assert second.external_conversation_id.startswith("derived:")
+    assert first.external_conversation_id != second.external_conversation_id
+    assert first.identity_reliable is True
+    assert second.identity_reliable is True
+
+
+def test_same_recruiter_duplicate_ids_stay_unreliable_without_discriminator() -> None:
+    first = summary(1)
+    first.recruiter_name = "刘女士"
+    first.job_title = None
+    first.company_name = None
+    first.external_job_id = None
+    second = summary(2)
+    second.external_conversation_id = first.external_conversation_id
+    second.recruiter_name = "刘女士"
+    second.job_title = None
+    second.company_name = None
+    second.external_job_id = None
+
+    _normalize_duplicate_conversation_ids([first, second])
+
+    assert first.identity_reliable is False
+    assert second.identity_reliable is False
 
 
 def test_successful_discovery_records_ready_platform_session() -> None:
