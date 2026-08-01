@@ -56,14 +56,19 @@ def validate_llm_score(
             raise LlmScoreValidationError(f"{item.dimension} 维度包含重复证据引用")
         invalid_refs = set(item.evidence_refs) - set(catalog)
         if invalid_refs:
-            raise LlmScoreValidationError(f"{item.dimension} 维度包含非法证据引用")
+            raise LlmScoreValidationError(
+                f"{item.dimension} 维度包含非法证据引用: {sorted(invalid_refs)}"
+            )
         cross_dimension_refs = [
             reference
             for reference in item.evidence_refs
             if item.dimension not in catalog[reference].dimensions
         ]
         if cross_dimension_refs:
-            raise LlmScoreValidationError(f"{item.dimension} 维度包含跨维度证据引用")
+            raise LlmScoreValidationError(
+                f"{item.dimension} 维度包含跨维度证据引用: "
+                f"{sorted(cross_dimension_refs)}"
+            )
         resolved_evidence = [
             catalog[reference].model_dump(mode="json")
             for reference in item.evidence_refs

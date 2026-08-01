@@ -44,6 +44,7 @@ from packages.browser_worker.models import (
     SessionStatus,
 )
 from packages.llm.models import LlmResult, MessageClassification, MessageClassificationRequest
+from packages.scoring.llm_engine import LlmScoreValidationError
 
 
 class FailingLlmProvider(FakeLlmProvider):
@@ -868,6 +869,63 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
         assert deferred is not None
         assert deferred.status == "WAITING_FOR_LLM"
         assert deferred.error_code == "LLM_SERVICE_ERROR"
+
+    invalid_score_conversation = client.post("/api/v1/conversations", json={
+        "job_id": job_id,
+        "external_conversation_id": "agent-invalid-score-conversation",
+        "recruiter_name": "评分异常招聘人",
+        "platform": "MOCK",
+    }).json()["data"]
+    invalid_score_message = client.post(
+        f"/api/v1/conversations/{invalid_score_conversation['id']}/messages",
+        json={
+            "external_message_id": "agent-invalid-score-output",
+            "content": "请介绍一个尚未处理的问题",
+            "received_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    assert invalid_score_message.status_code == 200
+
+    def fail_score_validation(*args: object, **kwargs: object) -> object:
+        raise LlmScoreValidationError(
+            "experience 维度包含跨维度证据引用: ['evidence:test']"
+        )
+
+    with monkeypatch.context() as invalid_score_patch:
+        invalid_score_patch.setattr(
+            "apps.api.app.services.conversation_service._bind_current_score",
+            fail_score_validation,
+        )
+        with Session(lease_engine, expire_on_commit=False) as agent_session:
+            tick_run(
+                agent_session,
+                run_id,
+                "invalid-score-worker",
+                provider=FakeLlmProvider(),
+                executor=FakeActionExecutor(),
+            )
+    with Session(lease_engine) as retry_session:
+        retry_message = retry_session.scalar(
+            select(entities.Message).where(
+                entities.Message.external_message_id == "agent-invalid-score-output"
+            )
+        )
+        assert retry_message is not None
+        retry_event = retry_session.scalar(
+            select(entities.AgentRunEvent)
+            .where(
+                entities.AgentRunEvent.entity_id == retry_message.id,
+                entities.AgentRunEvent.event_type
+                == "MESSAGE_SCORING_RETRY_SCHEDULED",
+            )
+            .order_by(entities.AgentRunEvent.created_at.desc())
+        )
+        assert retry_message.status == "RETRY_WAIT"
+        assert retry_message.error_code == "INVALID_SCORING_OUTPUT"
+        assert retry_message.retry_at is not None
+        assert retry_message.quarantined_at is None
+        assert retry_event is not None
+        assert "evidence:test" in retry_event.metadata_json["validation_error"]
 
     safety_conversation = client.post("/api/v1/conversations", json={
         "job_id": job_id,

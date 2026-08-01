@@ -32,6 +32,7 @@ from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.browser_worker.actions import ActionExecutor
 from packages.llm.ports import LlmProvider
+from packages.scoring.llm_engine import LlmScoreValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +311,25 @@ def tick_run(
             message.error_code = failure_code
             message.processing_started_at = None
             _record_failure(session, run, failure_code)
+            session.commit()
+            continue
+        except LlmScoreValidationError as exc:
+            message.status = "RETRY_WAIT"
+            message.retry_at = current + timedelta(
+                seconds=settings.boss_llm_retry_base_seconds
+            )
+            message.error_code = "INVALID_SCORING_OUTPUT"
+            message.processing_started_at = None
+            _record_failure(session, run, "INVALID_SCORING_OUTPUT")
+            _event(
+                session,
+                run.id,
+                "MESSAGE_SCORING_RETRY_SCHEDULED",
+                "message",
+                message.id,
+                ["INVALID_SCORING_OUTPUT"],
+                {"validation_error": str(exc)[:500]},
+            )
             session.commit()
             continue
         except (ValueError, ResourceNotFoundError) as exc:
