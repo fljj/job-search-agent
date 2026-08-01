@@ -54,7 +54,7 @@ tests/                      # 单元、浏览器夹具和 PostgreSQL 集成测�
 - `scoring`：硬过滤先行；未过滤职位由 LLM 给出七维分，程序验证总分、证据和版本。
 - `conversation_agent`：按 Rule → Knowledge → LLM → Human 路由回复并读取对话记忆。
 - `policy_engine`：返回 `ALLOW_AUTO/REQUIRE_CONFIRMATION/DENY` 并校验动作状态转换。
-- `resume_selector`：只选择已登记的平台附件，不读取或上传任意本地文件。
+- `resume_selector`：只选择已登记的平台既有在线简历或附件简历，不读取或上传任意本地文件。
 - `scheduling`：识别电话/面试意图，查询日历但不自动承诺具体时间。
 - `browser_worker`：定义页面输入输出；具体 DOM 逻辑位于 `adapters/browser`。
 - `services`：负责用户归属、数据库事务、指纹、审计和跨领域编排。

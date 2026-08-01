@@ -17,7 +17,7 @@
 
 ## 2. 迁移前检查
 
-1. 确认没有活动 Worker，BOSS 和脉脉 Run 均为 `PAUSED`。
+1. 确认没有活动 Worker，BOSS、脉脉和猎聘 Run 均为 `PAUSED`。
 2. 全局自动化保持 `paused=true`、`emergency_stop=true`。
 3. 记录当前代码提交、`alembic current` 和 `alembic heads`。
 4. 确认只有一个 Alembic head。
