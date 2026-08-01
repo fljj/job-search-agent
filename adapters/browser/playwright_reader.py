@@ -224,11 +224,6 @@ class BossReadOnlyAdapter(PlaywrightReadOnlyAdapter):
         super().__init__(Platform.BOSS, config)
 
 
-class MaimaiReadOnlyAdapter(PlaywrightReadOnlyAdapter):
-    def __init__(self, config: BrowserSelectorsConfig) -> None:
-        super().__init__(Platform.MAIMAI, config)
-
-
 class LiepinReadOnlyAdapter(PlaywrightReadOnlyAdapter):
     def __init__(self, config: BrowserSelectorsConfig) -> None:
         super().__init__(Platform.LIEPIN, config)

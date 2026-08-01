@@ -379,18 +379,11 @@ def test_unbound_inbound_message_gets_safe_clarification(
     ) is None
 
 
-@pytest.mark.parametrize(
-    ("platform", "page_url"),
-    [
-        (Platform.BOSS, "https://www.zhipin.com/web/geek/chat"),
-        (Platform.MAIMAI, "https://maimai.cn/chat"),
-    ],
-)
 def test_message_discovery_imports_unbound_scoreless_conversation(
     session: Session,
-    platform: Platform,
-    page_url: str,
 ) -> None:
+    platform = Platform.BOSS
+    page_url = "https://www.zhipin.com/web/geek/chat"
     session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
     session.flush()
     profile = db.CandidateProfile(

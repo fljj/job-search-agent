@@ -23,6 +23,8 @@ from adapters.browser.message_discovery import (
 from adapters.llm.fake import FakeLlmProvider
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.models import entities as db
+from apps.api.app.schemas.conversation import ConversationPayload
+from apps.api.app.services.conversation_service import create_conversation
 from apps.api.app.services.message_discovery_service import (
     _location_consent_allowed,
     _next_seen_message_keys,
@@ -192,24 +194,30 @@ def test_target_verification_checks_stable_identity_not_recruiter_name_only() ->
     assert _verify_target(selected, changed) == ["CONVERSATION_JOB_CHANGED"]
 
 
-def test_platform_recommendation_detail_is_skipped_without_failure() -> None:
+def test_maimai_private_message_discovery_is_disabled() -> None:
     session = MagicMock(spec=Session)
     run = db.AgentRun(id=uuid4(), platform="MAIMAI")
-    item = DiscoveredConversation(
-        summary=summary(1),
-        reason_codes=["PLATFORM_RECOMMENDATION_EXCLUDED"],
-    )
     batch = MessageDiscoveryBatch(
         platform=Platform.MAIMAI,
         partition="UNREAD",
-        scroll_position=1,
+        scroll_position=0,
         scanned_at=datetime.now(UTC),
-        items=[item],
     )
 
-    counts = persist_discovery_batch(session, run, "worker-1", batch)
+    with pytest.raises(ValueError, match="不再发现私信消息"):
+        persist_discovery_batch(session, run, "worker-1", batch)
 
-    assert counts == {"discovered": 1, "imported": 0, "paused": 0, "skipped": 1}
+
+def test_maimai_private_conversation_creation_is_disabled() -> None:
+    with pytest.raises(ValueError, match="不再建立私信会话"):
+        create_conversation(
+            MagicMock(spec=Session),
+            ConversationPayload(
+                platform="MAIMAI",
+                external_conversation_id="maimai-chat-1",
+                recruiter_name="招聘人",
+            ),
+        )
 
 
 def test_derived_boss_identity_uses_recruiter_when_list_role_is_not_job_title() -> None:

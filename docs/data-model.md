@@ -78,6 +78,9 @@ provider/model/prompt/schema 版本及 `llm_invocation_id`。只有输入和全�
 消息绑定会话和外部消息 ID，保存方向、正文、接收时间、处理状态、重试、错误和身份快照。
 平台发现同时持久化 `INBOUND` 与 `OUTBOUND`；同一会话和 episode 中，源入站消息之后的
 `OUTBOUND` 记录是抑制历史草稿再次调度的对账证据。
+新的 MAIMAI 会话和消息不再写入这两张表；存量脉脉记录仅作审计保留，
+查询和 Worker 调度均排除这些记录。脉脉推荐继续使用 `platform_recommendations`、
+`action_queue` 和审计表，不转换为普通会话。
 
 `(conversation_id, external_message_id)` 唯一。消息状态数据库约束为：
 

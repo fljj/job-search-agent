@@ -49,7 +49,7 @@ class FakePage(FakeElement):
 def job_page(platform: Platform) -> tuple[FakePage, PlatformSelectors]:
     config = get_browser_selectors()
     selectors = config.platforms[platform.value]
-    host = "www.zhipin.com" if platform is Platform.BOSS else "maimai.cn"
+    host = "www.zhipin.com"
     page = FakePage(url=f"https://{host}/job/abc")
     page.visible = {selectors.login_marker, selectors.job_root, selectors.job_open_marker}
     page.texts = {
@@ -65,8 +65,8 @@ def job_page(platform: Platform) -> tuple[FakePage, PlatformSelectors]:
     return page, selectors
 
 
-@pytest.mark.parametrize("platform", [Platform.BOSS, Platform.MAIMAI])
-def test_extracts_supported_platform_job_fixture(platform: Platform) -> None:
+def test_extracts_supported_platform_job_fixture() -> None:
+    platform = Platform.BOSS
     page, selectors = job_page(platform)
     result = extract_current_page(page, platform, selectors, "v1")
     assert result.status is SessionStatus.SESSION_READY
@@ -222,30 +222,6 @@ def test_extracts_real_boss_conversation_list_id_from_d_c() -> None:
     assert result.status is SessionStatus.SESSION_READY
     assert result.page_type is PageType.CONVERSATION_LIST
     assert result.conversations[0].external_conversation_id == "boss-chat-1"
-
-
-def test_maimai_conversation_list_requires_stable_last_message_identity() -> None:
-    selectors = get_browser_selectors().platforms["MAIMAI"]
-    page = FakePage(url="https://maimai.cn/web/feed_im")
-    page.visible = {selectors.login_marker, selectors.conversation_list_root}
-    page.element_lists = {
-        selectors.conversation_list_items: [
-            FakeElement(
-                texts={selectors.conversation_list_item_recruiter: "李招聘"},
-                attributes={
-                    ("", selectors.conversation_list_item_id_attribute): (
-                        '{"mid":"maimai-chat-1"}'
-                    ),
-                },
-            )
-        ]
-    }
-
-    result = extract_current_page(page, Platform.MAIMAI, selectors, "v1")
-
-    assert result.status is SessionStatus.SESSION_PAGE_CHANGED
-    assert result.reason_codes == ["NO_RECOGNIZABLE_CONVERSATION_LIST_ITEM"]
-    assert result.conversations == []
 
 
 def test_extracts_real_boss_conversation_dom_shape() -> None:

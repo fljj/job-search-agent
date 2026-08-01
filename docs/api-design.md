@@ -147,6 +147,10 @@
 | `POST /browser/read-current` | 读取当前受支持页面，不授权写入 |
 | `GET /browser/sessions` | 查看平台会话状态 |
 
+MAIMAI Run 只使用平台推荐接口；`POST /browser/read-current` 不接受 MAIMAI
+私信页读取。会话创建和消息导入拒绝 `platform=MAIMAI`，`GET /conversations`
+不返回历史脉脉会话。
+
 ## 9. 排期和日历
 
 | 方法与路径 | 用途 |

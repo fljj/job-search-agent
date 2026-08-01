@@ -90,7 +90,6 @@ export function MessagePage() {
         style={{ minWidth: 160 }}
         options={[
           { value: 'BOSS', label: 'BOSS直聘' },
-          { value: 'MAIMAI', label: '脉脉' },
           { value: 'LIEPIN', label: '猎聘' },
         ]}
         onChange={(value) => {

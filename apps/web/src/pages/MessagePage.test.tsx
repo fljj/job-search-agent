@@ -81,8 +81,8 @@ describe('MessagePage', () => {
         total: 1,
         items: [{
           id: 'conversation-21',
-          platform: 'MAIMAI',
-          recruiter_name: '脉脉招聘人',
+          platform: 'LIEPIN',
+          recruiter_name: '猎聘招聘人',
           state: 'ACTIVE',
           qualification_status: 'UNKNOWN',
           qualification_evidence: [],
@@ -93,11 +93,12 @@ describe('MessagePage', () => {
 
     await screen.findByText('共 41 条会话')
     fireEvent.mouseDown(screen.getByText('全部平台'))
-    fireEvent.click(await screen.findByText('脉脉'))
+    expect(screen.queryByText('脉脉')).toBeNull()
+    fireEvent.click(await screen.findByText('猎聘'))
 
-    await screen.findByText('脉脉招聘人')
+    await screen.findByText('猎聘招聘人')
     expect(api).toHaveBeenLastCalledWith(
-      '/conversations?page=1&page_size=20&platform=MAIMAI',
+      '/conversations?page=1&page_size=20&platform=LIEPIN',
     )
   })
 })

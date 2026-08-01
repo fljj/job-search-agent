@@ -182,6 +182,13 @@ def tick_run(
     rules = _effective_rules(session, run.platform, run.strategy_id)
     if not rules.enabled or rules.paused:
         return pause_run(session, run.id, ["AUTOMATION_DISABLED_OR_PAUSED"])
+    if run.platform == "MAIMAI":
+        run.heartbeat_at = current
+        _release_lease(session, run)
+        run.version += 1
+        _event(session, run.id, "RECOMMENDATION_ONLY_TICK")
+        session.commit()
+        return _response(run)
     if run.platform != "MOCK":
         platform_session = session.scalar(
             select(db.PlatformSession).where(

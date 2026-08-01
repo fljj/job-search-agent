@@ -12,7 +12,7 @@ describe('HumanConfirmationPage', () => {
       if (path === '/confirmation-tasks') return { items: [{
         id: 'task-1', status: 'PENDING_APPROVAL', action_type: 'REPLY',
         reason_codes: ['LLM_FAILURE_REQUIRES_HUMAN'], content: '请人工确认',
-        platform: 'MAIMAI', recruiter: '张女士', conversation_id: 'conversation-1',
+        platform: 'BOSS', recruiter: '张女士', conversation_id: 'conversation-1',
         expires_at: '2099-01-01T00:00:00Z',
       }] }
       if (path === '/confirmation-tasks/task-1/approve') return { id: 'action-1' }

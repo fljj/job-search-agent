@@ -21,9 +21,6 @@ from packages.browser_worker.models import (
     ReadResult,
     SessionStatus,
 )
-from packages.policy_engine.recommendation import RecommendationRules
-
-RECOMMENDATION_BUNDLE_WINDOW_SECONDS = 5
 
 
 class DiscoveredConversation(BaseModel):
@@ -427,72 +424,6 @@ class BossMessageDiscoveryAdapter(MessageDiscoveryAdapter):
         )
         with urlopen(request, timeout=3):
             return True
-
-
-class MaimaiMessageDiscoveryAdapter(MessageDiscoveryAdapter):
-    """读取脉脉普通私信；系统推荐和官方账号仍由独立流程处理。"""
-
-    def __init__(
-        self,
-        config: BrowserSelectorsConfig,
-        recommendation_rules: RecommendationRules,
-    ) -> None:
-        super().__init__(Platform.MAIMAI, config)
-        self.recommendation_rules = recommendation_rules
-
-    def _include_summary(self, summary: BrowserConversationSummary) -> bool:
-        if summary.recruiter_name in self.recommendation_rules.official_accounts:
-            return False
-        if any(
-            account in (summary.job_title or "")
-            for account in self.recommendation_rules.official_accounts
-        ):
-            return False
-        if summary.category in {"OFFICIAL", "RECOMMENDATION", "SYSTEM_RECOMMENDATION"}:
-            return False
-        preview = summary.last_message_text or ""
-        return not any(
-            marker in preview
-            for marker in self.recommendation_rules.recommendation_markers
-        )
-
-    def _detail_exclusion_reason(self, detail: ReadResult) -> str | None:
-        conversation = detail.conversation
-        if conversation is None:
-            return None
-        messages = conversation.messages
-        if any(message.direction.value != "INBOUND" for message in messages):
-            return None
-        marker_indexes = [
-            index
-            for index, message in enumerate(messages)
-            if any(
-                marker in message.content
-                for marker in self.recommendation_rules.recommendation_markers
-            )
-        ]
-        if not marker_indexes or marker_indexes[-1] != len(messages) - 1:
-            return None
-        messages_before_template = messages[: marker_indexes[-1]]
-        if not messages_before_template:
-            return "PLATFORM_RECOMMENDATION_EXCLUDED"
-        if len(messages_before_template) != 1:
-            return None
-        job_description = messages_before_template[0]
-        template = messages[marker_indexes[-1]]
-        is_job_description = any(
-            marker in job_description.content
-            for marker in ("职位描述", "职位要求", "岗位职责")
-        )
-        bundle_gap_seconds = (
-            template.received_at - job_description.received_at
-        ).total_seconds()
-        generated_together = (
-            0 <= bundle_gap_seconds <= RECOMMENDATION_BUNDLE_WINDOW_SECONDS
-        )
-        if is_job_description and generated_together:
-            return "PLATFORM_RECOMMENDATION_EXCLUDED"
-        return None
 
 
 def _verify_target(

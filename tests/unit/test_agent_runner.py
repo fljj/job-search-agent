@@ -341,7 +341,7 @@ def test_message_discovery_reuses_platform_cursor(
     session = MagicMock(spec=Session)
     run = db.AgentRun(
         id=uuid4(),
-        platform="MAIMAI",
+        platform="BOSS",
         cursor={
             "message_discovery": {
                 "partition": "UNREAD",
@@ -354,7 +354,7 @@ def test_message_discovery_reuses_platform_cursor(
         },
     )
     batch = MessageDiscoveryBatch(
-        platform=Platform.MAIMAI,
+        platform=Platform.BOSS,
         partition="ALL",
         scroll_position=30,
         scanned_at=datetime.now(UTC),
@@ -510,8 +510,8 @@ def test_message_discovery_pauses_only_after_consecutive_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = MagicMock(spec=Session)
-    maimai_run = db.AgentRun(id=uuid4(), platform="MAIMAI", cursor={})
     boss_run = db.AgentRun(id=uuid4(), platform="BOSS", cursor={})
+    another_run = db.AgentRun(id=uuid4(), platform="LIEPIN", cursor={})
     adapter = MagicMock(spec=MessageDiscoveryAdapter)
     adapter.scan.side_effect = ValueError("页面变化")
     paused: list[object] = []
@@ -523,17 +523,17 @@ def test_message_discovery_pauses_only_after_consecutive_failures(
     for _ in range(2):
         assert not _discover_messages(
             session,
-            maimai_run,
+            boss_run,
             "worker-1",
             "http://127.0.0.1:9222",
             adapter,
         )
         assert paused == []
     assert not _discover_messages(
-        session, maimai_run, "worker-1", "http://127.0.0.1:9222", adapter
+        session, boss_run, "worker-1", "http://127.0.0.1:9222", adapter
     )
-    assert paused == [maimai_run.id]
-    assert boss_run.id not in paused
+    assert paused == [boss_run.id]
+    assert another_run.id not in paused
 
 
 def test_boss_missing_message_page_is_reopened_without_pausing(
@@ -576,7 +576,7 @@ def test_boss_missing_message_page_is_reopened_without_pausing(
     assert events == ["PLATFORM_PAGE_REOPENED"]
 
 
-def test_disabled_maimai_recommendations_do_not_block_ordinary_messages(
+def test_disabled_maimai_recommendations_skip_recommendation_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = MagicMock(spec=Session)

@@ -37,6 +37,7 @@ from packages.browser_worker.models import (
     BrowserMessage,
     BrowserPlatformConsent,
     MessageDirection,
+    Platform,
 )
 from packages.job_parser.normalizers import normalize_location
 from packages.llm.ports import LlmProvider
@@ -176,6 +177,8 @@ def persist_discovery_batch(
 ) -> dict[str, int]:
     if run.platform != batch.platform.value:
         raise ValueError("消息发现批次平台与 Agent 运行不匹配")
+    if batch.platform is Platform.MAIMAI:
+        raise ValueError("脉脉仅处理系统推荐，不再发现私信消息")
     current = now or datetime.now(UTC)
     counts = {"discovered": len(batch.items), "imported": 0, "paused": 0, "skipped": 0}
     for item in batch.items:
@@ -190,9 +193,6 @@ def persist_discovery_batch(
                 "BINDING_JOB",
             ],
         )
-        if "PLATFORM_RECOMMENDATION_EXCLUDED" in item.reason_codes:
-            counts["skipped"] += 1
-            continue
         if item.detail is None or item.reason_codes:
             _discovery_event(
                 session,

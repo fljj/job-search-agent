@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from adapters.browser.playwright_reader import (
     BossReadOnlyAdapter,
     LiepinReadOnlyAdapter,
-    MaimaiReadOnlyAdapter,
     PlaywrightReadOnlyAdapter,
 )
 from apps.api.app.core.browser_config import get_browser_selectors
@@ -30,10 +29,11 @@ from packages.browser_worker.models import MessageDirection, Platform, ReadResul
 
 
 def read_current_page(session: Session, payload: BrowserReadRequest) -> BrowserReadResponse:
+    if payload.platform is Platform.MAIMAI:
+        raise ValueError("脉脉仅支持系统推荐处理，不再读取私信页面")
     config = get_browser_selectors()
     adapters: dict[Platform, PlaywrightReadOnlyAdapter] = {
         Platform.BOSS: BossReadOnlyAdapter(config),
-        Platform.MAIMAI: MaimaiReadOnlyAdapter(config),
         Platform.LIEPIN: LiepinReadOnlyAdapter(config),
     }
     adapter = adapters[payload.platform]

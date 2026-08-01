@@ -25,7 +25,6 @@ from adapters.browser.liepin_message_discovery import (
 )
 from adapters.browser.message_discovery import (
     BossMessageDiscoveryAdapter,
-    MaimaiMessageDiscoveryAdapter,
     MessageDiscoveryAdapter,
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
@@ -34,7 +33,6 @@ from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings, reload_settings
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.core.job_parser_config import get_job_parser_config
-from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
 from apps.api.app.services.action_service import recover_stale_executing_actions
 from apps.api.app.services.agent_service import pause_run, tick_run
@@ -316,6 +314,7 @@ def _process_maimai_recommendations(
             cdp_url,
             limit=get_settings().agent_tick_batch_size,
         )
+        record_ready_platform_session(session, run, cdp_url)
     except (OSError, TimeoutError, ValueError):
         pause_run(
             session,
@@ -731,22 +730,17 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             )
                     continue
                 elif run.platform == Platform.MAIMAI.value:
-                    if not _discover_messages(
-                        session,
-                        run,
-                        worker_id,
-                        cdp_url,
-                        MaimaiMessageDiscoveryAdapter(
-                            get_browser_selectors(),
-                            get_recommendation_rules(),
-                        ),
-                        executor,
-                    ):
-                        continue
                     if not _process_maimai_recommendations(
                         session, run, worker_id, cdp_url, executor
                     ):
                         continue
+                    run.executor_type = executor_type
+                    run.heartbeat_at = datetime.now(UTC)
+                    cursor = dict(run.cursor or {})
+                    cursor["last_tick_at"] = run.heartbeat_at.isoformat()
+                    run.cursor = cursor
+                    session.commit()
+                    continue
                 run.executor_type = executor_type
                 session.commit()
                 _tick_and_log(session, run, worker_id, executor)

@@ -4,12 +4,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmConfigurationError, LlmProviderError
 from apps.api.app.core.conversation_config import get_conversation_policy
-from apps.api.app.core.recommendation_config import get_recommendation_rules
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.conversation import (
     ConversationPayload,
@@ -72,6 +71,8 @@ GENERATOR_VERSION = "conversation-llm-v4"
 
 
 def create_conversation(session: Session, payload: ConversationPayload) -> dict[str, object]:
+    if payload.platform == "MAIMAI":
+        raise ValueError("脉脉仅处理系统推荐，不再建立私信会话")
     ensure_default_user(session)
     if payload.job_id is not None:
         get_job_entity(session, payload.job_id)
@@ -178,6 +179,8 @@ def import_message(
     session: Session, conversation_id: object, payload: MessagePayload
 ) -> MessageResponse:
     conversation = _get_conversation(session, conversation_id)
+    if conversation.platform == "MAIMAI":
+        raise ValueError("脉脉仅处理系统推荐，不再导入私信消息")
     existing = session.scalar(
         select(db.Message).where(
             db.Message.conversation_id == conversation.id,
@@ -251,12 +254,7 @@ def list_conversations(
 ) -> tuple[list[dict[str, object]], int]:
     query = select(db.Conversation).where(
         db.Conversation.user_id == DEFAULT_USER_ID,
-        or_(
-            db.Conversation.platform != "MAIMAI",
-            db.Conversation.recruiter_name.not_in(
-                get_recommendation_rules().official_accounts
-            ),
-        ),
+        db.Conversation.platform != "MAIMAI",
     )
     if job_id is not None:
         query = query.where(db.Conversation.job_id == job_id)
