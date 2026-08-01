@@ -181,7 +181,7 @@ def test_liepin_reply_uses_approved_conversation_and_reads_back() -> None:
         ).count() == 1
 
 
-def test_liepin_conversation_list_target_decodes_stable_im_id() -> None:
+def test_liepin_conversation_list_target_uses_stable_im_id_without_job_text() -> None:
     class EvaluationPage:
         def __init__(self, page: Page) -> None:
             self.page = page
@@ -195,6 +195,12 @@ def test_liepin_conversation_list_target_decodes_stable_im_id() -> None:
             return {}
 
     with fixture_page("action-conversation.html") as page:
+        page.locator("[data-company-name]").evaluate(
+            "element => { element.textContent = ''; }"
+        )
+        page.locator("[data-job-title]").evaluate(
+            "element => { element.textContent = ''; }"
+        )
         raw_page = EvaluationPage(page)
         opened = PlaywrightActionExecutor._open_approved_conversation(
             raw_page,  # type: ignore[arg-type]

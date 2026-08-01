@@ -51,16 +51,60 @@ def test_user_opened_drawer_is_not_closed(
     monkeypatch.setattr(adapter, "_find_home_target", lambda _url: "ws://home")
     monkeypatch.setattr(adapter, "_ensure_drawer_open", lambda _target: False)
     monkeypatch.setattr(adapter, "_restore_home", restore)
+    prepare = MagicMock(return_value=True)
+    monkeypatch.setattr(adapter, "_prepare_user_drawer_for_job_discovery", prepare)
     monkeypatch.setattr(
         MessageDiscoveryAdapter,
         "scan",
         lambda *_args, **_kwargs: _batch(),
     )
 
+    adapter.hold_drawer_for_actions()
     adapter.scan("http://127.0.0.1:9222")
+    adapter.finish_actions()
 
-    assert adapter.home_ready_for_job_discovery is False
+    assert adapter.home_ready_for_job_discovery is True
     restore.assert_not_called()
+    prepare.assert_called_once_with("ws://home")
+
+
+def test_user_opened_drawer_closes_conversation_but_keeps_job_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = LiepinMessageDiscoveryAdapter(get_browser_selectors())
+    page = MagicMock()
+    page.__enter__.return_value = page
+    page.__exit__.return_value = False
+    conversation_checks = iter([True, False])
+
+    def exists(selector: str) -> bool:
+        if selector == adapter.selectors.conversation_root:
+            return next(conversation_checks)
+        return selector == adapter.selectors.job_list_root
+
+    page.exists.side_effect = exists
+    page._evaluate.return_value = True
+    monkeypatch.setattr(
+        "adapters.browser.liepin_message_discovery.RawCdpPageReader",
+        lambda _target: page,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.liepin_message_discovery.extract_current_page",
+        lambda *_args, **_kwargs: ReadResult(
+            platform=Platform.LIEPIN,
+            status=SessionStatus.SESSION_READY,
+            page_type=PageType.CONVERSATION,
+            page_url="https://c.liepin.com/",
+            page_title="猎聘会话",
+            content_hash="d" * 64,
+            selector_version="fixture",
+        ),
+    )
+
+    assert adapter._prepare_user_drawer_for_job_discovery("ws://home") is True
+    expression = page._evaluate.call_args.args[0]
+    assert adapter.selectors.conversation_dialog_close_button in expression
+    assert adapter.selectors.conversation_drawer_close_button not in expression
 
 
 def test_agent_drawer_is_held_until_l4_actions_finish(

@@ -107,7 +107,7 @@ LLM 请求不设置 `max_tokens`，避免结构化 JSON 被截断；输出长度
 | `BOSS_JOB_SCAN_INTERVAL_SECONDS` | `180` | 完成一批后到下一批的最短间隔 |
 | `LIEPIN_JOB_BATCH_SIZE` | `1` | 猎聘每次只保留一个临时详情页完成评分和动作回读 |
 | `LIEPIN_JOB_SCAN_INTERVAL_SECONDS` | `180` | 猎聘完成一批后到下一批的最短间隔 |
-| `LIEPIN_WRITES_ENABLED` | `false` | L5 单次真实验收并明确授权前保持关闭；修改后需重启 Worker |
+| `LIEPIN_WRITES_ENABLED` | `true` | 是否允许猎聘执行已授权的普通回复、礼貌拒绝、聊一聊和现有简历投递；修改后需重启 Worker |
 | `BOSS_LLM_RETRY_BASE_SECONDS` | `300` | 职位详情等局部失败的首次等待时间 |
 | `BOSS_LLM_RETRY_MAX_SECONDS` | `3600` | 职位局部重试的最长等待时间 |
 | `BOSS_JOB_RETRY_MAX_ATTEMPTS` | `5` | 单个职位非全局故障的最多尝试次数 |
@@ -232,13 +232,12 @@ open -na "Google Chrome" --args \
 - 一个包含系统推荐的页面：`https://maimai.cn/chat`
 - Worker 只识别并处理系统推荐卡片，不扫描普通私信
 
-### 猎聘（L4 能力已就绪）
+### 猎聘
 
 - 一个已登录首页：`https://c.liepin.com/`
 - 不要另外打开第二个猎聘首页；Worker 不需要独立职位搜索页
 - Worker 会先读取首页消息抽屉，再发现、硬过滤和评分职位；不主动刷新首页
-- L5 真实页面验收前保持 `LIEPIN_WRITES_ENABLED=false`，此时只准备不可派发草稿和确认任务
-- 明确授权并完成 L5 验收后可设为 `true`；新消息可普通回复或投递已登记的站内现有简历，
+- 正式无人值守运行设置 `LIEPIN_WRITES_ENABLED=true`；新消息可普通回复或投递已登记的站内现有简历，
   满足主动门槛的职位可使用“聊一聊”
 - Agent 不新增、编辑、刷新、上传或删除猎聘简历；如页面要求选择，只使用名称完全一致的
   已登记默认简历
@@ -327,7 +326,7 @@ BOSS 和脉脉 Run 启用后直接按“系统设置”中的正式自动化配�
 3. 点击“启动”。
 4. 再选择平台 `MAIMAI`，使用同一策略点击“启动”。
 5. 如需猎聘，只保留唯一猎聘首页后选择 `LIEPIN` 启动；该 Run 先处理消息，再发现和评分
-   职位。L5 授权前保持 `LIEPIN_WRITES_ENABLED=false`，不会执行平台写动作。
+   职位。正式运行需设置 `LIEPIN_WRITES_ENABLED=true`。
 
 运行中的平台可在表格中暂停，已暂停的平台可恢复，已停止等终态任务可
 重新启动。页面连接异常不等于任务停止，应在总览使用“重新连接”。

@@ -227,7 +227,13 @@ def dispatch(
         decision = AutomationDecision.DENY
         reasons = ["CONVERSATION_IDENTITY_UNRELIABLE"]
     if inbound_action and conversation.platform == "LIEPIN":
-        identity_gaps = _liepin_inbound_identity_gaps(conversation, job)
+        identity_gaps = _liepin_inbound_identity_gaps(
+            conversation,
+            job,
+            allow_observed_job_identity=(
+                payload.action_type == ActionType.MISMATCH_DECLINE.value
+            ),
+        )
         if identity_gaps:
             decision = AutomationDecision.DENY
             reasons = identity_gaps
@@ -266,20 +272,6 @@ def dispatch(
     ):
         approve_retry(session, action.id)
     result = execute_action(session, action.id, payload.cdp_url, executor)
-    if (
-        result.status == ActionStatus.SUCCEEDED.value
-        and payload.action_type == ActionType.MISMATCH_DECLINE.value
-    ):
-        conversation.state = "DECLINED"
-        _audit(
-            session,
-            "CONVERSATION_DECLINED",
-            conversation.id,
-            "ACTIVE",
-            "DECLINED",
-            ["MISMATCH_DECLINE_SENT"],
-        )
-        session.commit()
     if result.status in {"FAILED_FINAL", "OUTCOME_UNKNOWN"}:
         _pause_platform(session, conversation.platform, result.failure_code or result.status)
     return {"decision": decision.value, "reason_codes": reasons,
@@ -434,12 +426,21 @@ def _proactive_safety_gaps(job: db.Job, recruiter_name: str) -> list[str]:
 def _liepin_inbound_identity_gaps(
     conversation: db.Conversation,
     job: db.Job | None,
+    *,
+    allow_observed_job_identity: bool = False,
 ) -> list[str]:
     reasons: list[str] = []
-    if job is None or not job.external_job_id:
-        reasons.append("LIEPIN_LINKED_JOB_ID_MISSING")
-    if job is None or not job.company_name or not job.title:
-        reasons.append("LIEPIN_LINKED_JOB_IDENTITY_INCOMPLETE")
+    if allow_observed_job_identity:
+        if (
+            not conversation.observed_company_name
+            or not conversation.observed_job_title
+        ):
+            reasons.append("LIEPIN_OBSERVED_JOB_IDENTITY_INCOMPLETE")
+    else:
+        if job is None or not job.external_job_id:
+            reasons.append("LIEPIN_LINKED_JOB_ID_MISSING")
+        if job is None or not job.company_name or not job.title:
+            reasons.append("LIEPIN_LINKED_JOB_IDENTITY_INCOMPLETE")
     if not conversation.recruiter_name or not conversation.external_conversation_id:
         reasons.append("LIEPIN_CONVERSATION_IDENTITY_INCOMPLETE")
     return reasons

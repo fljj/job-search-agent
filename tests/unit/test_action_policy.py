@@ -1,5 +1,7 @@
 import pytest
 
+from apps.api.app.models import entities as db
+from apps.api.app.services.automation_service import _liepin_inbound_identity_gaps
 from packages.policy_engine.content_check import validate_edited_content
 from packages.policy_engine.state_machine import ActionStatus, ActionType, require_transition
 
@@ -27,6 +29,24 @@ def test_low_score_decline_has_a_stable_action_type() -> None:
 
 def test_mismatch_decline_has_a_stable_action_type() -> None:
     assert ActionType.MISMATCH_DECLINE.value == "MISMATCH_DECLINE"
+
+
+def test_liepin_mismatch_decline_accepts_reliable_observed_job_identity() -> None:
+    conversation = db.Conversation(
+        platform="LIEPIN",
+        external_conversation_id="conversation-1",
+        recruiter_name="招聘人",
+        observed_company_name="测试公司",
+        observed_job_title="测试岗位",
+    )
+
+    assert _liepin_inbound_identity_gaps(
+        conversation, None, allow_observed_job_identity=True
+    ) == []
+    assert _liepin_inbound_identity_gaps(conversation, None) == [
+        "LIEPIN_LINKED_JOB_ID_MISSING",
+        "LIEPIN_LINKED_JOB_IDENTITY_INCOMPLETE",
+    ]
 
 
 @pytest.mark.parametrize("action_type", [

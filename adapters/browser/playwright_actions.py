@@ -888,6 +888,28 @@ class PlaywrightActionExecutor:
                     if _reply_target_matches(check, command):
                         matches.append(str(websocket_url))
                         continue
+                    if (
+                        platform is Platform.LIEPIN
+                        and check.status is SessionStatus.SESSION_READY
+                        and page.exists(selectors.job_list_root)
+                        and not page.exists(selectors.conversation_list_root)
+                    ):
+                        entry_selector = selectors.conversation_entry_button
+                        opened = bool(
+                            entry_selector
+                            and page._evaluate(
+                                "(() => { const matches = Array.from(document.querySelectorAll("
+                                f"{json.dumps(entry_selector)}"
+                                ")).filter(item => item.getClientRects().length > 0);"
+                                "if (matches.length !== 1) return false; "
+                                "matches[0].click(); return true; })()"
+                            )
+                        )
+                        if opened:
+                            for _ in range(30):
+                                if page.exists(selectors.conversation_list_root):
+                                    break
+                                time.sleep(0.1)
                     if not page.exists(selectors.conversation_list_root):
                         continue
                     if not self._find_and_open_approved_conversation(
@@ -1002,13 +1024,16 @@ class PlaywrightActionExecutor:
                 "  const jobMatches = expectedJob && visible.includes(expectedJob);"
                 "  return companyMatches || jobMatches;"
                 " }"
-                "  if (job !== expectedJob) return false;"
-                "  if (company !== expectedCompany) return false;"
                 " const raw = item.getAttribute(idAttribute) || item.getAttribute('d-c');"
                 " if (!raw) return false;"
-                " if (!idJsonKey) return raw === expectedId;"
-                " try { return String(JSON.parse(decodeURIComponent(raw))[idJsonKey]) === expectedId; }"
+                " let idMatches = false;"
+                " if (!idJsonKey) idMatches = raw === expectedId;"
+                " else try { idMatches = String(JSON.parse(decodeURIComponent(raw))[idJsonKey]) === expectedId; }"
                 " catch { return false; }"
+                " if (!idMatches) return false;"
+                " if (job && expectedJob && job !== expectedJob) return false;"
+                " if (company && expectedCompany && company !== expectedCompany) return false;"
+                " return true;"
                 "});"
                 "if (matches.length !== 1) return null;"
                 "matches[0].scrollIntoView({block: 'center'});"
@@ -1178,8 +1203,45 @@ class PlaywrightActionExecutor:
                     continue
                 with RawCdpPageReader(websocket_url) as page:
                     check = extract_current_page(page, platform, selectors, selectors.version)
-                if _reply_target_matches(check, command):
-                    matches.append(str(websocket_url))
+                    if _reply_target_matches(check, command):
+                        matches.append(str(websocket_url))
+                        continue
+                    if (
+                        platform is Platform.LIEPIN
+                        and check.status is SessionStatus.SESSION_READY
+                        and page.exists(selectors.job_list_root)
+                        and not page.exists(selectors.conversation_list_root)
+                    ):
+                        entry_selector = selectors.conversation_entry_button
+                        opened = bool(
+                            entry_selector
+                            and page._evaluate(
+                                "(() => { const matches = Array.from(document.querySelectorAll("
+                                f"{json.dumps(entry_selector)}"
+                                ")).filter(item => item.getClientRects().length > 0);"
+                                "if (matches.length !== 1) return false; "
+                                "matches[0].click(); return true; })()"
+                            )
+                        )
+                        if opened:
+                            for _ in range(30):
+                                if page.exists(selectors.conversation_list_root):
+                                    break
+                                time.sleep(0.1)
+                    if not page.exists(selectors.conversation_list_root):
+                        continue
+                    if not self._find_and_open_approved_conversation(
+                        page, selectors, command
+                    ):
+                        continue
+                    for _ in range(30):
+                        check = extract_current_page(
+                            page, platform, selectors, selectors.version
+                        )
+                        if _reply_target_matches(check, command):
+                            matches.append(str(websocket_url))
+                            break
+                        time.sleep(0.1)
             if len(matches) != 1:
                 return ExecutionResult(
                     outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
@@ -1195,9 +1257,13 @@ class PlaywrightActionExecutor:
                     f"{json.dumps(selectors.sent_message_items)}));"
                     f"const baseline = {raw_baseline};"
                     f"const expected = {json.dumps((command.content or '').strip())};"
+                    "const matchesExpected = item => { const body = item.querySelector('.text-content'); "
+                    "const text = (body?.textContent || item.textContent || '').trim(); "
+                    "if (text === expected) return true; if (!text.startsWith(expected)) return false; "
+                    "const suffix = text.slice(expected.length).trim(); "
+                    "return /^(未读|已读|发送中|发送失败)$/.test(suffix); };"
                     "return {count: items.length, matched: items.slice(baseline).some("
-                    "item => { const body = item.querySelector('.text-content'); return "
-                    "(body?.textContent || item.textContent || '').trim() === expected; })}; })()"
+                    "matchesExpected)}; })()"
                 )
                 if isinstance(observation, dict) and observation.get("matched"):
                     return ExecutionResult(
@@ -1558,10 +1624,15 @@ class PlaywrightActionExecutor:
                     )
                 for _ in range(30):
                     observed = page._evaluate(
-                        "Array.from(document.querySelectorAll("
+                        "(() => { const expected = "
+                        f"{json.dumps(command.content.strip())}; return Array.from(document.querySelectorAll("
                         f"{json.dumps(selectors.sent_message_items)}"
-                        f")).slice({baseline_count}).some(item => "
-                        f"(item.textContent || '').trim() === {json.dumps(command.content.strip())})"
+                        f")).slice({baseline_count}).some(item => {{ "
+                        "const body = item.querySelector('.text-content'); "
+                        "const text = (body?.textContent || item.textContent || '').trim(); "
+                        "if (text === expected) return true; if (!text.startsWith(expected)) return false; "
+                        "const suffix = text.slice(expected.length).trim(); "
+                        "return /^(未读|已读|发送中|发送失败)$/.test(suffix); }); })()"
                     )
                     if observed:
                         evidence = hashlib.sha256(

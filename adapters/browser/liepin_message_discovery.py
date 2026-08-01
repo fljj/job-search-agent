@@ -54,7 +54,7 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
         )
 
     def finish_actions(self) -> None:
-        """动作批次结束后只收起本适配器打开的抽屉。"""
+        """动作批次结束后恢复可扫描职位的首页状态。"""
 
         target = self._held_target
         opened_by_agent = self._held_opened_by_agent
@@ -64,6 +64,43 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
         if target and opened_by_agent:
             self._restore_home(target)
             self.home_ready_for_job_discovery = True
+        elif target:
+            self.home_ready_for_job_discovery = (
+                self._prepare_user_drawer_for_job_discovery(target)
+            )
+
+    def _prepare_user_drawer_for_job_discovery(self, target: str) -> bool:
+        """保留用户打开的消息抽屉，仅关闭具体会话并确认职位列表仍可读取。"""
+
+        with RawCdpPageReader(target) as page:
+            state = extract_current_page(
+                page,
+                Platform.LIEPIN,
+                self.selectors,
+                self.selectors.version,
+            )
+            if state.status is SessionStatus.SESSION_PAUSED:
+                return False
+            if page.exists(self.selectors.conversation_root):
+                close_selector = self.selectors.conversation_dialog_close_button
+                if not close_selector:
+                    return False
+                closed = page._evaluate(
+                    "(() => { const matches = Array.from(document.querySelectorAll("
+                    f"{json.dumps(close_selector)}"
+                    ")).filter(item => item.getClientRects().length > 0);"
+                    "if (matches.length !== 1) return false; "
+                    "matches[0].click(); return true; })()"
+                )
+                if not closed:
+                    return False
+                for _ in range(30):
+                    if not page.exists(self.selectors.conversation_root):
+                        break
+                    time.sleep(0.1)
+                else:
+                    return False
+            return page.exists(self.selectors.job_list_root)
 
     def scan(
         self,

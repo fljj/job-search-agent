@@ -514,6 +514,24 @@ def _finish(
                 external_reference=result.external_reference,
             )
         )
+    if (
+        target is ActionStatus.SUCCEEDED
+        and action.action_type == ActionType.MISMATCH_DECLINE.value
+        and action.conversation_id
+    ):
+        conversation = session.get(db.Conversation, action.conversation_id)
+        if conversation is not None and conversation.state != "DECLINED":
+            previous_state = conversation.state
+            conversation.state = "DECLINED"
+            _audit(
+                session,
+                "CONVERSATION_DECLINED",
+                "conversation",
+                conversation.id,
+                previous_state,
+                "DECLINED",
+                ["MISMATCH_DECLINE_SENT"],
+            )
     _audit(
         session,
         event,
