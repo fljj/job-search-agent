@@ -217,6 +217,9 @@ class Job(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source_status: Mapped[str] = mapped_column(String(20))
+    recruiter_role: Mapped[str] = mapped_column(
+        String(30), default="UNKNOWN", server_default="UNKNOWN"
+    )
     raw_data: Mapped[dict[str, object]] = mapped_column(JSONB)
 
 

@@ -64,13 +64,14 @@ describe('总览平台运行聚合', () => {
   it('同时展示并汇总所有活动平台', () => {
     const runs = [
       run('MAIMAI', 'RUNNING', 3),
+      run('LIEPIN', 'RUNNING', 2),
       run('BOSS', 'RUNNING', 5),
       run('MOCK', 'STOPPED', 100),
     ]
 
-    expect(activeRuns(runs).map((item) => item.platform)).toEqual(['BOSS', 'MAIMAI'])
-    expect(activeRuns(runs).reduce((sum, item) => sum + item.processed_count, 0)).toBe(8)
-    expect(agentStatusText(runs)).toBe('2 个平台运行中')
+    expect(activeRuns(runs).map((item) => item.platform)).toEqual(['BOSS', 'MAIMAI', 'LIEPIN'])
+    expect(activeRuns(runs).reduce((sum, item) => sum + item.processed_count, 0)).toBe(10)
+    expect(agentStatusText(runs)).toBe('3 个平台运行中')
   })
 
   it('部分平台暂停时显示部分运行', () => {

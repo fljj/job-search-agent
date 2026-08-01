@@ -80,6 +80,7 @@ def test_reads_job_detail_with_platform_selector_version() -> None:
     assert result.job.external_job_id == "job-liepin-1"
     assert result.job.company_name == "示例科技"
     assert result.job.recruiter_name == "李女士"
+    assert result.job.recruiter_role == "DIRECT_EMPLOYER"
     assert result.job.work_mode == "ONSITE"
 
 

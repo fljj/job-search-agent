@@ -1,8 +1,8 @@
 # job-search-agent
 
-面向 BOSS 直聘和脉脉的无人值守求职 Agent。系统可以自动发现和评分职位、处理普通招聘
-消息，并按规则发送网站内已有简历；电话和面试的具体时间、登录验证、验证码及安全异常
-仍由用户处理。
+面向 BOSS 直聘和脉脉的无人值守求职 Agent，并已加入猎聘 L2 只读职位发现与评分。BOSS
+和脉脉可以处理普通招聘消息并按规则发送网站内已有简历；猎聘当前不会发送招呼、消息或
+简历。电话和面试的具体时间、登录验证、验证码及安全异常仍由用户处理。
 
 ## 1. 系统组成
 
@@ -28,7 +28,7 @@
   “面试确认”页面处理。总览分别统计两类未过期任务。
 
 API、前端和 Worker 是三个独立进程。一个 Worker 会处理数据库中所有处于 `RUNNING`
-状态的平台任务，不需要为 BOSS 和脉脉分别启动 Worker。
+状态的平台任务，不需要为各平台分别启动 Worker。
 
 ## 2. 环境要求
 
@@ -85,12 +85,14 @@ APPLE_CALENDAR_NAME=求职面试
 
 | 配置 | 默认值 | 说明 |
 |---|---|---|
-| `AGENT_EXECUTOR_MODE` | `REAL` | BOSS/脉脉必须使用 `REAL`；离线 MOCK 使用 `FAKE` |
+| `AGENT_EXECUTOR_MODE` | `REAL` | BOSS/脉脉及猎聘只读 Run 使用 `REAL`；离线 MOCK 使用 `FAKE` |
 | `AGENT_CDP_URL` | `http://127.0.0.1:9222` | 专用 Chrome 的调试地址 |
 | `AGENT_POLL_INTERVAL_SECONDS` | `10` | Worker 轮询间隔 |
 | `AGENT_TICK_BATCH_SIZE` | `10` | 每轮最多处理数量 |
 | `BOSS_JOB_BATCH_SIZE` | `5` | BOSS 每批最多处理的职位数 |
 | `BOSS_JOB_SCAN_INTERVAL_SECONDS` | `180` | 完成一批后到下一批的最短间隔 |
+| `LIEPIN_JOB_BATCH_SIZE` | `5` | 猎聘首页每批最多只读处理的职位数 |
+| `LIEPIN_JOB_SCAN_INTERVAL_SECONDS` | `180` | 猎聘完成一批后到下一批的最短间隔 |
 | `BOSS_LLM_RETRY_BASE_SECONDS` | `300` | 职位详情等局部失败的首次等待时间 |
 | `BOSS_LLM_RETRY_MAX_SECONDS` | `3600` | 职位局部重试的最长等待时间 |
 | `BOSS_JOB_RETRY_MAX_ATTEMPTS` | `5` | 单个职位非全局故障的最多尝试次数 |
@@ -214,6 +216,12 @@ open -na "Google Chrome" --args \
 
 - 一个消息页：`https://maimai.cn/chat`
 
+### 猎聘（L2 只读）
+
+- 一个已登录首页：`https://c.liepin.com/`
+- 不要另外打开第二个猎聘首页；Worker 不需要独立职位搜索页
+- 当前只发现、硬过滤和评分，不会执行“聊一聊”“投简历”或消息回复
+
 同一平台不要打开多个消息列表或职位列表，否则 Worker 无法唯一确认操作目标并会暂停。
 遇到登录验证、验证码或页面结构无法确认时，Worker 会停止该平台写操作。
 
@@ -227,7 +235,7 @@ curl http://127.0.0.1:9222/json/version
 
 Worker 进程和平台 Run 是两回事：
 
-- Run：保存在数据库中，表示 BOSS 或脉脉是否应该运行。
+- Run：保存在数据库中，表示某个平台是否应该运行。
 - Worker：本机唯一执行进程，轮询并处理所有 `RUNNING` Run。
 
 ### 6.1 配置自动化
@@ -287,7 +295,7 @@ BOSS 和脉脉 Run 启用后直接按“系统设置”中的正式自动化配�
 具体推荐规则见
 [config/recommendation-policy.json](config/recommendation-policy.json)。
 
-### 6.3 创建 BOSS 和脉脉 Run
+### 6.3 创建平台 Run
 
 在“系统设置”底部的“Agent 运行”区域：
 
@@ -295,6 +303,7 @@ BOSS 和脉脉 Run 启用后直接按“系统设置”中的正式自动化配�
 2. 选择已经启用的求职策略。
 3. 点击“启动”。
 4. 再选择平台 `MAIMAI`，使用同一策略点击“启动”。
+5. 如需猎聘 L2，只保留唯一猎聘首页后选择 `LIEPIN` 启动；该 Run 只发现和评分职位。
 
 平台显示 `RUNNING` 只表示数据库任务已经启动；必须继续启动 Worker 才会实际扫描页面。
 
@@ -459,7 +468,8 @@ python scripts/reset_runtime_data.py --confirm-database job_agent --execute
   `UNKNOWN`，但已证实的完全无关岗位、黑名单、欺诈、重复发送、错误目标和附件不可用
   仍会阻断。
 - 电话和面试具体时间必须由用户确认，日历空闲不等于自动接受。
-- BOSS 支持职位发现和消息处理；脉脉支持普通消息及系统推荐，暂不支持脉脉职位列表主动发现。
+- BOSS 支持职位发现和消息处理；脉脉支持普通消息及系统推荐，暂不支持脉脉职位列表主动发现；
+  猎聘当前只支持首页职位发现、硬过滤和评分，不支持消息或写动作。
 - 页面身份不一致、登录失效、选择器变化或结果无法确认时，系统会暂停或进入安全对账。
 
 详细设计和业务规则见：

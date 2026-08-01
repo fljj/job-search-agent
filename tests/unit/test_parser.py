@@ -53,6 +53,17 @@ def test_hard_filter_keyword_detection_is_configurable() -> None:
     ).parse(job).headhunter_detected is True
 
 
+def test_structured_recruiter_role_detects_headhunter_without_jd_keyword() -> None:
+    job = JobInput(
+        title="Java开发工程师",
+        company_name="示例科技",
+        description="负责核心业务系统开发。",
+        recruiter_role="HEADHUNTER",
+    )
+
+    assert RuleJobParser(RuleParserConfig()).parse(job).headhunter_detected is True
+
+
 def test_only_explicit_full_time_bachelor_requirement_is_detected() -> None:
     explicit = JobInput(
         title="Java开发工程师",

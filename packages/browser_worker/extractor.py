@@ -197,6 +197,11 @@ def _extract_job(
         work_mode=work_mode,
         salary_text=page.text(selectors.salary),
         recruiter_name=_normalize_recruiter_name(page.text(selectors.recruiter_on_job)),
+        recruiter_role=_normalize_recruiter_role(
+            page.text(selectors.recruiter_role_on_job)
+            if selectors.recruiter_role_on_job
+            else None
+        ),
         description=description,
         source_status=source_status,
     )
@@ -213,6 +218,13 @@ def _normalize_recruiter_name(value: str | None) -> str | None:
         normalized,
     ).strip()
     return normalized or None
+
+
+def _normalize_recruiter_role(value: str | None) -> str:
+    normalized = "".join((value or "").casefold().split())
+    if any(marker in normalized for marker in ("猎头", "headhunter")):
+        return "HEADHUNTER"
+    return "DIRECT_EMPLOYER" if normalized else "UNKNOWN"
 
 
 def _extract_conversation_list(

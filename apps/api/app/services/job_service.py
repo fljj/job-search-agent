@@ -100,6 +100,7 @@ def _record_job_observation(session: Session, job: db.Job) -> None:
             "salary_text": job.salary_text,
             "description": job.description,
             "source_status": job.source_status,
+            "recruiter_role": job.recruiter_role,
             "raw_data": job.raw_data,
         },
     ))
@@ -403,6 +404,7 @@ def _domain_job(job: db.Job) -> JobInput:
         industry=job.industry, location=job.location, work_mode=job.work_mode,
         salary_text=job.salary_text, description=job.description, published_at=job.published_at,
         source_status=job.source_status, source=job.source,
+        recruiter_role=job.recruiter_role,
     )
 
 

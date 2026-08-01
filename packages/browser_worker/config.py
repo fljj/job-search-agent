@@ -42,6 +42,7 @@ class JobDetailSelectors(SelectorModel):
     salary: str
     description: str
     recruiter_on_job: str
+    recruiter_role_on_job: str | None = None
     job_open_marker: str
     job_closed_marker: str
     platform_greeting_dialog: str
@@ -123,6 +124,7 @@ class PlatformSelectors(SelectorModel):
     salary: str
     description: str
     recruiter_on_job: str
+    recruiter_role_on_job: str | None = None
     job_open_marker: str
     job_closed_marker: str
     platform_greeting_dialog: str

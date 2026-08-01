@@ -61,6 +61,7 @@ class JobInput(BaseModel):
     published_at: datetime | None = None
     source_status: SourceJobStatus = SourceJobStatus.UNKNOWN
     source: str = "MOCK"
+    recruiter_role: str = "UNKNOWN"
 
 
 class RuleParserConfig(BaseModel):

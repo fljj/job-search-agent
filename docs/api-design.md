@@ -107,7 +107,7 @@
 | 方法与路径 | 用途 |
 | --- | --- |
 | `GET/PUT /automation/settings` | 获取或局部更新全局、平台、策略配置 |
-| `POST/GET /automation/runs` | 创建或列出平台 Run |
+| `POST/GET /automation/runs` | 创建或列出平台 Run；平台支持 `BOSS/MAIMAI/LIEPIN/MOCK` |
 | `GET /automation/runs/{id}` | 获取 Run |
 | `POST /automation/runs/{id}/pause` | 暂停 Run |
 | `POST /automation/runs/{id}/resume` | 恢复 Run |
@@ -123,6 +123,11 @@
 
 自动化设置不包含小时/每日投递配额、低分婉拒开关、回复置信度或简历最低分。公司和招聘人
 冷却仅用于防重复。
+
+猎聘 L2 Run 只执行首页职位发现、硬过滤和评分。API 可以创建、暂停、恢复猎聘 Run，但
+服务端不会为猎聘创建外部写动作；即使错误调用执行链，执行器也会在写入前返回
+`PLATFORM_WRITES_NOT_ENABLED`。职位列表、职位详情和总览的现有 `source/platform` 筛选
+直接支持 `LIEPIN`，不增加平台专用职位 API。
 
 ## 8. 平台推荐和浏览器只读
 

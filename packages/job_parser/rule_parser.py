@@ -42,7 +42,7 @@ class RuleJobParser:
             ),
             headhunter_detected=any(
                 word in text for word in self.config.headhunter_keywords
-            ),
+            ) or job.recruiter_role == "HEADHUNTER",
             internship_detected=any(
                 word in text for word in self.config.internship_keywords
             ),

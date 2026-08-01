@@ -639,7 +639,7 @@ def record_ready_platform_session(
     run: db.AgentRun,
     cdp_url: str,
 ) -> None:
-    """消息列表扫描成功后记录真实会话证据，供后续动作服务端复核。"""
+    """记录已识别的平台页面证据，供发现流程和后续动作复核。"""
     record = session.scalar(
         select(db.PlatformSession).where(
             db.PlatformSession.user_id == DEFAULT_USER_ID,
@@ -717,7 +717,8 @@ def record_platform_session_failure(
 
 
 def _page_role(platform: str, url: str) -> str | None:
-    path = urlparse(url).path
+    parsed = urlparse(url)
+    path = parsed.path
     if platform == "BOSS":
         if path == "/web/geek/chat":
             return "MESSAGE_LIST"
@@ -725,6 +726,12 @@ def _page_role(platform: str, url: str) -> str | None:
             return "JOB_LIST"
     if platform == "MAIMAI" and "feed_im" in path:
         return "MESSAGE_LIST"
+    if (
+        platform == "LIEPIN"
+        and parsed.hostname == "c.liepin.com"
+        and path in {"", "/"}
+    ):
+        return "JOB_LIST"
     return None
 
 

@@ -46,9 +46,12 @@ def process_job_discovery_batch(
     executor: ActionExecutor,
     cdp_url: str,
     now: datetime | None = None,
+    execute_external_actions: bool = True,
 ) -> dict[str, int]:
     if run.platform != batch.platform.value:
         raise ValueError("职位发现批次平台与 Agent 运行不匹配")
+    if batch.platform.value == "LIEPIN" and execute_external_actions:
+        raise ValueError("猎聘 L2 只允许发现和评分，禁止创建外部写动作")
     current = now or datetime.now(UTC)
     rules = _effective_rules(session, run.platform, run.strategy_id)
     blocked = job_scan_block_reasons(session, run, rules, current)
@@ -119,6 +122,7 @@ def process_job_discovery_batch(
                 description=source.description,
                 source_status=source.source_status,
                 source=batch.platform.value,
+                recruiter_role=source.recruiter_role,
             ),
         )
         job = session.get(db.Job, imported.job.id)
@@ -172,6 +176,24 @@ def process_job_discovery_batch(
                     counts["skipped"] += 1
                     continue
                 counts["scored"] += 1
+                if not execute_external_actions:
+                    contact_candidate = (
+                        score.automation_eligible
+                        and source.recruiter_role != "HEADHUNTER"
+                    )
+                    reasons = (
+                        ["PROACTIVE_CONTACT_CANDIDATE"]
+                        if contact_candidate
+                        else list(score.action_blockers)
+                        or ["PROACTIVE_CONTACT_NOT_ELIGIBLE"]
+                    )
+                    if (
+                        source.recruiter_role == "HEADHUNTER"
+                        and "HEADHUNTER_PROACTIVE_CONTACT_BLOCKED" not in reasons
+                    ):
+                        reasons.append("HEADHUNTER_PROACTIVE_CONTACT_BLOCKED")
+                    _finish(record, "SCORED", reasons)
+                    continue
                 draft_id = create_greeting_draft(session, score.id, provider).id
             _state_event(session, run, item, "AUTHORIZING")
             _state_event(session, run, item, "CONTACTING")

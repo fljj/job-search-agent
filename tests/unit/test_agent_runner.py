@@ -16,6 +16,7 @@ from adapters.browser.message_discovery import (
     MessageDiscoveryBatch,
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
+from adapters.browser.read_only_actions import ReadOnlyActionExecutor
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import Settings
 from apps.api.app.models import entities as db
@@ -33,6 +34,7 @@ from scripts.run_agent_worker import (
     _merge_seen_job_ids,
     _process_maimai_recommendations,
     _run_boss_job_discovery,
+    _run_liepin_job_discovery,
     _single_worker_lock,
 )
 
@@ -186,16 +188,89 @@ def test_fake_executor_can_simulate_safety_failure() -> None:
 
 def test_worker_executor_mode_is_explicitly_isolated() -> None:
     real_executor, real_type = _build_executor("BOSS", "REAL")
+    liepin_executor, liepin_type = _build_executor("LIEPIN", "REAL")
     fake_executor, fake_type = _build_executor("MOCK", "FAKE")
 
     assert isinstance(real_executor, PlaywrightActionExecutor)
     assert real_type == "REAL_CDP"
+    assert isinstance(liepin_executor, ReadOnlyActionExecutor)
+    assert liepin_type == "READ_ONLY_CDP"
     assert isinstance(fake_executor, FakeActionExecutor)
     assert fake_type == "FAKE"
     with pytest.raises(ValueError, match="禁止使用 Fake"):
         _build_executor("BOSS", "FAKE")
+    with pytest.raises(ValueError, match="只读阶段禁止使用 Fake"):
+        _build_executor("LIEPIN", "FAKE")
     with pytest.raises(ValueError, match="显式配置 Fake"):
         _build_executor("MOCK", "REAL")
+
+
+def test_liepin_job_discovery_forces_read_only_batch_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = db.AgentRun(
+        id=uuid4(),
+        user_id=uuid4(),
+        strategy_id=uuid4(),
+        platform="LIEPIN",
+        cursor={},
+    )
+    now = datetime.now(UTC)
+    batch = JobDiscoveryBatch(
+        platform=Platform.LIEPIN,
+        search_key="HOME",
+        scroll_position=0,
+        scanned_at=now,
+        next_scan_at=now,
+    )
+    adapter = MagicMock()
+    adapter.scan.return_value = batch
+    processed = MagicMock()
+    session = MagicMock(spec=Session)
+    session.scalars.return_value.all.return_value = []
+    session.get.return_value = MagicMock(title_rules=[])
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.LiepinJobDiscoveryAdapter",
+        lambda _config: adapter,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.next_retryable_job", lambda *_args: None
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.process_job_discovery_batch", processed
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_settings",
+        lambda: Settings(_env_file=None, liepin_job_batch_size=5),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_job_parser_config", MagicMock()
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_browser_selectors", MagicMock()
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.build_runtime_llm_provider", MagicMock()
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.runtime_event", lambda *_args, **_kwargs: None
+    )
+
+    _run_liepin_job_discovery(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        ReadOnlyActionExecutor(),
+        AutomationRules(),
+    )
+
+    assert adapter.scan.call_args.kwargs["search_key"] == "HOME"
+    assert adapter.scan.call_args.kwargs["refresh_before_scan"] is False
+    assert processed.call_args.kwargs["execute_external_actions"] is False
+    adapter.close_details.assert_called_once_with(
+        "http://127.0.0.1:9222", batch
+    )
 
 
 def test_only_one_worker_can_hold_process_lock(

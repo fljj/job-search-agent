@@ -18,12 +18,14 @@ from adapters.browser.fake_actions import FakeActionExecutor
 from adapters.browser.job_discovery import (
     BossJobDiscoveryAdapter,
 )
+from adapters.browser.liepin_job_discovery import LiepinJobDiscoveryAdapter
 from adapters.browser.message_discovery import (
     BossMessageDiscoveryAdapter,
     MaimaiMessageDiscoveryAdapter,
     MessageDiscoveryAdapter,
 )
 from adapters.browser.playwright_actions import PlaywrightActionExecutor
+from adapters.browser.read_only_actions import ReadOnlyActionExecutor
 from adapters.llm.errors import LlmProviderError
 from apps.api.app.core.browser_config import get_browser_selectors
 from apps.api.app.core.config import get_settings, reload_settings
@@ -121,6 +123,10 @@ def _build_executor(platform: str, mode: str) -> tuple[ActionExecutor, str]:
         if mode != "REAL":
             raise ValueError("真实招聘平台正式运行禁止使用 Fake 执行器")
         return PlaywrightActionExecutor(get_browser_selectors()), "REAL_CDP"
+    if platform == Platform.LIEPIN.value:
+        if mode != "REAL":
+            raise ValueError("猎聘只读阶段禁止使用 Fake 执行器")
+        return ReadOnlyActionExecutor(), "READ_ONLY_CDP"
     if platform == "MOCK":
         if mode != "FAKE":
             raise ValueError("MOCK 运行必须显式配置 Fake 执行器")
@@ -347,6 +353,60 @@ def _run_boss_job_discovery(
     executor: ActionExecutor,
     rules: object,
 ) -> None:
+    settings = get_settings()
+    _run_job_discovery(
+        session,
+        run,
+        worker_id,
+        cdp_url,
+        executor,
+        rules,
+        adapter=BossJobDiscoveryAdapter(get_browser_selectors()),
+        search_keys=settings.boss_job_searches,
+        batch_size=settings.boss_job_batch_size,
+        interval_seconds=settings.boss_job_scan_interval_seconds,
+        execute_external_actions=True,
+    )
+
+
+def _run_liepin_job_discovery(
+    session: Session,
+    run: db.AgentRun,
+    worker_id: str,
+    cdp_url: str,
+    executor: ActionExecutor,
+    rules: object,
+) -> None:
+    settings = get_settings()
+    _run_job_discovery(
+        session,
+        run,
+        worker_id,
+        cdp_url,
+        executor,
+        rules,
+        adapter=LiepinJobDiscoveryAdapter(get_browser_selectors()),
+        search_keys=["HOME"],
+        batch_size=settings.liepin_job_batch_size,
+        interval_seconds=settings.liepin_job_scan_interval_seconds,
+        execute_external_actions=False,
+    )
+
+
+def _run_job_discovery(
+    session: Session,
+    run: db.AgentRun,
+    worker_id: str,
+    cdp_url: str,
+    executor: ActionExecutor,
+    rules: object,
+    *,
+    adapter: BossJobDiscoveryAdapter | LiepinJobDiscoveryAdapter,
+    search_keys: list[str],
+    batch_size: int,
+    interval_seconds: int,
+    execute_external_actions: bool,
+) -> None:
     from packages.policy_engine.automation import AutomationRules
 
     assert isinstance(rules, AutomationRules)
@@ -388,9 +448,6 @@ def _run_boss_job_discovery(
         else []
     )
     parser_config = get_job_parser_config()
-    settings = get_settings()
-    search_keys = settings.boss_job_searches
-    adapter = BossJobDiscoveryAdapter(get_browser_selectors())
     try:
         job_batch = adapter.scan(
             cdp_url,
@@ -418,8 +475,8 @@ def _run_boss_job_discovery(
                 *parser_config.relevant_title_keywords,
                 *relevant_title_keywords,
             ],
-            limit=1 if retry_job_id else settings.boss_job_batch_size,
-            interval_seconds=settings.boss_job_scan_interval_seconds,
+            limit=1 if retry_job_id else batch_size,
+            interval_seconds=interval_seconds,
         )
         if retry_record is not None and not job_batch.items:
             mark_retry_target_not_visible(session, retry_record)
@@ -440,8 +497,8 @@ def _run_boss_job_discovery(
                     *parser_config.relevant_title_keywords,
                     *relevant_title_keywords,
                 ],
-                limit=settings.boss_job_batch_size,
-                interval_seconds=settings.boss_job_scan_interval_seconds,
+                limit=batch_size,
+                interval_seconds=interval_seconds,
             )
     except (OSError, TimeoutError, ValueError) as exc:
         record_platform_session_failure(session, run, "JOB_DISCOVERY_UNAVAILABLE")
@@ -469,6 +526,7 @@ def _run_boss_job_discovery(
             provider=build_runtime_llm_provider(session),
             executor=executor,
             cdp_url=cdp_url,
+            execute_external_actions=execute_external_actions,
         )
     finally:
         adapter.close_details(cdp_url, job_batch)
@@ -572,6 +630,35 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             )
                         else:
                             _run_boss_job_discovery(
+                                session,
+                                run,
+                                worker_id,
+                                cdp_url,
+                                executor,
+                                rules,
+                            )
+                    continue
+                elif run.platform == Platform.LIEPIN.value:
+                    run.executor_type = executor_type
+                    record_ready_platform_session(session, run, cdp_url)
+                    session.commit()
+                    rules = _effective_rules(
+                        session, run.platform, run.strategy_id
+                    )
+                    if rules.job_scan_enabled and not rules.emergency_stop:
+                        scan_blockers = job_scan_block_reasons(
+                            session, run, rules, datetime.now(UTC)
+                        )
+                        if scan_blockers:
+                            runtime_event(
+                                logger,
+                                "JOB_SCAN_SKIPPED",
+                                worker_id=worker_id,
+                                run_id=run_id,
+                                reason_codes=scan_blockers,
+                            )
+                        else:
+                            _run_liepin_job_discovery(
                                 session,
                                 run,
                                 worker_id,

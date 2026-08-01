@@ -60,6 +60,7 @@ class BrowserJob(BaseModel):
     work_mode: str = "UNKNOWN"
     salary_text: str | None = None
     recruiter_name: str | None = None
+    recruiter_role: str = "UNKNOWN"
     description: str
     source_status: str = "UNKNOWN"
 

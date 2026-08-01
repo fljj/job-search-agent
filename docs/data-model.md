@@ -37,8 +37,10 @@
 
 ### `jobs` 与 `job_observations`
 
-`jobs` 保存平台、外部职位 ID、内容哈希、标题、公司、地点、工作模式、薪资、正文、状态及
-原始结构。平台外部 ID 和内容哈希用于幂等。正文变化更新当前职位，并在
+`jobs` 保存平台、外部职位 ID、内容哈希、标题、公司、地点、工作模式、薪资、正文、状态、
+结构化招聘人身份 `recruiter_role` 及原始结构。招聘人身份取值为
+`HEADHUNTER / DIRECT_EMPLOYER / UNKNOWN`；旧数据默认 `UNKNOWN`，不能根据姓名猜测身份。
+平台外部 ID 和内容哈希用于幂等。正文变化更新当前职位，并在
 `job_observations(job_id, content_hash)` 追加唯一快照。
 
 ### `parsed_job_details`
@@ -126,7 +128,8 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
 - `platform_sessions`：登录、页面和选择器可用状态；
 - `browser_page_registrations`：平台页面角色、CDP target、所有权和唯一性；
 - `browser_read_runs` / `page_evidence`：脱敏页面读取与证据；
-- `job_discovery_records`：职位预筛、处理、重试、正文版本和原因；
+- `job_discovery_records`：职位预筛、处理、重试、正文版本和原因；猎聘满足主动条件但尚未
+  开放写入的记录使用 `SCORED + PROACTIVE_CONTACT_CANDIDATE`，不创建 Action Queue；
 - `platform_recommendations`：脉脉推荐卡片、简化判断、动作和回读证据；
 - `llm_circuit_breakers`：用户级模型能力状态、探测和失败信息；
 - `llm_runtime_settings`：当前 provider/model 和版本，不保存 API Key。

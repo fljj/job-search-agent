@@ -28,6 +28,7 @@
     "salary": ".job-apply-content .job-salary",
     "description": ".job-intro-container",
     "recruiter_on_job": ".recruiter-container .recruiter-name",
+    "recruiter_role_on_job": ".recruiter-container .recruiter-role",
     "job_open_marker": ".job-apply-operate .btn-chat",
     "job_closed_marker": ".job-status-closed, .job-detail-status-expired",
     "platform_greeting_dialog": ".im-ui-chat-modal-container",
