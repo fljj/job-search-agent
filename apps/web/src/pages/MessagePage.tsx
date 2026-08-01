@@ -98,7 +98,8 @@ export function MessagePage() {
           void load(1, pageSize, value)
         }} />
     </Space>
-    <Table rowKey="id" dataSource={items} loading={loading} scroll={{ x: 1600 }}
+    <Table rowKey="id" dataSource={items} loading={loading} scroll={{ x: 1800 }}
+      tableLayout="fixed"
       pagination={{
         current: page,
         pageSize,
@@ -114,37 +115,39 @@ export function MessagePage() {
         void load(nextPage, nextPageSize)
       }}
       columns={[
-      { title: '平台', dataIndex: 'platform' },
-      { title: '公司/职位', render: (_: unknown, item: ConversationSummary) =>
-        <Space direction="vertical" size={0}><strong>{item.company_name ?? '-'}</strong>
+      { title: '平台', dataIndex: 'platform', width: 100 },
+      { title: '公司/职位', width: 240, render: (_: unknown, item: ConversationSummary) =>
+        <Space direction="vertical" size={0} style={{ width: '100%' }}><strong>{item.company_name ?? '-'}</strong>
           <span>{item.job_title ?? '-'}</span></Space> },
-      { title: '关联职位', render: (_: unknown, item: ConversationSummary) =>
+      { title: '关联职位', width: 110, render: (_: unknown, item: ConversationSummary) =>
         item.job_id
           ? <Button type="link" onClick={() => {
             window.location.hash = `jobs?job_id=${item.job_id}`
           }}>查看职位</Button>
           : <Tag>职位未绑定</Tag> },
-      { title: '招聘人', dataIndex: 'recruiter_name' },
-      { title: '评分', render: (_: unknown, item: ConversationSummary) =>
+      { title: '招聘人', dataIndex: 'recruiter_name', width: 120, ellipsis: true },
+      { title: '评分', width: 110, render: (_: unknown, item: ConversationSummary) =>
         !item.job_id
           ? <Tag>职位未绑定</Tag>
           : item.latest_score === undefined || item.latest_score === null
           ? <Tag>待评分</Tag> : <Tag color={item.latest_score >= 80 ? 'green' : 'blue'}>
             {item.latest_score} / {item.latest_grade}</Tag> },
-      { title: '入站资格', render: (_: unknown, item: ConversationSummary) =>
-        <Space direction="vertical" size={0}>
+      { title: '入站资格', width: 260, render: (_: unknown, item: ConversationSummary) =>
+        <Space direction="vertical" size={0} style={{ width: '100%' }}>
           <Tag color={item.qualification_status === 'FULL_MATCH' ? 'green'
             : item.qualification_status === 'ROUGH_MATCH' ? 'blue'
               : item.qualification_status === 'MISMATCH' ? 'red' : 'default'}>
             {businessLabel(item.qualification_status)}
           </Tag>
-          <span>{item.qualification_evidence.map(displayReason).join('；') || '-'}</span>
+          <span style={{ overflowWrap: 'anywhere' }}>
+            {item.qualification_evidence.map(displayReason).join('；') || '-'}
+          </span>
         </Space> },
-      { title: '会话状态', dataIndex: 'state',
+      { title: '会话状态', dataIndex: 'state', width: 130,
         render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag> },
-      { title: 'Agent 最近决策', render: (_: unknown, item: ConversationSummary) =>
-        <Space direction="vertical" size={0}>
-          {item.latest_draft_type && <Space size={4}>
+      { title: 'Agent 最近决策', width: 360, render: (_: unknown, item: ConversationSummary) =>
+        <Space direction="vertical" size={0} style={{ width: '100%' }}>
+          {item.latest_draft_type && <Space size={4} wrap>
             <Tag color={
               item.latest_draft_decision === 'DENY' || item.qualification_status === 'MISMATCH'
                 ? 'red' : 'blue'
@@ -160,7 +163,7 @@ export function MessagePage() {
               ? businessLabel(item.latest_reply_source)
               : '历史未记录来源'}</Tag>
           </Space>}
-          <span>{decisionContent(item)}</span>
+          <span style={{ overflowWrap: 'anywhere' }}>{decisionContent(item)}</span>
         </Space> },
       { title: '简历发送', width: 280, ellipsis: true,
         render: (_: unknown, item: ConversationSummary) =>

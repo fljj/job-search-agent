@@ -126,7 +126,8 @@ export function JobPage() {
         setPage(1)
         void load(1, pageSize)
       }}>筛选</Button>
-    </Space><Table rowKey="id" dataSource={jobs} loading={loading} scroll={{ x: 1500 }}
+    </Space><Table rowKey="id" dataSource={jobs} loading={loading} scroll={{ x: 1700 }}
+      tableLayout="fixed"
       pagination={{
         current: page,
         pageSize,
@@ -146,36 +147,36 @@ export function JobPage() {
         render: (source: string) => <Tag>{platformLabels[source] ?? source}</Tag> },
       { title: '职位', dataIndex: 'title', width: 260, ellipsis: true },
       { title: '公司', dataIndex: 'company_name', width: 220, ellipsis: true },
-      { title: '模式', dataIndex: 'work_mode', render: (mode: string) => <Tag>{mode}</Tag> },
-      { title: '地点', dataIndex: 'location' },
-      { title: '薪资', dataIndex: 'salary_text', render: (value?: string) => value ?? '-' },
-      { title: '评分', render: (_: unknown, job: Job) => job.latest_score
+      { title: '模式', dataIndex: 'work_mode', width: 100, render: (mode: string) => <Tag>{mode}</Tag> },
+      { title: '地点', dataIndex: 'location', width: 120, ellipsis: true },
+      { title: '薪资', dataIndex: 'salary_text', width: 120, render: (value?: string) => value ?? '-' },
+      { title: '评分', width: 180, render: (_: unknown, job: Job) => job.latest_score
         ? job.latest_score.hard_rejected
           ? <Tag color="red">硬性排除（未AI评分）</Tag>
           : <Tag color={job.latest_score.total_score >= 80 ? 'green' : 'blue'}>
             {job.latest_score.total_score} / {job.latest_score.grade}</Tag>
         : <Tag>待评分</Tag> },
-      { title: '硬性规则', render: (_: unknown, job: Job) => job.latest_score
+      { title: '硬性规则', width: 120, render: (_: unknown, job: Job) => job.latest_score
         ? <Tag color={job.latest_score.hard_rejected ? 'red' : 'green'}>
           {job.latest_score.hard_rejected ? '已排除' : '通过'}</Tag> : <Tag>待评分</Tag> },
-      { title: '沟通进度', render: (_: unknown, job: Job) => {
+      { title: '沟通进度', width: 240, render: (_: unknown, job: Job) => {
         const communication = job.communication
         const reason = communication?.failure_code
           ?? communication?.reason_codes?.[0]
-        return <Space direction="vertical" size={0}>
+        return <Space direction="vertical" size={0} style={{ width: '100%' }}>
           <Tag color={communication?.status === 'CONVERSATION_ACTIVE' ? 'green'
             : communication?.status === 'GREETING_RETRY_PENDING'
               || communication?.status === 'GREETING_FAILED' ? 'red' : 'blue'}>
             {businessLabel(communication?.status ?? 'NOT_CONTACTED')}
           </Tag>
-          {reason && <span>{businessLabel(reason)}</span>}
+          {reason && <span style={{ overflowWrap: 'anywhere' }}>{businessLabel(reason)}</span>}
           {communication?.conversation_id && <Button type="link" size="small"
             onClick={() => { window.location.hash = `messages?job_id=${job.id}` }}>
             查看对应消息
           </Button>}
         </Space>
       } },
-      { title: '操作', render: (_: unknown, job: Job) => <Space direction="vertical" size={0}>
+      { title: '操作', width: 150, render: (_: unknown, job: Job) => <Space direction="vertical" size={0}>
         <Button disabled={!job.latest_score}
           onClick={() => job.latest_score && void openScore(job.latest_score.id)}>
           查看评分证据
