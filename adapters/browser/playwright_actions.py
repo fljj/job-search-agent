@@ -1154,8 +1154,10 @@ class PlaywrightActionExecutor:
                     observed = page._evaluate(
                         "Array.from(document.querySelectorAll("
                         f"{json.dumps(selectors.sent_message_items)}"
-                        f")).slice({baseline_count}).some(item => "
-                        f"(item.textContent || '').trim() === {json.dumps(command.content.strip())})"
+                        f")).slice({baseline_count}).some(item => {{ const body = "
+                        "item.querySelector('.text-content'); return "
+                        f"((body?.textContent || item.textContent || '').trim() === "
+                        f"{json.dumps(command.content.strip())}); }})"
                     )
                     if observed:
                         return ExecutionResult(
@@ -1256,7 +1258,8 @@ class PlaywrightActionExecutor:
                     f"const baseline = {raw_baseline};"
                     f"const expected = {json.dumps((command.content or '').strip())};"
                     "return {count: items.length, matched: items.slice(baseline).some("
-                    "item => (item.textContent || '').trim() === expected)}; })()"
+                    "item => { const body = item.querySelector('.text-content'); return "
+                    "(body?.textContent || item.textContent || '').trim() === expected; })}; })()"
                 )
                 if isinstance(observation, dict) and observation.get("matched"):
                     return ExecutionResult(

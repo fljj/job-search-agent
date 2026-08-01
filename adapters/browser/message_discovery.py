@@ -521,25 +521,30 @@ def _job_id_from_href(href: str | None) -> str | None:
 def _normalize_duplicate_conversation_ids(
     items: list[BrowserConversationSummary],
 ) -> None:
-    counts: dict[str, int] = {}
+    groups: dict[str, list[BrowserConversationSummary]] = {}
     for item in items:
-        counts[item.external_conversation_id] = (
-            counts.get(item.external_conversation_id, 0) + 1
-        )
-    for item in items:
-        if counts[item.external_conversation_id] <= 1:
+        groups.setdefault(item.external_conversation_id, []).append(item)
+    for group in groups.values():
+        if len(group) <= 1:
             continue
-        identity = "|".join(
-            [
-                item.recruiter_name,
-                item.job_title or "",
-                item.company_name or "",
-            ]
+        job_ids = [item.external_job_id for item in group]
+        jobs_are_unique = (
+            all(job_ids)
+            and len(set(job_ids)) == len(job_ids)
         )
-        item.external_conversation_id = (
-            f"derived:{hashlib.sha256(identity.encode()).hexdigest()}"
-        )
-        item.identity_reliable = False
+        for item in group:
+            identity = "|".join(
+                [
+                    item.recruiter_name,
+                    item.job_title or "",
+                    item.company_name or "",
+                ]
+            )
+            item.external_conversation_id = (
+                f"derived:{hashlib.sha256(identity.encode()).hexdigest()}"
+            )
+            if not jobs_are_unique:
+                item.identity_reliable = False
 
 
 def select_discovery_candidates(

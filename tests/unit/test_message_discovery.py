@@ -658,6 +658,23 @@ def test_duplicate_platform_conversation_ids_get_stable_composite_ids() -> None:
     assert first.external_conversation_id.startswith("derived:")
     assert second.external_conversation_id.startswith("derived:")
     assert first.external_conversation_id != second.external_conversation_id
+    assert first.identity_reliable is False
+    assert second.identity_reliable is False
+
+
+def test_duplicate_conversation_ids_remain_reliable_with_unique_job_ids() -> None:
+    first = summary(1)
+    second = summary(2)
+    second.external_conversation_id = first.external_conversation_id
+    second.external_job_id = "job-2"
+
+    _normalize_duplicate_conversation_ids([first, second])
+
+    assert first.external_conversation_id.startswith("derived:")
+    assert second.external_conversation_id.startswith("derived:")
+    assert first.external_conversation_id != second.external_conversation_id
+    assert first.identity_reliable is True
+    assert second.identity_reliable is True
 
 
 def test_successful_discovery_records_ready_platform_session() -> None:

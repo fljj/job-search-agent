@@ -228,6 +228,9 @@ def persist_discovery_batch(
         if detail is None:
             counts["paused"] += 1
             continue
+        conversation.identity_reliable = (
+            item.summary.identity_reliable and detail.identity_reliable
+        )
         conversation.job_id = job.id if job else None
         conversation.strategy_id = run.strategy_id
         conversation.latest_job_score_id = score.id if score else None
