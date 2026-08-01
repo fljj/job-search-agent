@@ -30,6 +30,7 @@ class DiscoveredConversation(BaseModel):
     summary: BrowserConversationSummary
     detail: ReadResult | None = None
     job_detail: ReadResult | None = None
+    job_source_url: str | None = None
     reason_codes: list[str] = Field(default_factory=list)
 
 
@@ -240,6 +241,12 @@ class MessageDiscoveryAdapter:
                         summary.external_conversation_id
                     )
                 linked_href = self._linked_job_href(page) if not reasons else None
+                linked_source_url = (
+                    linked_href
+                    if (urlparse(linked_href).hostname or "").lower()
+                    in self.selectors.allowed_hosts
+                    else None
+                )
                 visible_job_id = _job_id_from_href(linked_href)
                 reuse_linked_job = bool(
                     known_linked_job_id
@@ -266,6 +273,7 @@ class MessageDiscoveryAdapter:
                     summary=summary,
                     detail=detail if not reasons else None,
                     job_detail=job_detail,
+                    job_source_url=linked_source_url,
                     reason_codes=reasons,
                 )
             time.sleep(0.1)

@@ -111,6 +111,7 @@ def process_job_discovery_batch(
             session,
             JobImportPayload(
                 external_job_id=source.external_job_id,
+                source_url=item.detail_target_url or item.detail.page_url,
                 title=source.title,
                 company_name=source.company_name,
                 industry=source.industry,

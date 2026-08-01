@@ -26,7 +26,7 @@ from apps.api.app.services.conversation_service import (
     create_conversation,
     import_message,
 )
-from apps.api.app.services.job_service import import_job
+from apps.api.app.services.job_service import import_job, to_job_domain
 from apps.api.app.services.llm_circuit_service import open_llm_circuit
 from apps.api.app.services.llm_config_service import runtime_settings
 from apps.api.app.services.qualification_service import refresh_qualification
@@ -755,6 +755,7 @@ def _resolve_job(
             session,
             JobImportPayload(
                 external_job_id=source.external_job_id,
+                source_url=item.job_source_url,
                 title=source.title,
                 company_name=source.company_name,
                 industry=source.industry,
@@ -778,7 +779,18 @@ def _resolve_job(
                 db.Job.external_job_id == external_job_id,
             )
         ).all()
-        return matches[0] if len(matches) == 1 else None
+        if len(matches) == 1:
+            job = matches[0]
+            if item.job_source_url:
+                import_job(
+                    session,
+                    JobImportPayload.model_validate({
+                        **to_job_domain(job).model_dump(),
+                        "source_url": item.job_source_url,
+                    }),
+                )
+            return job
+        return None
     title = item.summary.job_title or (detail.job_title if detail else None)
     company = item.summary.company_name or (detail.company_name if detail else None)
     if not title or not company:

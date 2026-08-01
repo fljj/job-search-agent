@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -319,6 +320,67 @@ def test_missing_approved_job_tab_is_retryable_before_any_click() -> None:
         assert result.outcome is ExecutionOutcome.FAILED_RETRYABLE
         assert result.error_code == "APPROVED_TARGET_PAGE_NOT_FOUND"
         assert page.get_by_text("不应发送").count() == 0
+
+
+def test_missing_job_tab_can_open_persisted_source_url_after_identity_check(
+    monkeypatch,
+) -> None:
+    created_response = MagicMock()
+    created_response.__enter__.return_value.read.return_value = json.dumps({
+        "id": "opened-job",
+    }).encode()
+    list_response = MagicMock()
+    list_response.__enter__.return_value.read.return_value = json.dumps([{
+        "id": "opened-job",
+        "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/opened-job",
+    }]).encode()
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.urlopen",
+        MagicMock(side_effect=[created_response, list_response]),
+    )
+    page = MagicMock()
+    reader = MagicMock()
+    reader.__enter__.return_value = page
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.RawCdpPageReader",
+        lambda _: reader,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.extract_current_page",
+        lambda *_args, **_kwargs: ReadResult(
+            platform=Platform.BOSS,
+            status=SessionStatus.SESSION_READY,
+            page_type=PageType.JOB,
+            page_url="https://www.zhipin.com/job_detail/boss-job-1.html",
+            page_title="高级 Python 后端工程师",
+            content_hash="a" * 64,
+            selector_version="fixture",
+            job={
+                "external_job_id": "boss-job-1",
+                "title": "高级 Python 后端工程师",
+                "company_name": "示例科技",
+                "recruiter_name": "张招聘",
+                "description": "Python 后端开发",
+            },
+        ),
+    )
+    command = approved_command(
+        "GREETING",
+        external_job_id="boss-job-1",
+        source_url="https://www.zhipin.com/job_detail/boss-job-1.html",
+    )
+
+    opened, failure = PlaywrightActionExecutor(
+        get_browser_selectors()
+    )._open_approved_job_target(
+        "http://127.0.0.1:9222",
+        command,
+        Platform.BOSS,
+        get_browser_selectors().platforms["BOSS"],
+    )
+
+    assert failure is None
+    assert opened == "ws://127.0.0.1/devtools/page/opened-job"
 
 
 def test_selects_unique_existing_resume_and_reads_back_result() -> None:

@@ -4,7 +4,8 @@ import { api } from '../api/client'
 import { businessLabel } from './business-labels'
 
 interface Job { id: string; title: string; company_name: string; work_mode: string; location?: string;
-  salary_text?: string; source: string; latest_score?: { id: string; total_score: number; grade: string;
+  salary_text?: string; source: string; source_url?: string;
+  latest_score?: { id: string; total_score: number; grade: string;
     eligibility: string; hard_rejected: boolean; effective_job_status: string };
   communication?: { status: string; conversation_id?: string; action_status?: string;
     failure_code?: string; reason_codes: string[] } }
@@ -167,9 +168,17 @@ export function JobPage() {
           </Button>}
         </Space>
       } },
-      { title: '操作', render: (_: unknown, job: Job) => <Button
-        disabled={!job.latest_score} onClick={() => job.latest_score && void openScore(job.latest_score.id)}>
-        查看评分证据</Button> },
+      { title: '操作', render: (_: unknown, job: Job) => <Space direction="vertical" size={0}>
+        <Button disabled={!job.latest_score}
+          onClick={() => job.latest_score && void openScore(job.latest_score.id)}>
+          查看评分证据
+        </Button>
+        {job.source_url
+          ? <Button type="link" href={job.source_url} target="_blank" rel="noopener noreferrer">
+            打开原职位
+          </Button>
+          : <Button type="link" disabled>暂无原职位链接</Button>}
+      </Space> },
     ]} /></Card>
     <Drawer title="评分详情" width={720} open={Boolean(score)} onClose={() => setScore(undefined)}>
       {score && <Space direction="vertical" size="large" style={{ width: '100%' }}>

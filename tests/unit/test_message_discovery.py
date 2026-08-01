@@ -320,6 +320,9 @@ def test_bound_unchanged_job_reuses_local_jd_without_opening_detail(
     assert discovered.detail is not None
     assert discovered.detail.conversation is not None
     assert discovered.detail.conversation.external_job_id == "job-1"
+    assert discovered.job_source_url == (
+        "https://www.zhipin.com/job_detail/job-1.html"
+    )
     linked_reader.assert_not_called()
 
 

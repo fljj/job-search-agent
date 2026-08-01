@@ -409,6 +409,7 @@ def _approved_command(session: Session, action: db.ActionQueue) -> ApprovedComma
         platform=action.platform,
         conversation_key=action.target_conversation_key,
         external_job_id=job.external_job_id if job else None,
+        source_url=job.source_url if job else None,
         company=action.target_company,
         job_title=action.target_job_title,
         recruiter=action.target_recruiter,

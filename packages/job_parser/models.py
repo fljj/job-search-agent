@@ -51,6 +51,7 @@ class SalaryRange(BaseModel):
 
 class JobInput(BaseModel):
     external_job_id: str | None = None
+    source_url: str | None = Field(default=None, max_length=2000)
     title: str = Field(min_length=1, max_length=200)
     company_name: str = Field(min_length=1, max_length=200)
     industry: str | None = None

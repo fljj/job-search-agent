@@ -82,6 +82,29 @@ describe('JobPage', () => {
     expect(window.location.hash).toBe('#messages?job_id=job-1')
   })
 
+  it('有来源链接时可以打开原职位', async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({
+        items: [{ id: 'strategy-1', name: '远程后端', enabled: true }],
+      })
+      .mockResolvedValueOnce({
+        total: 1,
+        items: [{
+          id: 'job-1', title: 'Java后端', company_name: '示例公司',
+          work_mode: 'REMOTE', source: 'BOSS',
+          source_url: 'https://www.zhipin.com/job_detail/job-1.html',
+        }],
+      })
+
+    render(<JobPage />)
+
+    const link = await screen.findByRole('link', { name: '打开原职位' })
+    expect(link.getAttribute('href')).toBe(
+      'https://www.zhipin.com/job_detail/job-1.html',
+    )
+    expect(link.getAttribute('target')).toBe('_blank')
+  })
+
   it('消息关联职位未评分时不被策略筛选隐藏', async () => {
     window.location.hash = 'jobs?job_id=job-unscored'
     vi.mocked(api)

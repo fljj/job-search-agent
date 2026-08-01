@@ -4,6 +4,8 @@ const labels: Record<string, string> = {
   JOB_DISCOVERY_UNAVAILABLE: '职位页面不可用',
   RECOMMENDATION_DISCOVERY_UNAVAILABLE: '推荐页面不可用',
   RESULT_NOT_OBSERVED: '发送结果待核对',
+  JOB_SOURCE_URL_MISSING: '未保存原职位链接',
+  JOB_SOURCE_URL_UNAVAILABLE: '原职位链接暂不可用',
   SESSION_READY: '页面就绪', SESSION_UNAVAILABLE: '页面不可用',
   OPEN: '暂停（模型不可用）', PROBING: '正在检测', CLOSED: '正常可用',
   CONFIGURED: '已配置', UNCONFIGURED: '未配置',

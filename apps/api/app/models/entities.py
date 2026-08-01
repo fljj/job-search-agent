@@ -207,6 +207,10 @@ class Job(TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     source: Mapped[str] = mapped_column(String(30), default="MOCK")
     external_job_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    source_url_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     content_hash: Mapped[str] = mapped_column(String(64))
     title: Mapped[str] = mapped_column(String(200))
     company_name: Mapped[str] = mapped_column(String(200))

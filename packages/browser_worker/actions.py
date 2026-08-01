@@ -16,6 +16,7 @@ class ApprovedCommand(BaseModel):
     platform: str
     conversation_key: str | None = None
     external_job_id: str | None = None
+    source_url: str | None = None
     company: str
     job_title: str
     recruiter: str

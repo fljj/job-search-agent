@@ -105,7 +105,8 @@ def _import_extraction(
 ) -> None:
     if result.job:
         imported = import_job(session, JobImportPayload(
-            external_job_id=result.job.external_job_id, title=result.job.title,
+            external_job_id=result.job.external_job_id, source_url=result.page_url,
+            title=result.job.title,
             company_name=result.job.company_name, industry=result.job.industry,
             location=result.job.location, work_mode=result.job.work_mode,
             salary_text=result.job.salary_text, description=result.job.description,

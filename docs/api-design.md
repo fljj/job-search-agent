@@ -66,6 +66,10 @@
 | `GET /jobs/{id}/scores` | 获取评分历史 |
 | `GET /scores/{id}` | 获取评分详情、证据和风险 |
 
+职位导入可携带可选 `source_url`。服务端根据 `source` 校验平台域名并规范化链接；
+`POST /jobs/import`、`GET /jobs` 和 `GET /jobs/{id}` 的职位响应均返回可选
+`source_url`。非对应招聘平台的链接返回 `400 VALIDATION_ERROR`。
+
 硬性排除在调用 LLM 前执行。LLM 分数必须通过维度、总和、证据、模型及提示版本校验。
 
 ## 5. 对话、资格和草稿

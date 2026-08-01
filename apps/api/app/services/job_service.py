@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, aliased
@@ -19,6 +20,7 @@ from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
 from packages.job_parser.models import JobInput, ParsedJob
 from packages.job_parser.rule_parser import RuleJobParser
+from packages.job_parser.source_url import normalize_job_source_url
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
 from packages.policy_engine.state_machine import ActionType
@@ -26,6 +28,9 @@ from packages.policy_engine.state_machine import ActionType
 
 def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse:
     ensure_default_user(session)
+    payload = payload.model_copy(
+        update={"source_url": normalize_job_source_url(payload.source, payload.source_url)}
+    )
     content_hash = _content_hash(payload)
     existing_by_external = None
     if payload.external_job_id:
@@ -44,6 +49,7 @@ def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse
         and existing_by_content is not None
         and existing_by_external.id != existing_by_content.id
     ):
+        _record_source_url(existing_by_content, payload.source_url)
         _record_job_observation(session, existing_by_content)
         session.commit()
         return JobImportResponse(result="DUPLICATE", job=_response(existing_by_content))
@@ -60,10 +66,12 @@ def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse
             existing.work_mode = payload.work_mode.value
             existing.source_status = payload.source_status.value
             existing.raw_data = payload.model_dump(mode="json")
+            _record_source_url(existing, payload.source_url)
             _record_job_observation(session, existing)
             session.commit()
             session.refresh(existing)
             return JobImportResponse(result="UPDATED", job=_response(existing))
+        _record_source_url(existing, payload.source_url)
         _record_job_observation(session, existing)
         session.commit()
         return JobImportResponse(result="DUPLICATE", job=_response(existing))
@@ -74,6 +82,7 @@ def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse
         published_at=payload.published_at, work_mode=payload.work_mode.value,
         source_status=payload.source_status.value,
     )
+    _record_source_url(job, payload.source_url)
     session.add(job)
     session.flush()
     _record_job_observation(session, job)
@@ -104,6 +113,12 @@ def _record_job_observation(session: Session, job: db.Job) -> None:
             "raw_data": job.raw_data,
         },
     ))
+
+
+def _record_source_url(job: db.Job, source_url: str | None) -> None:
+    if source_url:
+        job.source_url = source_url
+        job.source_url_observed_at = datetime.now(UTC)
 
 
 def list_jobs(
@@ -400,7 +415,8 @@ def _get_job_entity(session: Session, job_id: object) -> db.Job:
 
 def _domain_job(job: db.Job) -> JobInput:
     return JobInput(
-        external_job_id=job.external_job_id, title=job.title, company_name=job.company_name,
+        external_job_id=job.external_job_id, source_url=job.source_url,
+        title=job.title, company_name=job.company_name,
         industry=job.industry, location=job.location, work_mode=job.work_mode,
         salary_text=job.salary_text, description=job.description, published_at=job.published_at,
         source_status=job.source_status, source=job.source,
@@ -530,5 +546,7 @@ def _parsed_response(record: db.ParsedJobDetail) -> ParsedJobResponse:
 
 
 def _content_hash(payload: JobImportPayload) -> str:
-    stable = payload.model_dump(mode="json", exclude={"external_job_id", "published_at"})
+    stable = payload.model_dump(
+        mode="json", exclude={"external_job_id", "published_at", "source_url"}
+    )
     return hashlib.sha256(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode()).hexdigest()

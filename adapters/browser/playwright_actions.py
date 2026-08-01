@@ -1,7 +1,8 @@
 import hashlib
 import json
 import time
-from urllib.request import urlopen
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
 
 from playwright.sync_api import (
     Browser,
@@ -246,10 +247,13 @@ class PlaywrightActionExecutor:
                 ):
                     matches.append(str(websocket_url))
             if not matches:
-                return ExecutionResult(
-                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
-                    error_code="APPROVED_TARGET_PAGE_NOT_FOUND",
+                opened, failure = self._open_approved_job_target(
+                    cdp_url, command, platform, selectors
                 )
+                if failure:
+                    return failure
+                if opened:
+                    matches.append(opened)
             if len(matches) > 1:
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FAILED_RETRYABLE,
@@ -261,6 +265,110 @@ class PlaywrightActionExecutor:
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
                 error_code="RAW_CDP_PREFLIGHT_ERROR",
             )
+
+    def _open_approved_job_target(
+        self,
+        cdp_url: str,
+        command: ApprovedCommand,
+        platform: Platform,
+        selectors: PlatformSelectors,
+    ) -> tuple[str | None, ExecutionResult | None]:
+        if not command.source_url:
+            return None, ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="JOB_SOURCE_URL_MISSING",
+            )
+        parsed = urlparse(command.source_url)
+        hostname = (parsed.hostname or "").lower()
+        if (
+            parsed.scheme not in {"http", "https"}
+            or hostname not in selectors.allowed_hosts
+        ):
+            return None, ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_FINAL,
+                error_code="JOB_SOURCE_URL_UNAVAILABLE",
+            )
+        request = Request(
+            f"{cdp_url.rstrip('/')}/json/new?{quote(command.source_url, safe=':/?=&%')}",
+            method="PUT",
+        )
+        try:
+            with urlopen(request, timeout=3) as response:
+                created = json.loads(response.read())
+            target_id = str(created.get("id") or "")
+            for _ in range(100):
+                with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+                    targets = json.loads(response.read())
+                target = next(
+                    (
+                        item for item in targets
+                        if str(item.get("id") or "") == target_id
+                        and item.get("webSocketDebuggerUrl")
+                    ),
+                    None,
+                )
+                if target is None:
+                    time.sleep(0.1)
+                    continue
+                websocket_url = str(target["webSocketDebuggerUrl"])
+                with RawCdpPageReader(websocket_url) as page:
+                    check = extract_current_page(
+                        page,
+                        platform,
+                        selectors,
+                        selectors.version,
+                        expected_company=command.company,
+                        expected_job_title=command.job_title,
+                    )
+                if check.status is SessionStatus.SESSION_AUTH_REQUIRED:
+                    self._close_created_target(cdp_url, target_id)
+                    return None, ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="LOGIN_REQUIRED",
+                    )
+                if check.status is not SessionStatus.SESSION_READY:
+                    time.sleep(0.1)
+                    continue
+                if not check.job or (
+                    command.external_job_id
+                    and check.job.external_job_id != command.external_job_id
+                ):
+                    self._close_created_target(cdp_url, target_id)
+                    return None, ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="JOB_TARGET_MISMATCH",
+                    )
+                if (
+                    command.company not in check.job.company_name
+                    or command.job_title not in check.job.title
+                    or command.recruiter not in (check.job.recruiter_name or "")
+                ):
+                    self._close_created_target(cdp_url, target_id)
+                    return None, ExecutionResult(
+                        outcome=ExecutionOutcome.FAILED_FINAL,
+                        error_code="JOB_TARGET_MISMATCH",
+                    )
+                return websocket_url, None
+            self._close_created_target(cdp_url, target_id)
+            return None, ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="JOB_SOURCE_URL_UNAVAILABLE",
+            )
+        except (OSError, TimeoutError, ValueError):
+            return None, ExecutionResult(
+                outcome=ExecutionOutcome.FAILED_RETRYABLE,
+                error_code="JOB_SOURCE_URL_UNAVAILABLE",
+            )
+
+    @staticmethod
+    def _close_created_target(cdp_url: str, target_id: str) -> None:
+        if not target_id:
+            return
+        try:
+            with urlopen(f"{cdp_url.rstrip('/')}/json/close/{target_id}", timeout=3):
+                pass
+        except (OSError, TimeoutError, ValueError):
+            return
 
     def _execute_platform_consent_over_raw_cdp(
         self,

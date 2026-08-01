@@ -37,10 +37,12 @@
 
 ### `jobs` 与 `job_observations`
 
-`jobs` 保存平台、外部职位 ID、内容哈希、标题、公司、地点、工作模式、薪资、正文、状态、
+`jobs` 保存平台、外部职位 ID、规范化原职位链接 `source_url`、链接最后观测时间
+`source_url_observed_at`、内容哈希、标题、公司、地点、工作模式、薪资、正文、状态、
 结构化招聘人身份 `recruiter_role` 及原始结构。招聘人身份取值为
 `HEADHUNTER / DIRECT_EMPLOYER / UNKNOWN`；旧数据默认 `UNKNOWN`，不能根据姓名猜测身份。
-平台外部 ID 和内容哈希用于幂等。正文变化更新当前职位，并在
+平台外部 ID 和内容哈希用于幂等；URL 可变且不参与唯一性或内容哈希。URL 只允许
+对应招聘平台域名，并移除跟踪参数和 fragment。正文变化更新当前职位，并在
 `job_observations(job_id, content_hash)` 追加唯一快照。
 
 ### `parsed_job_details`

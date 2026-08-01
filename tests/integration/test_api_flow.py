@@ -167,6 +167,7 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
 
     job_payload = {
         "external_job_id": "integration-001", "title": "Java后端工程师",
+        "source_url": "https://www.zhipin.com/job_detail/integration-001.html?utm_source=test",
         "company_name": "集成测试公司", "industry": "互联网", "location": "北京",
         "work_mode": "REMOTE", "salary_text": "40K-45K",
         "description": "5年以上Java、Spring Boot和MySQL经验", "source_status": "OPEN",
@@ -176,6 +177,9 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     duplicate_import = client.post("/api/v1/jobs/import", json=job_payload)
     assert first_import.json()["data"]["result"] == "CREATED"
     assert duplicate_import.json()["data"]["result"] == "DUPLICATE"
+    assert first_import.json()["data"]["job"]["source_url"] == (
+        "https://www.zhipin.com/job_detail/integration-001.html"
+    )
     job_id = first_import.json()["data"]["job"]["id"]
     batch_import = client.post("/api/v1/jobs/import/batch", json={
         "items": [job_payload, {"title": "缺少必填字段"}],
