@@ -16,7 +16,9 @@ interface OverviewMetrics {
 }
 interface Operations {
   database_ready: boolean; llm_configured: boolean; unknown_action_count: number
-  pending_confirmation_count: number; workers: Array<{ worker_id: string; status: string }>
+  pending_confirmation_count: number; pending_human_confirmation_count: number
+  pending_schedule_confirmation_count: number
+  workers: Array<{ worker_id: string; status: string }>
   discrepancies: unknown[]
   desired_runs?: Array<{ platform: string; desired_state: string }>
   platform_readiness?: Array<{ platform: string; status: string; reason_codes: string[] }>
@@ -111,8 +113,10 @@ export function OverviewPage() {
         value={processedCount} suffix={` / 待处理 ${metrics?.waiting_message_count ?? 0}`} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="自动动作"
         value={metrics?.successful_action_count ?? 0} /></Card></Col>
+      <Col xs={24} sm={12} xl={6}><Card><Statistic title="待人工处理"
+        value={operations?.pending_human_confirmation_count ?? 0} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="待确认面试"
-        value={operations?.pending_confirmation_count ?? 0} /></Card></Col>
+        value={operations?.pending_schedule_confirmation_count ?? 0} /></Card></Col>
     </Row>
     <Card title="运行状态" extra={<Button onClick={() => void load()}>刷新</Button>}>
       <Descriptions column={{ xs: 1, md: 2 }} items={[

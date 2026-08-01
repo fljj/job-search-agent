@@ -28,6 +28,8 @@ function mockOverviewApi() {
         llm_configured: true,
         unknown_action_count: 0,
         pending_confirmation_count: 0,
+        pending_human_confirmation_count: 3,
+        pending_schedule_confirmation_count: 2,
         workers: [{ worker_id: 'worker-1', status: 'RUNNING' }],
         discrepancies: [],
         llm_circuit: {
@@ -66,6 +68,15 @@ describe('OverviewPage 重新连接', () => {
     })).toBe(false)
   })
 
+  it('分别展示人工确认和面试确认数量', async () => {
+    render(<OverviewPage />)
+
+    expect(await screen.findByText('待人工处理')).toBeTruthy()
+    expect(screen.getByText('待确认面试')).toBeTruthy()
+    expect(screen.getByText('3')).toBeTruthy()
+    expect(screen.getByText('2')).toBeTruthy()
+  })
+
   it('点击后调用恢复接口并提示重新检查页面', async () => {
     const successSpy = vi.spyOn(message, 'success').mockImplementation(() => undefined as never)
     render(<OverviewPage />)
@@ -95,6 +106,8 @@ describe('OverviewPage 重新连接', () => {
         llm_configured: true,
         unknown_action_count: 0,
         pending_confirmation_count: 0,
+        pending_human_confirmation_count: 0,
+        pending_schedule_confirmation_count: 0,
         workers: [],
         discrepancies: [],
         llm_circuit: {

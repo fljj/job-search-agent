@@ -396,6 +396,9 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     assert time_reply.json()["data"]["confirmation_task_id"] is not None
     tasks = client.get("/api/v1/confirmation-tasks")
     assert len(tasks.json()["data"]["items"]) == 1
+    confirmation_metrics = client.get("/api/v1/automation/operations/status").json()["data"]
+    assert confirmation_metrics["pending_human_confirmation_count"] == 1
+    assert confirmation_metrics["pending_schedule_confirmation_count"] == 0
 
     time_task_id = time_reply.json()["data"]["confirmation_task_id"]
     unsafe_edit = client.post(f"/api/v1/confirmation-tasks/{time_task_id}/modify",
@@ -414,6 +417,8 @@ def test_complete_first_phase_api_flow(client: TestClient, monkeypatch: pytest.M
     })
     assert unavailable_schedule.json()["data"]["calendar_status"] == "UNAVAILABLE"
     assert unavailable_schedule.json()["data"]["status"] == "PENDING_APPROVAL"
+    schedule_metrics = client.get("/api/v1/automation/operations/status").json()["data"]
+    assert schedule_metrics["pending_schedule_confirmation_count"] == 1
 
     explicit_message = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
         "external_message_id": "message-schedule-explicit",

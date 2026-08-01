@@ -418,6 +418,7 @@ def _approved_command(session: Session, action: db.ActionQueue) -> ApprovedComma
 
 
 def list_tasks(session: Session) -> list[dict[str, object]]:
+    now = datetime.now(UTC)
     rows = session.scalars(
         select(db.ConfirmationTask)
         .where(db.ConfirmationTask.user_id == DEFAULT_USER_ID)
@@ -436,7 +437,13 @@ def list_tasks(session: Session) -> list[dict[str, object]]:
         result.append(
             {
                 "id": task.id,
-                "status": task.status,
+                "status": (
+                    ActionStatus.EXPIRED.value
+                    if task.status == ActionStatus.PENDING_APPROVAL.value
+                    and task.expires_at
+                    and task.expires_at < now
+                    else task.status
+                ),
                 "action_type": decision.action_type if decision else None,
                 "reason_codes": decision.reason_codes if decision else [],
                 "content": draft.content if draft else None,
@@ -454,6 +461,7 @@ def list_tasks(session: Session) -> list[dict[str, object]]:
                         else None
                     )
                 ),
+                "conversation_id": conversation.id if conversation else None,
             }
         )
     return result

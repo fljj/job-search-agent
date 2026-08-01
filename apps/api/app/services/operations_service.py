@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -359,7 +359,34 @@ def operations_status(session: Session) -> dict[str, object]:
         "pending_confirmation_count": session.scalar(
             select(func.count())
             .select_from(db.ConfirmationTask)
-            .where(db.ConfirmationTask.status == "PENDING_APPROVAL")
+            .where(
+                db.ConfirmationTask.status == "PENDING_APPROVAL",
+                or_(
+                    db.ConfirmationTask.expires_at.is_(None),
+                    db.ConfirmationTask.expires_at > datetime.now(UTC),
+                ),
+            )
+        )
+        or 0,
+        "pending_human_confirmation_count": session.scalar(
+            select(func.count())
+            .select_from(db.ConfirmationTask)
+            .where(
+                db.ConfirmationTask.status == "PENDING_APPROVAL",
+                or_(
+                    db.ConfirmationTask.expires_at.is_(None),
+                    db.ConfirmationTask.expires_at > datetime.now(UTC),
+                ),
+            )
+        )
+        or 0,
+        "pending_schedule_confirmation_count": session.scalar(
+            select(func.count())
+            .select_from(db.ScheduleConfirmation)
+            .where(
+                db.ScheduleConfirmation.status == "PENDING_APPROVAL",
+                db.ScheduleConfirmation.expires_at > datetime.now(UTC),
+            )
         )
         or 0,
         "reconciliation_tasks": list_reconciliation_tasks(session),

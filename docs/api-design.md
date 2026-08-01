@@ -11,6 +11,14 @@
   `X-Local-Access-Token`。
 - 资源均限制为当前单用户数据；前端权限不能替代服务端策略检查。
 
+### 1.1 人工确认与排期统计
+
+- `GET /confirmation-tasks` 返回普通人工确认任务，包含目标会话、回复内容、原因、到期时间
+  和当前状态；待确认但已过期的任务按 `EXPIRED` 展示。
+- `GET /automation/operations/status` 同时返回
+  `pending_human_confirmation_count` 和 `pending_schedule_confirmation_count`。前者只统计未
+  过期的普通人工任务，后者只统计未过期的电话或面试时间确认，两者不得混用。
+
 ## 2. 候选人、知识库和简历
 
 | 方法与路径 | 用途 |
