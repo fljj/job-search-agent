@@ -1,5 +1,9 @@
 import pytest
 
+from adapters.browser.maimai_recommendations import (
+    _has_recommendation_request,
+    _is_system_recommendation_preview,
+)
 from apps.api.app.core.recommendation_config import get_recommendation_rules
 from packages.policy_engine.recommendation import (
     RecommendationDecision,
@@ -91,3 +95,15 @@ def test_headhunter_inbound_is_not_rejected_by_identity() -> None:
         rules=get_recommendation_rules(),
     )
     assert decision is RecommendationDecision.ACCEPT_AND_SEND_PROFILE
+
+
+def test_real_maimai_recommendation_preview_is_verified_in_two_steps() -> None:
+    rules = get_recommendation_rules()
+
+    assert _is_system_recommendation_preview("[系统推荐][消息卡片]", rules)
+    assert not _is_system_recommendation_preview("可以要一份你的简历吗？", rules)
+    assert _has_recommendation_request(
+        "我们正在招 Java 后端人才，可以要一份你的简历吗？",
+        rules,
+    )
+    assert not _has_recommendation_request("普通招聘沟通", rules)

@@ -36,16 +36,28 @@ class MaimaiRecommendationAdapter:
     ) -> list[MaimaiRecommendationCard]:
         validate_local_cdp_url(cdp_url)
         target = self._target(cdp_url)
+        system_markers = [
+            marker
+            for marker in rules.recommendation_markers
+            if "系统推荐" in marker
+        ]
+        if not system_markers:
+            return []
         with RawCdpPageReader(target) as page:
             raw_items = page._evaluate(
-                """(() => Array.from(document.querySelectorAll('.message-item[data-msg]'))
-                .filter(item => item.querySelector('.message-badge'))
+                """(() => { const markers = __SYSTEM_MARKERS__;
+                return Array.from(document.querySelectorAll('.message-item[data-msg]'))
+                .filter(item => { const preview =
+                  (item.querySelector('.message-latest-text')?.textContent || '').trim();
+                  return markers.some(marker => preview.includes(marker)); })
                 .slice(0, __LIMIT__).map(item => ({
                   dataMsg: item.getAttribute('data-msg') || '',
                   recruiter: (item.querySelector('.message-user-name')?.textContent || '').trim(),
                   title: (item.querySelector('.message-user-title')?.textContent || '').trim(),
                   preview: (item.querySelector('.message-latest-text')?.textContent || '').trim()
-                })))()""".replace("__LIMIT__", str(limit))
+                })); })()""".replace(
+                    "__SYSTEM_MARKERS__", json.dumps(system_markers)
+                ).replace("__LIMIT__", str(limit))
             )
             cards: list[MaimaiRecommendationCard] = []
             for item in raw_items:
@@ -53,10 +65,10 @@ class MaimaiRecommendationAdapter:
                 preview = str(item.get("preview") or "")
                 if recruiter in rules.official_accounts:
                     continue
-                if not all(marker in preview for marker in rules.recommendation_markers):
+                if not _is_system_recommendation_preview(preview, rules):
                     continue
                 external_id = _external_id(str(item.get("dataMsg") or ""))
-                detail = self._open_and_read(page, external_id)
+                detail = self._open_and_read(page, external_id, rules)
                 if detail:
                     cards.append(detail)
             return cards
@@ -170,7 +182,10 @@ class MaimaiRecommendationAdapter:
             )
 
     def _open_and_read(
-        self, page: RawCdpPageReader, external_id: str
+        self,
+        page: RawCdpPageReader,
+        external_id: str,
+        rules: RecommendationRules,
     ) -> MaimaiRecommendationCard | None:
         if not self._select(page, external_id):
             return None
@@ -178,7 +193,12 @@ class MaimaiRecommendationAdapter:
         recruiter = page.text(".dialogue-header-username") or ""
         recruiter_title = page.text(".dialogue-header-career") or ""
         panel = page.text(".dialogue_list_container") or ""
-        if not recruiter or "可以要一份你的简历吗" not in panel:
+        if not recruiter or not _has_recommendation_request(panel, rules):
+            return None
+        if (
+            page._evaluate(_control_expression("同意", click=False)) != 1
+            or page._evaluate(_control_expression("拒绝", click=False)) != 1
+        ):
             return None
         job_title = _job_title(panel)
         company = recruiter_title.split("·", 1)[0].strip(" ·")
@@ -234,6 +254,24 @@ def _external_id(data_msg: str) -> str:
     if value is None:
         raise ValueError("脉脉推荐缺少稳定 ID")
     return str(value)
+
+
+def _is_system_recommendation_preview(
+    preview: str, rules: RecommendationRules
+) -> bool:
+    system_markers = [
+        marker for marker in rules.recommendation_markers if "系统推荐" in marker
+    ]
+    return bool(system_markers) and any(marker in preview for marker in system_markers)
+
+
+def _has_recommendation_request(
+    panel: str, rules: RecommendationRules
+) -> bool:
+    request_markers = [
+        marker for marker in rules.recommendation_markers if "系统推荐" not in marker
+    ]
+    return bool(request_markers) and any(marker in panel for marker in request_markers)
 
 
 def _job_title(text: str) -> str:
