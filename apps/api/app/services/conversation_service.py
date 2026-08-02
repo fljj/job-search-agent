@@ -18,7 +18,10 @@ from apps.api.app.schemas.conversation import (
 )
 from apps.api.app.schemas.decision import DecisionRequest
 from apps.api.app.services.decision_service import create_decision
-from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.errors import (
+    JobDecisionUnavailableError,
+    ResourceNotFoundError,
+)
 from apps.api.app.services.job_service import get_job_entity, get_parsed_entity
 from apps.api.app.services.knowledge_service import get_knowledge_entities
 from apps.api.app.services.llm_config_service import build_runtime_llm_provider
@@ -188,6 +191,9 @@ def import_message(
         )
     )
     if existing:
+        if existing.direction == "OUTBOUND":
+            if _reconcile_inbound_messages_before_outbound(session, existing):
+                session.commit()
         return _message_response(existing)
     message_values = payload.model_dump(exclude={"direction"})
     if payload.direction == "OUTBOUND":
@@ -200,6 +206,8 @@ def import_message(
             **message_values,
         )
         session.add(message)
+        session.flush()
+        _reconcile_inbound_messages_before_outbound(session, message)
         session.commit()
         session.refresh(message)
         return _message_response(message)
@@ -242,6 +250,51 @@ def import_message(
     session.commit()
     session.refresh(message)
     return _message_response(message)
+
+
+def _reconcile_inbound_messages_before_outbound(
+    session: Session,
+    outbound: db.Message,
+) -> bool:
+    """平台已观察到我方回复时，将更早的未完成入站消息对账为已处理。"""
+    pending_statuses = {
+        "RECEIVED",
+        "AWAITING_IDENTITY",
+        "PROCESSING",
+        "RETRY_WAIT",
+        "WAITING_FOR_LLM",
+        "QUARANTINED",
+    }
+    messages = session.scalars(
+        select(db.Message).where(
+            db.Message.conversation_id == outbound.conversation_id,
+            db.Message.direction == "INBOUND",
+            db.Message.status.in_(pending_statuses),
+            db.Message.received_at <= outbound.received_at,
+        )
+    ).all()
+    for message in messages:
+        before_state = message.status
+        message.status = "COMPLETED"
+        message.retry_at = None
+        message.error_code = None
+        message.processing_started_at = None
+        message.quarantined_at = None
+        session.add(
+            db.AuditEvent(
+                user_id=DEFAULT_USER_ID,
+                actor_type="SYSTEM",
+                event_type="MESSAGE_RECONCILED_FROM_PLATFORM_OUTBOUND",
+                entity_type="message",
+                entity_id=message.id,
+                before_state=before_state,
+                after_state="COMPLETED",
+                reason_codes=["OBSERVED_LATER_OUTBOUND_MESSAGE"],
+                metadata_json={"outbound_message_id": str(outbound.id)},
+                correlation_id=f"message-outbound-reconcile:{message.id}:{outbound.id}",
+            )
+        )
+    return bool(messages)
 
 
 def list_conversations(
@@ -502,7 +555,9 @@ def create_reply_draft(
     if llm_provider is None:
         raise LlmConfigurationError("当前消息需要大模型，但模型暂不可用")
     if job_decision is None:
-        raise ValueError("当前消息缺少可用于大模型回复的职位沟通决策")
+        raise JobDecisionUnavailableError(
+            "当前消息缺少可用于大模型回复的职位沟通决策"
+        )
     result = _build_decision_reply(
         session,
         conversation,

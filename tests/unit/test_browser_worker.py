@@ -109,6 +109,17 @@ def test_boss_job_title_can_identify_remote_work_mode() -> None:
     assert result.job and result.job.work_mode == "REMOTE"
 
 
+def test_boss_job_description_can_identify_remote_work_mode() -> None:
+    page, selectors = job_page(Platform.BOSS)
+    page.texts.pop(selectors.work_mode)
+    page.texts[selectors.job_title] = "银行系统开发"
+    page.texts[selectors.description] = "总部在新西兰，工作地点是居家办公。"
+
+    result = extract_current_page(page, Platform.BOSS, selectors, "v1")
+
+    assert result.job and result.job.work_mode == "REMOTE"
+
+
 def test_preserves_boss_recruiting_agency_company_prefix_as_scoring_evidence() -> None:
     page, selectors = job_page(Platform.BOSS)
     page.texts[selectors.company] = "代招公司：上海某大型证券公司"

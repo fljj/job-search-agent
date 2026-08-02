@@ -195,7 +195,8 @@ def _extract_job(
     location = page.text(selectors.location)
     work_mode = _normalize_work_mode(page.text(selectors.work_mode))
     if work_mode == "UNKNOWN":
-        work_mode = _normalize_work_mode(title)
+        # BOSS 等平台常把“居家办公”只写在 JD 末尾，标题和属性栏不一定标注。
+        work_mode = _normalize_work_mode(f"{title}\n{description}")
     job = BrowserJob(
         external_job_id=(
             page.attribute(selectors.job_id, "data-job-id") or _job_id_from_url(page.url)

@@ -18,7 +18,10 @@ from apps.api.app.services.action_service import (
 )
 from apps.api.app.services.automation_service import _effective_rules, dispatch
 from apps.api.app.services.conversation_service import create_reply_draft, create_resume_draft
-from apps.api.app.services.errors import ResourceNotFoundError
+from apps.api.app.services.errors import (
+    JobDecisionUnavailableError,
+    ResourceNotFoundError,
+)
 from apps.api.app.services.llm_circuit_service import (
     llm_circuit_is_open,
     llm_circuit_status,
@@ -44,6 +47,7 @@ SAFETY_FAILURE_CODES = {
     "JOB_TARGET_MISMATCH",
     "RESULT_NOT_OBSERVED",
 }
+MESSAGE_DEPENDENCY_RETRY_DELAY = timedelta(seconds=30)
 
 
 def start_run(session: Session, payload: AgentRunStartRequest) -> dict[str, object]:
@@ -325,6 +329,9 @@ def tick_run(
             message.processing_started_at = None
             _record_failure(session, run, failure_code)
             session.commit()
+            continue
+        except JobDecisionUnavailableError:
+            _defer_message_for_pending_decision(session, run, message, current)
             continue
         except (ValueError, ResourceNotFoundError) as exc:
             message.status = "QUARANTINED"
@@ -727,6 +734,29 @@ def _complete_message(session: Session, message: db.Message) -> None:
     message.retry_at = None
     message.error_code = None
     message.processing_started_at = None
+    session.commit()
+
+
+def _defer_message_for_pending_decision(
+    session: Session,
+    run: db.AgentRun,
+    message: db.Message,
+    current: datetime,
+) -> None:
+    """职位决策依赖尚未就绪时延后重试，避免把可恢复消息永久隔离。"""
+    message.status = "RETRY_WAIT"
+    message.retry_at = current + MESSAGE_DEPENDENCY_RETRY_DELAY
+    message.error_code = "JOB_DECISION_PENDING"
+    message.processing_started_at = None
+    message.quarantined_at = None
+    _event(
+        session,
+        run.id,
+        "MESSAGE_DEPENDENCY_DEFERRED",
+        "message",
+        message.id,
+        ["JOB_DECISION_PENDING"],
+    )
     session.commit()
 
 

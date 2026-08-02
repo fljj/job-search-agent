@@ -703,8 +703,11 @@ def test_platform_outbound_message_blocks_historical_draft_dispatch(
     session.commit()
 
     stored_outbound = session.get(db.Message, outbound.id)
+    stored_inbound = session.get(db.Message, inbound.id)
     assert stored_outbound is not None
+    assert stored_inbound is not None
     assert stored_outbound.direction == "OUTBOUND"
+    assert stored_inbound.status == "COMPLETED"
     assert _pending_drafts(session, run, 10) == []
 
 
