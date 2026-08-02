@@ -379,7 +379,8 @@ def test_liepin_job_discovery_enables_l4_action_processing(
         AutomationRules(),
     )
 
-    assert adapter.scan.call_args.kwargs["search_key"] == "HOME"
+    assert adapter.scan.call_args.kwargs["search_key"] == "Golang"
+    assert adapter.scan.call_args.kwargs["search_keys"] == ["Golang", "Java"]
     assert adapter.scan.call_args.kwargs["refresh_before_scan"] is False
     assert processed.call_args.kwargs["execute_external_actions"] is True
     adapter.close_details.assert_called_once_with(

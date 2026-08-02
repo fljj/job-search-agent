@@ -107,6 +107,7 @@ LLM 请求不设置 `max_tokens`，避免结构化 JSON 被截断；输出长度
 | `BOSS_JOB_SCAN_INTERVAL_SECONDS` | `180` | 完成一批后到下一批的最短间隔 |
 | `LIEPIN_JOB_BATCH_SIZE` | `1` | 猎聘每次只保留一个临时详情页完成沟通决策和动作回读 |
 | `LIEPIN_JOB_SCAN_INTERVAL_SECONDS` | `180` | 猎聘完成一批后到下一批的最短间隔 |
+| `LIEPIN_JOB_SEARCH_LABELS` | `Golang,Java` | 猎聘首页职位入口名称；当前入口处理完后按顺序切换，不主动刷新页面 |
 | `LIEPIN_WRITES_ENABLED` | `true` | 是否允许猎聘执行已授权的普通回复、礼貌拒绝、聊一聊和现有简历投递；修改后需重启 Worker |
 | `BOSS_LLM_RETRY_BASE_SECONDS` | `300` | 职位详情等局部失败的首次等待时间 |
 | `BOSS_LLM_RETRY_MAX_SECONDS` | `3600` | 职位局部重试的最长等待时间 |

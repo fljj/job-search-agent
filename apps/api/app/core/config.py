@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     boss_job_scan_interval_seconds: int = Field(default=180, ge=30, le=3600)
     liepin_job_batch_size: int = Field(default=1, ge=1, le=20)
     liepin_job_scan_interval_seconds: int = Field(default=180, ge=30, le=3600)
+    liepin_job_search_labels: str = "Golang,Java"
     liepin_writes_enabled: bool = False
     boss_llm_retry_base_seconds: int = Field(default=300, ge=60, le=3600)
     boss_llm_retry_max_seconds: int = Field(default=3600, ge=300, le=21600)
@@ -111,6 +112,14 @@ class Settings(BaseSettings):
         return [
             label.strip()
             for label in self.boss_job_search_labels.split(",")
+            if label.strip()
+        ]
+
+    @property
+    def liepin_job_searches(self) -> list[str]:
+        return [
+            label.strip()
+            for label in self.liepin_job_search_labels.split(",")
             if label.strip()
         ]
 

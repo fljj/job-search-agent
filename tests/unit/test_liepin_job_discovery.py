@@ -125,6 +125,54 @@ def test_scan_prefilters_irrelevant_title_before_opening_detail(
     assert batch.refresh_before_next_scan is False
 
 
+def test_scan_switches_to_next_liepin_search_when_current_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = object.__new__(LiepinJobDiscoveryAdapter)
+    adapter.selectors = MagicMock(version="liepin-v1")
+    page = MagicMock()
+    page.__enter__.return_value = page
+    page.__exit__.return_value = False
+    listing = ReadResult(
+        platform=Platform.LIEPIN,
+        status=SessionStatus.SESSION_READY,
+        page_type=PageType.JOB_LIST,
+        page_url="https://c.liepin.com/",
+        page_title="猎聘首页",
+        content_hash="b" * 64,
+        selector_version="liepin-v1",
+        jobs=[],
+    )
+    activated: list[str] = []
+    monkeypatch.setattr(adapter, "_find_home_target", lambda _url: "ws://home")
+    monkeypatch.setattr(
+        "adapters.browser.liepin_job_discovery.RawCdpPageReader",
+        lambda _target: page,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.liepin_job_discovery.extract_current_page",
+        lambda *_args, **_kwargs: listing,
+    )
+    monkeypatch.setattr(adapter, "_scroll_home", lambda _page: None)
+    monkeypatch.setattr(
+        adapter,
+        "_activate_search",
+        lambda _page, key: activated.append(key),
+    )
+
+    batch = adapter.scan(
+        "http://127.0.0.1:9222",
+        search_key="Golang",
+        search_keys=["Golang", "Java"],
+        switch_search_before_scan=True,
+    )
+
+    assert activated == ["Golang"]
+    assert batch.search_key == "Golang"
+    assert batch.exhausted
+    assert batch.next_search_key == "Java"
+
+
 def test_close_only_exact_worker_owned_liepin_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

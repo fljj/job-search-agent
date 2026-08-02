@@ -395,7 +395,7 @@ def _run_liepin_job_discovery(
         executor,
         rules,
         adapter=LiepinJobDiscoveryAdapter(get_browser_selectors()),
-        search_keys=["HOME"],
+        search_keys=settings.liepin_job_searches,
         batch_size=settings.liepin_job_batch_size,
         interval_seconds=settings.liepin_job_scan_interval_seconds,
         execute_external_actions=(

@@ -10,6 +10,7 @@ from adapters.browser.job_discovery import (
     JobPrefilterState,
     classify_job_title,
     is_job_list_exhausted,
+    next_job_search,
     select_job_candidates,
     verify_job_target,
 )
@@ -48,12 +49,17 @@ class LiepinJobDiscoveryAdapter:
         limit: int = 20,
         interval_seconds: int = 180,
     ) -> JobDiscoveryBatch:
-        del search_key, search_keys, refresh_before_scan, switch_search_before_scan
+        del refresh_before_scan
         # L4 需保留详情到“聊一聊”回读结束；共享首页一次只能持有一个临时详情。
         limit = min(limit, 1)
+        configured_searches = search_keys or []
+        if configured_searches and search_key not in configured_searches:
+            search_key = configured_searches[0]
         validate_local_cdp_url(cdp_url)
         target = self._find_home_target(cdp_url)
         with RawCdpPageReader(target) as page:
+            if switch_search_before_scan and configured_searches:
+                self._activate_search(page, search_key)
             listing = extract_current_page(
                 page,
                 Platform.LIEPIN,
@@ -129,9 +135,14 @@ class LiepinJobDiscoveryAdapter:
                 )
             )[-2000:]
             current = datetime.now(UTC)
+            next_search, _ = next_job_search(
+                search_key, configured_searches, exhausted=is_job_list_exhausted(
+                    len(candidates), listing.cursor, previous_cursor
+                )
+            )
             return JobDiscoveryBatch(
                 platform=Platform.LIEPIN,
-                search_key="HOME",
+                search_key=search_key,
                 scroll_position=scroll_position + len(candidates),
                 next_cursor=listing.cursor,
                 scanned_at=current,
@@ -143,9 +154,39 @@ class LiepinJobDiscoveryAdapter:
                 exhausted=is_job_list_exhausted(
                     len(candidates), listing.cursor, previous_cursor
                 ),
-                next_search_key="HOME",
+                next_search_key=next_search,
                 refresh_before_next_scan=False,
             )
+
+    @staticmethod
+    def _activate_search(page: RawCdpPageReader, search_key: str) -> None:
+        switched = False
+        for _ in range(40):
+            state = page._evaluate(
+                "(() => {"
+                f"const expected={json.dumps(search_key)}.trim().toLocaleLowerCase();"
+                "const visible=element => element.getClientRects().length > 0 "
+                "&& getComputedStyle(element).visibility !== 'hidden';"
+                "const items=[...document.querySelectorAll('[data-nick=\"switch-item\"]')]"
+                ".filter(visible);"
+                "const matches=items.filter(item => "
+                "(item.textContent||'').trim().toLocaleLowerCase()===expected);"
+                "if(matches.length!==1)return {found:false,active:false};"
+                "const target=matches[0];"
+                "const active=String(target.className).includes('switch-title-item-active');"
+                "if(!active)target.click();"
+                "return {found:true,active};})()"
+            )
+            if isinstance(state, dict) and state.get("found"):
+                if state.get("active"):
+                    if switched:
+                        time.sleep(0.5)
+                    return
+                switched = True
+                time.sleep(0.25)
+                continue
+            time.sleep(0.25)
+        raise ValueError(f"猎聘职位入口不可用: {search_key}")
 
     @staticmethod
     def _candidates(
