@@ -122,7 +122,7 @@ def test_invisible_retry_target_falls_back_to_normal_job_batch(
     session.scalars.return_value.all.return_value = []
     session.get.return_value = MagicMock(title_rules=[])
     marked: list[object] = []
-    processed: list[JobDiscoveryBatch] = []
+    processed: list[tuple[JobDiscoveryBatch, bool]] = []
     lifecycle: list[str] = []
     adapter.close_details.side_effect = lambda *_: lifecycle.append("closed")
     monkeypatch.setattr(
@@ -237,7 +237,9 @@ def test_liepin_detail_retry_does_not_consume_normal_discovery_slot(
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.process_job_discovery_batch",
-        lambda _session, _run, batch, **_kwargs: processed.append(batch),
+        lambda _session, _run, batch, **kwargs: processed.append(
+            (batch, kwargs.get("update_cursor", True))
+        ),
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.get_settings",
@@ -266,7 +268,7 @@ def test_liepin_detail_retry_does_not_consume_normal_discovery_slot(
         execute_external_actions=False,
     )
 
-    assert processed == [retry_batch, normal_batch]
+    assert processed == [(retry_batch, False), (normal_batch, True)]
     assert closed == [retry_batch, normal_batch]
     assert adapter.scan.call_count == 2
     assert adapter.scan.call_args_list[0].kwargs["target_job_ids"] == {

@@ -525,6 +525,7 @@ def _run_job_discovery(
                     executor=executor,
                     cdp_url=cdp_url,
                     execute_external_actions=execute_external_actions,
+                    update_cursor=False,
                 )
             finally:
                 adapter.close_details(cdp_url, job_batch)

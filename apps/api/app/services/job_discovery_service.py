@@ -46,6 +46,7 @@ def process_job_discovery_batch(
     cdp_url: str,
     now: datetime | None = None,
     execute_external_actions: bool = True,
+    update_cursor: bool = True,
 ) -> dict[str, int]:
     if run.platform != batch.platform.value:
         raise ValueError("职位发现批次平台与 Agent 运行不匹配")
@@ -277,22 +278,23 @@ def process_job_discovery_batch(
             )
             counts["skipped"] += 1
         _state_event(session, run, item, "RETURNING")
-    root_cursor = dict(run.cursor or {})
-    root_cursor["job_discovery"] = {
-        "search_key": batch.next_search_key or batch.search_key,
-        "scroll_position": 0 if batch.exhausted else batch.scroll_position,
-        "next_cursor": batch.next_cursor,
-        "seen_job_ids": batch.seen_job_ids,
-        "last_scan_at": batch.scanned_at.isoformat(),
-        "next_scan_at": (
-            retry_backoff_until or batch.next_scan_at
-        ).isoformat(),
-        "exhausted": batch.exhausted,
-        # 保留字段兼容既有游标，但 BOSS 常驻页面不得主动刷新。
-        "refresh_before_scan": False,
-        "switch_search_before_scan": batch.exhausted,
-    }
-    run.cursor = root_cursor
+    if update_cursor:
+        root_cursor = dict(run.cursor or {})
+        root_cursor["job_discovery"] = {
+            "search_key": batch.next_search_key or batch.search_key,
+            "scroll_position": 0 if batch.exhausted else batch.scroll_position,
+            "next_cursor": batch.next_cursor,
+            "seen_job_ids": batch.seen_job_ids,
+            "last_scan_at": batch.scanned_at.isoformat(),
+            "next_scan_at": (
+                retry_backoff_until or batch.next_scan_at
+            ).isoformat(),
+            "exhausted": batch.exhausted,
+            # 保留字段兼容既有游标，但 BOSS 常驻页面不得主动刷新。
+            "refresh_before_scan": False,
+            "switch_search_before_scan": batch.exhausted,
+        }
+        run.cursor = root_cursor
     _event(session, run, "JOB_SCAN_COMPLETED", [f"{key.upper()}_{value}" for key, value in counts.items()])
     session.commit()
     return counts
