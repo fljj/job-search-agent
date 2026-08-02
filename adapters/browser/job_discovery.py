@@ -485,14 +485,17 @@ def is_job_list_exhausted(
 
 
 def verify_job_target(
-    summary: BrowserJobSummary, detail: ReadResult
+    summary: BrowserJobSummary,
+    detail: ReadResult,
+    *,
+    verify_company: bool = True,
 ) -> list[str]:
     job = detail.job
     if detail.page_type is not PageType.JOB or job is None:
         return ["JOB_DETAIL_MISSING"]
     if job.external_job_id and job.external_job_id != summary.external_job_id:
         return ["JOB_ID_MISMATCH"]
-    if not (
+    if verify_company and not (
         summary.company_name in job.company_name
         or job.company_name in summary.company_name
     ):

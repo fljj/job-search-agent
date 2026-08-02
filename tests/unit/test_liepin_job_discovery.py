@@ -6,8 +6,15 @@ from uuid import uuid4
 
 import pytest
 
-from adapters.browser.job_discovery import DiscoveredJob, JobDiscoveryBatch
-from adapters.browser.liepin_job_discovery import LiepinJobDiscoveryAdapter
+from adapters.browser.job_discovery import (
+    DiscoveredJob,
+    JobDiscoveryBatch,
+    verify_job_target,
+)
+from adapters.browser.liepin_job_discovery import (
+    LiepinJobDiscoveryAdapter,
+    _is_masked_headhunter_company,
+)
 from adapters.browser.read_only_actions import ReadOnlyActionExecutor
 from apps.api.app.models import entities as db
 from apps.api.app.services.job_discovery_service import process_job_discovery_batch
@@ -147,6 +154,32 @@ def test_close_only_exact_worker_owned_liepin_detail(
         "http://127.0.0.1:9222/json/list",
         "http://127.0.0.1:9222/json/close/worker-detail",
     ]
+
+
+def test_masked_headhunter_company_uses_job_identity_without_company_match() -> None:
+    summary = BrowserJobSummary(
+        external_job_id="78248167",
+        title="软件开发主管",
+        company_name="某国内知名公司",
+        detail_url="https://www.liepin.com/a/78248167.shtml",
+    )
+    detail = _detail(summary)
+    assert detail.job is not None
+    detail.job.company_name = "亚信科技"
+
+    assert _is_masked_headhunter_company(summary)
+    assert verify_job_target(summary, detail) == ["JOB_COMPANY_MISMATCH"]
+    assert verify_job_target(summary, detail, verify_company=False) == []
+
+
+def test_regular_liepin_job_still_requires_company_match() -> None:
+    summary = _summary("1983664515", "Java工程师")
+    detail = _detail(summary)
+    assert detail.job is not None
+    detail.job.company_name = "其他公司"
+
+    assert not _is_masked_headhunter_company(summary)
+    assert verify_job_target(summary, detail) == ["JOB_COMPANY_MISMATCH"]
 
 
 @pytest.mark.parametrize(

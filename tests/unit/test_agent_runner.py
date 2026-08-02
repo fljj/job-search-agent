@@ -172,6 +172,110 @@ def test_invisible_retry_target_falls_back_to_normal_job_batch(
     assert lifecycle == ["processed", "closed"]
 
 
+def test_liepin_detail_retry_does_not_consume_normal_discovery_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = db.AgentRun(
+        id=uuid4(),
+        user_id=uuid4(),
+        strategy_id=uuid4(),
+        platform="LIEPIN",
+        cursor={"job_discovery": {"search_key": "HOME"}},
+    )
+    retry = MagicMock(
+        external_job_id="retry-job",
+        reason_codes=["JOB_DETAIL_NOT_READY"],
+    )
+    now = datetime.now(UTC)
+    retry_batch = JobDiscoveryBatch(
+        platform=Platform.LIEPIN,
+        search_key="HOME",
+        scroll_position=1,
+        scanned_at=now,
+        next_scan_at=now,
+        items=[
+            DiscoveredJob(
+                summary=BrowserJobSummary(
+                    external_job_id="retry-job",
+                    title="软件开发主管",
+                    company_name="某国内知名公司",
+                ),
+                reason_codes=["JOB_DETAIL_NOT_READY"],
+            )
+        ],
+    )
+    normal_batch = JobDiscoveryBatch(
+        platform=Platform.LIEPIN,
+        search_key="HOME",
+        scroll_position=2,
+        scanned_at=now,
+        next_scan_at=now,
+        items=[
+            DiscoveredJob(
+                summary=BrowserJobSummary(
+                    external_job_id="new-job",
+                    title="Java工程师",
+                    company_name="示例科技",
+                )
+            )
+        ],
+    )
+    adapter = MagicMock()
+    adapter.scan.side_effect = [retry_batch, normal_batch]
+    processed: list[JobDiscoveryBatch] = []
+    closed: list[JobDiscoveryBatch] = []
+    adapter.close_details.side_effect = lambda _url, batch: closed.append(batch)
+    session = MagicMock(spec=Session)
+    session.scalars.return_value.all.return_value = []
+    session.get.return_value = MagicMock(title_rules=[])
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.LiepinJobDiscoveryAdapter",
+        lambda _config: adapter,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.next_retryable_job", lambda *_: retry
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.process_job_discovery_batch",
+        lambda _session, _run, batch, **_kwargs: processed.append(batch),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_settings",
+        lambda: Settings(_env_file=None, liepin_job_batch_size=1),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_job_parser_config", MagicMock()
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_browser_selectors", MagicMock()
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.build_runtime_llm_provider", MagicMock()
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.runtime_event", lambda *_, **__: None
+    )
+
+    _run_liepin_job_discovery(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        MagicMock(),
+        AutomationRules(),
+        execute_external_actions=False,
+    )
+
+    assert processed == [retry_batch, normal_batch]
+    assert closed == [retry_batch, normal_batch]
+    assert adapter.scan.call_count == 2
+    assert adapter.scan.call_args_list[0].kwargs["target_job_ids"] == {
+        "retry-job"
+    }
+    assert adapter.scan.call_args_list[1].kwargs["target_job_ids"] is None
+    assert "retry-job" in adapter.scan.call_args_list[1].kwargs["seen_job_ids"]
+
+
 def test_fake_executor_is_offline_and_records_commands() -> None:
     executor = FakeActionExecutor()
     result = executor.execute("http://127.0.0.1:9222", command())

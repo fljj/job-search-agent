@@ -30,6 +30,7 @@ def extract_current_page(
     expected_company: str | None = None,
     expected_job_title: str | None = None,
     expected_recruiter: str | None = None,
+    fallback_company: str | None = None,
 ) -> ReadResult:
     host = (urlparse(page.url).hostname or "").lower()
     if host not in selectors.allowed_hosts:
@@ -70,7 +71,13 @@ def extract_current_page(
         )
     if page.exists(selectors.job_root):
         return _extract_job(
-            page, platform, selectors, selector_version, expected_company, expected_job_title
+            page,
+            platform,
+            selectors,
+            selector_version,
+            expected_company,
+            expected_job_title,
+            fallback_company,
         )
     if page.exists(selectors.conversation_root):
         return _extract_conversation(
@@ -159,9 +166,12 @@ def _extract_job(
     version: str,
     expected_company: str | None,
     expected_job_title: str | None,
+    fallback_company: str | None,
 ) -> ReadResult:
     title = page.text(selectors.job_title)
-    company = _normalize_company_name(page.text(selectors.company))
+    company = _normalize_company_name(
+        page.text(selectors.company) or fallback_company
+    )
     description = page.text(selectors.description)
     if not title or not company or not description:
         return _failure(
@@ -591,7 +601,16 @@ def _job_id_from_url(value: str) -> str | None:
         return query_job_id
     liepin_match = re.search(r"/(?:job|a)/([^/?#]+?)\.shtml$", parsed.path)
     if liepin_match:
-        return liepin_match.group(1)
+        path_id = liepin_match.group(1)
+        # 猎聘企业职位路径使用 19 + 八位 job_id；首页和查询参数使用八位稳定 ID。
+        # 详情加载后可能移除查询参数，因此路径回退也必须归一为同一身份。
+        if (
+            (parsed.hostname or "").lower().endswith("liepin.com")
+            and parsed.path.startswith("/job/")
+            and re.fullmatch(r"19\d{8}", path_id)
+        ):
+            return path_id[2:]
+        return path_id
     name = parsed.path.rsplit("/", 1)[-1]
     for suffix in (".shtml", ".html"):
         if name.endswith(suffix):

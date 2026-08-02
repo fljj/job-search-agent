@@ -1,6 +1,6 @@
 {
   "platform": "LIEPIN",
-  "version": "2026-08-01-v7",
+  "version": "2026-08-02-v8",
   "allowed_hosts": ["c.liepin.com", "www.liepin.com"],
   "session": {
     "login_marker": "#im-c-entry",
@@ -21,7 +21,7 @@
     "job_root": ".job-apply-container",
     "job_id": "[data-job-id]",
     "job_title": ".job-apply-content .job-title",
-    "company": ".recruiter-container .company-name",
+    "company": ".company-info-container .company-card .name, .recruiter-container .company-name",
     "industry": ".company-intro-container .company-industry",
     "location": ".job-properties .job-location",
     "work_mode": ".job-properties .work-mode",
@@ -29,7 +29,7 @@
     "description": ".job-intro-container",
     "recruiter_on_job": ".recruiter-container .recruiter-name",
     "recruiter_role_on_job": ".recruiter-container .recruiter-role",
-    "job_open_marker": ".job-apply-operate .btn-chat",
+    "job_open_marker": ".apply-box .btn-main, .job-apply-operate .btn-chat, .recruiter-container .btn-chat",
     "job_closed_marker": ".job-status-closed, .job-detail-status-expired",
     "platform_greeting_dialog": ".im-ui-chat-modal-container",
     "platform_greeting_message": ".im-ui-message-item-send .im-ui-message-item-normal-message-wrapper"

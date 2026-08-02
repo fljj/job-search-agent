@@ -234,6 +234,8 @@ class LiepinJobDiscoveryAdapter:
             )
         created_target_id = str(created_target.get("id") or "")
         keep_target = False
+        last_reason_codes: list[str] = []
+        verify_company = not _is_masked_headhunter_company(summary)
         try:
             for _ in range(100):
                 with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
@@ -258,8 +260,13 @@ class LiepinJobDiscoveryAdapter:
                             Platform.LIEPIN,
                             self.selectors,
                             self.selectors.version,
-                            expected_company=summary.company_name,
+                            expected_company=(
+                                summary.company_name if verify_company else None
+                            ),
                             expected_job_title=summary.title,
+                            fallback_company=(
+                                None if verify_company else summary.company_name
+                            ),
                         )
                 except (OSError, TimeoutError, ValueError):
                     time.sleep(0.1)
@@ -268,9 +275,14 @@ class LiepinJobDiscoveryAdapter:
                     result.status is not SessionStatus.SESSION_READY
                     or result.page_type is not PageType.JOB
                 ):
+                    last_reason_codes = result.reason_codes
                     time.sleep(0.1)
                     continue
-                reasons = verify_job_target(summary, result)
+                reasons = verify_job_target(
+                    summary,
+                    result,
+                    verify_company=verify_company,
+                )
                 keep_target = not reasons
                 return DiscoveredJob(
                     summary=summary,
@@ -280,7 +292,8 @@ class LiepinJobDiscoveryAdapter:
                     reason_codes=reasons,
                 )
             return DiscoveredJob(
-                summary=summary, reason_codes=["JOB_DETAIL_NOT_READY"]
+                summary=summary,
+                reason_codes=last_reason_codes or ["JOB_DETAIL_NOT_READY"],
             )
         finally:
             if (
@@ -340,3 +353,11 @@ class LiepinJobDiscoveryAdapter:
                     item.detail_target_id,
                     item.detail_target_url,
                 )
+
+
+def _is_masked_headhunter_company(summary: BrowserJobSummary) -> bool:
+    """猎聘 /a/ 猎头职位的列表公司可能是脱敏描述，不能与详情实名强比较。"""
+
+    path = urlparse(summary.detail_url or "").path
+    company = "".join(summary.company_name.split())
+    return path.startswith("/a/") and company.startswith("某")

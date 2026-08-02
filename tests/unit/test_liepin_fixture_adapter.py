@@ -63,7 +63,13 @@ def test_reads_home_job_list_and_normalizes_both_link_forms() -> None:
         "job-liepin-1",
         "job-liepin-2",
     ]
-    assert _job_id_from_url("https://www.liepin.com/job/1983664515.shtml") == "1983664515"
+    assert _job_id_from_url("https://www.liepin.com/job/1983664515.shtml") == "83664515"
+    assert (
+        _job_id_from_url(
+            "https://www.liepin.com/job/1983664515.shtml?job_id=83664515"
+        )
+        == "83664515"
+    )
     assert _job_id_from_url("https://www.liepin.com/a/7823456789.shtml") == "7823456789"
 
 
@@ -77,13 +83,45 @@ def test_reads_job_detail_with_platform_selector_version() -> None:
 
     assert result.status is SessionStatus.SESSION_READY
     assert result.page_type is PageType.JOB
-    assert result.selector_version == "2026-08-01-v7"
+    assert result.selector_version == "2026-08-02-v8"
     assert result.job is not None
     assert result.job.external_job_id == "job-liepin-1"
     assert result.job.company_name == "示例科技"
     assert result.job.recruiter_name == "李女士"
     assert result.job.recruiter_role == "DIRECT_EMPLOYER"
     assert result.job.work_mode == "ONSITE"
+
+
+def test_reads_current_liepin_company_and_open_markers() -> None:
+    with fixture_page("job-detail-current.html") as page:
+        result = read_fixture(
+            page,
+            expected_company="华天软件",
+            expected_job_title="Java工程师",
+        )
+
+    assert result.status is SessionStatus.SESSION_READY
+    assert result.job is not None
+    assert result.job.company_name == "华天软件"
+    assert result.job.source_status == "OPEN"
+
+
+def test_headhunter_detail_uses_explicit_masked_company_fallback() -> None:
+    with fixture_page("job-detail-headhunter-current.html") as page:
+        selectors = get_browser_selectors().platforms["LIEPIN"]
+        result = extract_current_page(
+            PlaywrightPageReader(page),
+            Platform.LIEPIN,
+            selectors,
+            selectors.version,
+            expected_job_title="软件开发主管",
+            fallback_company="某国内知名公司",
+        )
+
+    assert result.status is SessionStatus.SESSION_READY
+    assert result.job is not None
+    assert result.job.company_name == "某国内知名公司"
+    assert result.job.recruiter_role == "HEADHUNTER"
 
 
 def test_reads_encoded_conversation_ids_and_message_directions() -> None:

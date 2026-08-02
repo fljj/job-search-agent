@@ -513,6 +513,45 @@ def _run_job_discovery(
                 limit=batch_size,
                 interval_seconds=interval_seconds,
             )
+        elif retry_record is not None:
+            # 到期重试与正常发现分开处理。详情读取类失败只重试一条，但不能长期
+            # 占用本轮唯一名额；LLM 恢复类失败仍服从全局熔断，不继续业务。
+            try:
+                process_job_discovery_batch(
+                    session,
+                    run,
+                    job_batch,
+                    provider=build_runtime_llm_provider(session),
+                    executor=executor,
+                    cdp_url=cdp_url,
+                    execute_external_actions=execute_external_actions,
+                )
+            finally:
+                adapter.close_details(cdp_url, job_batch)
+            if "WAITING_FOR_LLM_RECOVERY" in retry_record.reason_codes:
+                return
+            normal_seen_job_ids = list(
+                dict.fromkeys([*seen_job_ids, retry_record.external_job_id])
+            )
+            job_batch = adapter.scan(
+                cdp_url,
+                search_key=job_batch.next_search_key or job_batch.search_key,
+                search_keys=search_keys,
+                refresh_before_scan=False,
+                switch_search_before_scan=False,
+                scroll_position=job_batch.scroll_position,
+                previous_cursor=job_batch.next_cursor,
+                seen_job_ids=normal_seen_job_ids,
+                target_job_ids=None,
+                irrelevant_title_keywords=parser_config.irrelevant_title_keywords,
+                relevant_title_keywords=relevant_title_keywords,
+                direction_title_keywords=[
+                    *parser_config.relevant_title_keywords,
+                    *relevant_title_keywords,
+                ],
+                limit=batch_size,
+                interval_seconds=interval_seconds,
+            )
     except (OSError, TimeoutError, ValueError) as exc:
         record_platform_session_failure(session, run, "JOB_DISCOVERY_UNAVAILABLE")
         runtime_event(
@@ -543,8 +582,6 @@ def _run_job_discovery(
         )
     finally:
         adapter.close_details(cdp_url, job_batch)
-    if retry_record is not None and not job_batch.items:
-        mark_retry_target_not_visible(session, retry_record)
     runtime_event(
         logger,
         "JOB_SCAN_COMPLETED",
