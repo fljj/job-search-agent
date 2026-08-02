@@ -308,9 +308,40 @@ def test_raw_jd_full_time_bachelor_requirement_overrides_parser_miss(
     assert "FULL_TIME_BACHELOR_REQUIRED" in codes(changed)
 
 
+def test_parenthesized_full_time_after_bachelor_overrides_parser_miss(
+    context: JobDecisionContext,
+) -> None:
+    changed = context.model_copy(
+        update={
+            "candidate": context.candidate.model_copy(
+                update={"bachelor_full_time": False}
+            ),
+            "strategy": context.strategy.model_copy(
+                update={"reject_full_time_bachelor_required": True}
+            ),
+            "job": context.job.model_copy(
+                update={
+                    "description": "本科及以上学历（全日制），计算机相关专业优先。"
+                }
+            ),
+            "parsed_job": context.parsed_job.model_copy(
+                update={"full_time_bachelor_required": False}
+            ),
+        }
+    )
+
+    assert "FULL_TIME_BACHELOR_REQUIRED" in codes(changed)
+
+
 @pytest.mark.parametrize(
     "description",
-    ["本科不限是否全日制", "不要求全日制本科", "全日制本科优先"],
+    [
+        "本科不限是否全日制",
+        "不要求全日制本科",
+        "全日制本科优先",
+        "非全日制本科也可",
+        "本科非统招也可",
+    ],
 )
 def test_non_mandatory_full_time_bachelor_wording_is_not_hard_rejected(
     context: JobDecisionContext,

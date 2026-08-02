@@ -15,7 +15,7 @@ from packages.job_parser.normalizers import (
     normalize_text,
 )
 
-HARD_FILTER_VERSION = "hard-filter:1.1.0"
+HARD_FILTER_VERSION = "hard-filter:1.1.1"
 
 
 def evaluate_hard_filters(
@@ -201,9 +201,12 @@ def _requires_full_time_bachelor(description: str, parsed_required: bool) -> boo
     if parsed_required:
         return True
     text = normalize_text(description).replace(" ", "")
-    for match in re.finditer(r"(?:全日制|统招).{0,8}本科", text):
-        context = text[max(0, match.start() - 8):min(len(text), match.end() + 8)]
-        if any(marker in context for marker in ("不要求", "无需", "不限", "非必须", "优先")):
+    pattern = r"(?:全日制|统招).{0,12}本科|本科.{0,12}(?:全日制|统招)"
+    for match in re.finditer(pattern, text):
+        context = text[max(0, match.start() - 10):min(len(text), match.end() + 10)]
+        if any(marker in context for marker in (
+            "不要求", "无需", "不限", "非必须", "优先", "非全日制", "非统招", "也可",
+        )):
             continue
         return True
     return False
