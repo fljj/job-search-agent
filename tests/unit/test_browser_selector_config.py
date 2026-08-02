@@ -20,7 +20,7 @@ def test_loads_independently_versioned_platform_configs() -> None:
 
     assert set(config.platforms) == {"BOSS", "MAIMAI", "LIEPIN"}
     assert config.platforms["BOSS"].version == "2026-07-29-v14"
-    assert config.platforms["LIEPIN"].version == "2026-08-02-v8"
+    assert config.platforms["LIEPIN"].version == "2026-08-02-v10"
     assert (
         config.platforms["LIEPIN"].conversation_entry_button
         == "#im-c-entry .im-ui-basic-entry"
