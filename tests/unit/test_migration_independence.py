@@ -1,7 +1,11 @@
 import ast
 from pathlib import Path
+from typing import cast
 
 import pytest
+from sqlalchemy import CheckConstraint, Table
+
+from apps.api.app.models import entities as db
 
 MIGRATION_DIR = Path("apps/api/alembic/versions")
 HISTORICAL_REVISIONS = (
@@ -32,3 +36,15 @@ def test_historical_migration_does_not_depend_on_application_models(filename: st
     assert not any(module.startswith("apps.api.app") for module in imported_modules)
     assert "Base.metadata" not in source
     assert "op.create_table" in source
+
+
+def test_message_status_constraint_matches_platform_event_import() -> None:
+    constraint = next(
+        item
+        for item in cast(Table, db.Message.__table__).constraints
+        if item.name == "ck_messages_status"
+    )
+
+    assert "PLATFORM_EVENT_IGNORED" in str(
+        cast(CheckConstraint, constraint).sqltext
+    )

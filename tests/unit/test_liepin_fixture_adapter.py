@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, sync_playwright
 
-from adapters.browser.playwright_actions import PlaywrightActionExecutor
+from adapters.browser.playwright_actions import (
+    PlaywrightActionExecutor,
+    _strip_delivery_status_suffix,
+)
 from adapters.browser.playwright_reader import PlaywrightPageReader, _current_cdp_target
 from apps.api.app.core.browser_config import get_browser_selectors
 from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome
@@ -208,6 +211,15 @@ def test_liepin_greeting_click_is_read_back_once() -> None:
         assert result.outcome is ExecutionOutcome.SUCCEEDED
         assert result.observed_content == "您好，希望进一步沟通。"
         assert page.locator(".im-ui-message-item-send").count() == 1
+
+
+def test_platform_delivery_status_is_not_saved_as_message_content() -> None:
+    assert _strip_delivery_status_suffix("您好，希望进一步沟通。未读") == (
+        "您好，希望进一步沟通。"
+    )
+    assert _strip_delivery_status_suffix("您好，希望进一步沟通。 已读 ") == (
+        "您好，希望进一步沟通。"
+    )
 
 
 def test_liepin_reply_uses_approved_conversation_and_reads_back() -> None:

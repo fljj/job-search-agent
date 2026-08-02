@@ -1,8 +1,11 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
+from apps.api.app.models import entities as db
 from apps.api.app.services.conversation_service import (
     _full_time_education_reply,
     _is_ignored_platform_event,
@@ -167,7 +170,9 @@ def test_full_time_education_is_disclosed_only_when_explicitly_asked() -> None:
     session = _EducationSession()
     asked = type("Message", (), {"content": "请问你的本科是全日制吗？"})()
 
-    result = _full_time_education_reply(session, asked)  # type: ignore[arg-type]
+    result = _full_time_education_reply(
+        cast(Session, session), cast(db.Message, asked)
+    )
 
     assert result is not None
     assert result.content == "我的本科不是统招、不是全日制，学历可在学信网查询。"
@@ -178,7 +183,9 @@ def test_postgraduate_education_reply_uses_verified_knowledge() -> None:
     session = _EducationSession()
     asked = type("Message", (), {"content": "研究生是统招还是在职？学信网可查吗？"})()
 
-    result = _full_time_education_reply(session, asked)  # type: ignore[arg-type]
+    result = _full_time_education_reply(
+        cast(Session, session), cast(db.Message, asked)
+    )
 
     assert result is not None
     assert result.content == "我的硕士研究生属于统招，为在职就读，学历可在学信网查询。"
@@ -190,8 +197,8 @@ def test_full_time_education_is_not_proactively_disclosed() -> None:
     ordinary = type("Message", (), {"content": "请介绍一下你的项目经验"})()
 
     assert (
-        _full_time_education_reply(  # type: ignore[arg-type]
-            session, ordinary
+        _full_time_education_reply(
+            cast(Session, session), cast(db.Message, ordinary)
         )
         is None
     )

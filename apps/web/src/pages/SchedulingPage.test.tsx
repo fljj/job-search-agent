@@ -55,6 +55,14 @@ function mockInitialRequests() {
   })
 }
 
+function rowButton(row: Element, label: string): HTMLButtonElement {
+  const button = [...row.querySelectorAll('button')].find(
+    (item) => item.textContent?.replace(/\s/g, '') === label,
+  )
+  if (!button) throw new Error(`未找到操作按钮：${label}`)
+  return button
+}
+
 describe('SchedulingPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -66,16 +74,15 @@ describe('SchedulingPage', () => {
     render(<SchedulingPage />)
     await screen.findByText('明天下午电话沟通')
 
-    const rows = screen.getAllByRole('row')
-    const firstRow = rows.find((row) => within(row).queryByText('明天下午电话沟通'))!
-    const secondRow = rows.find((row) => within(row).queryByText('后天下午面试'))!
-    const finishedRow = rows.find((row) => within(row).queryByText('已处理任务'))!
+    const firstRow = screen.getByText('明天下午电话沟通').closest('tr')!
+    const secondRow = screen.getByText('后天下午面试').closest('tr')!
+    const finishedRow = screen.getByText('已处理任务').closest('tr')!
 
     fireEvent.change(within(firstRow).getByPlaceholderText('第一条默认回复'), {
       target: { value: '第一条人工确认回复' },
     })
-    fireEvent.click(within(firstRow).getByRole('checkbox'))
-    fireEvent.click(within(firstRow).getByRole('button', { name: '确认时间回复' }))
+    fireEvent.click(firstRow.querySelector('input[type="checkbox"]')!)
+    fireEvent.click(rowButton(firstRow, '确认时间回复'))
 
     await waitFor(() => expect(api).toHaveBeenCalledWith(
       '/scheduling/requests/schedule-1/approve',
@@ -91,7 +98,7 @@ describe('SchedulingPage', () => {
     fireEvent.change(within(secondRow).getByPlaceholderText('第二条默认回复'), {
       target: { value: '第二条人工确认回复' },
     })
-    fireEvent.click(within(secondRow).getByRole('button', { name: '确认时间回复' }))
+    fireEvent.click(rowButton(secondRow, '确认时间回复'))
 
     await waitFor(() => expect(api).toHaveBeenCalledWith(
       '/scheduling/requests/schedule-2/approve',
@@ -104,9 +111,9 @@ describe('SchedulingPage', () => {
       }),
     ))
 
-    expect(within(finishedRow).getByRole('button', { name: '确认时间回复' }))
+    expect(rowButton(finishedRow, '确认时间回复'))
       .toHaveProperty('disabled', true)
-    expect(within(finishedRow).getByRole('button', { name: /拒.*绝/ }))
+    expect(rowButton(finishedRow, '拒绝'))
       .toHaveProperty('disabled', true)
   })
 
@@ -123,14 +130,13 @@ describe('SchedulingPage', () => {
 
     render(<SchedulingPage />)
     await screen.findByText('明天下午电话沟通')
-    const rows = screen.getAllByRole('row')
-    const firstRow = rows.find((row) => within(row).queryByText('明天下午电话沟通'))!
-    const secondRow = rows.find((row) => within(row).queryByText('后天下午面试'))!
+    const firstRow = screen.getByText('明天下午电话沟通').closest('tr')!
+    const secondRow = screen.getByText('后天下午面试').closest('tr')!
 
     fireEvent.change(within(secondRow).getByPlaceholderText('第二条默认回复'), {
       target: { value: '第二条仍保留' },
     })
-    fireEvent.click(within(firstRow).getByRole('button', { name: /拒.*绝/ }))
+    fireEvent.click(rowButton(firstRow, '拒绝'))
 
     await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('任务状态已变化'))
     expect(within(secondRow).getByDisplayValue('第二条仍保留')).toBeTruthy()

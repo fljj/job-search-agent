@@ -3,6 +3,18 @@ from decimal import Decimal
 
 import pytest
 
+from packages.job_matching.models import (
+    CandidateProfile,
+    CandidateSkill,
+    IndustryRule,
+    IndustryRuleType,
+    JobDecisionContext,
+    RuleType,
+    SalaryRule,
+    Strategy,
+    TitleRule,
+    WorkModeRule,
+)
 from packages.job_parser.models import (
     JobInput,
     ParsedJob,
@@ -10,18 +22,6 @@ from packages.job_parser.models import (
     SeniorityLevel,
     SourceJobStatus,
     WorkMode,
-)
-from packages.job_matching.models import (
-    CandidateProfile,
-    CandidateSkill,
-    IndustryRule,
-    IndustryRuleType,
-    RuleType,
-    SalaryRule,
-    JobDecisionContext,
-    Strategy,
-    TitleRule,
-    WorkModeRule,
 )
 
 

@@ -3,15 +3,19 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from apps.api.app.core.config import Settings
 from packages.audit.redaction import RedactingFilter
 
 
-def configure_runtime_logging(settings: Settings) -> Path:
+def configure_runtime_logging(
+    log_dir: str,
+    *,
+    max_bytes: int,
+    backup_count: int,
+) -> Path:
     """配置正式运行日志；文件轮转且所有输出经过凭证脱敏。"""
-    log_dir = Path(settings.agent_log_dir).expanduser()
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "agent.log"
+    resolved_log_dir = Path(log_dir).expanduser()
+    resolved_log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = resolved_log_dir / "agent.log"
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
@@ -25,8 +29,8 @@ def configure_runtime_logging(settings: Settings) -> Path:
     ):
         handler = RotatingFileHandler(
             log_path,
-            maxBytes=settings.agent_log_max_bytes,
-            backupCount=settings.agent_log_backup_count,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
             encoding="utf-8",
         )
         handler.setFormatter(formatter)

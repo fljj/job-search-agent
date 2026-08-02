@@ -53,6 +53,7 @@ from packages.browser_worker.models import (
 
 def test_successful_greeting_creates_one_trackable_conversation(session: Session) -> None:
     session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    session.flush()
     job = db.Job(
         user_id=DEFAULT_USER_ID,
         source="BOSS",
@@ -173,7 +174,7 @@ def test_llm_selection_is_stored_without_api_key_and_applies_immediately(
     assert "secret" not in str(llm_configuration(session))
 
 
-def test_explicit_inbound_resume_request_does_not_require_score(
+def test_explicit_inbound_resume_request_does_not_require_proactive_decision(
     session: Session,
 ) -> None:
     session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
@@ -200,7 +201,6 @@ def test_explicit_inbound_resume_request_does_not_require_score(
             rule_type="INCLUDE",
             pattern="Java后端",
             normalized_pattern="java后端",
-            score=15,
         )
     )
     session.add(strategy)
@@ -372,6 +372,7 @@ def test_explicit_inbound_resume_request_does_not_require_score(
 
     assert arrival_draft.content == strategy.arrival_time_reply
     assert arrival_draft.decision.value == "ALLOW_AUTO"
+    assert arrival_draft.reply_source is not None
     assert arrival_draft.reply_source.value == "RULE_TEMPLATE"
     llm_provider.classify_message.assert_not_called()
     assert arrival_draft.reason_codes == ["CONFIGURED_ARRIVAL_TIME_REPLY"]

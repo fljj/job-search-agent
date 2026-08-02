@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from playwright.sync_api import Page, sync_playwright
 
 from adapters.browser.playwright_actions import (
@@ -150,7 +151,7 @@ def test_reply_executor_rejects_ambiguous_derived_conversation_identity() -> Non
 
 
 def test_reply_executor_scrolls_virtual_list_without_refreshing(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     executor = PlaywrightActionExecutor(get_browser_selectors())
     page = MagicMock()
@@ -323,7 +324,7 @@ def test_missing_approved_job_tab_is_retryable_before_any_click() -> None:
 
 
 def test_missing_job_tab_can_open_persisted_source_url_after_identity_check(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     created_response = MagicMock()
     created_response.__enter__.return_value.read.return_value = json.dumps({
@@ -411,7 +412,9 @@ def test_real_boss_resume_trigger_is_restricted_by_visible_text() -> None:
     assert "发简历" in script
 
 
-def test_real_boss_default_resume_uses_direct_confirmation(monkeypatch) -> None:
+def test_real_boss_default_resume_uses_direct_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     page = MagicMock()
     page._evaluate.side_effect = [0, 0, None, {"x": 10, "y": 20}, {"x": 30, "y": 40}, True]
     reader = MagicMock()
@@ -431,7 +434,9 @@ def test_real_boss_default_resume_uses_direct_confirmation(monkeypatch) -> None:
     assert page._command.call_count == 4
 
 
-def test_resume_reconciliation_does_not_retry_when_result_is_not_observed(monkeypatch) -> None:
+def test_resume_reconciliation_does_not_retry_when_result_is_not_observed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     response = MagicMock()
     response.__enter__.return_value.read.return_value = json.dumps([{
         "type": "page",
@@ -479,7 +484,9 @@ def test_resume_reconciliation_does_not_retry_when_result_is_not_observed(monkey
     assert "messages.slice(1).some(isResume)" in script
 
 
-def test_resume_reconciliation_accepts_resume_in_new_outbound_message(monkeypatch) -> None:
+def test_resume_reconciliation_accepts_resume_in_new_outbound_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     response = MagicMock()
     response.__enter__.return_value.read.return_value = json.dumps([{
         "type": "page",
@@ -520,7 +527,9 @@ def test_resume_reconciliation_accepts_resume_in_new_outbound_message(monkeypatc
     assert result.observed_content == "后端开发简历"
 
 
-def test_real_boss_does_not_fall_back_to_legacy_attachment_list(monkeypatch) -> None:
+def test_real_boss_does_not_fall_back_to_legacy_attachment_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     page = MagicMock()
     page._evaluate.side_effect = [0, 0, None, {"x": 10, "y": 20}, None]
     reader = MagicMock()

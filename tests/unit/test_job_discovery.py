@@ -1,10 +1,12 @@
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
 from adapters.browser.job_discovery import (
     BossJobDiscoveryAdapter,
@@ -20,6 +22,7 @@ from adapters.browser.job_discovery import (
     verify_job_target,
 )
 from apps.api.app.core.config import Settings
+from apps.api.app.models import entities as db
 from apps.api.app.services.automation_service import _proactive_safety_gaps
 from apps.api.app.services.job_discovery_service import (
     _is_prewrite_retryable,
@@ -458,7 +461,7 @@ def test_job_detail_accepts_full_company_name_for_truncated_list_name() -> None:
 def test_closes_only_detail_targets_created_for_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    closed: list[tuple[str, str]] = []
+    closed: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         BossJobDiscoveryAdapter,
         "_close_target",
@@ -592,7 +595,7 @@ def test_unknown_work_mode_does_not_skip_scoring_preflight() -> None:
 
 
 def test_unknown_work_mode_can_be_confirmed_by_proactive_greeting() -> None:
-    job = SimpleNamespace(
+    job = db.Job(
         company_name="示例公司",
         work_mode="UNKNOWN",
         external_job_id="job-1",
@@ -622,7 +625,7 @@ def test_retry_uses_exponential_backoff_and_stops_after_limit(
         "apps.api.app.services.job_discovery_service.get_settings",
         lambda: settings,
     )
-    record = SimpleNamespace(
+    record = db.JobDiscoveryRecord(
         retry_count=0,
         status="DISCOVERED",
         reason_codes=[],
@@ -650,11 +653,12 @@ def test_single_job_retry_does_not_block_other_job_scans() -> None:
         work_start_hour=0,
         work_end_hour=24,
     )
-    run = SimpleNamespace(cursor={})
+    session = MagicMock(spec=Session)
+    run = db.AgentRun(cursor={})
 
-    assert job_scan_block_reasons(  # type: ignore[arg-type]
-        SimpleNamespace(),  # type: ignore[arg-type]
-        run,  # type: ignore[arg-type]
+    assert job_scan_block_reasons(
+        session,
+        run,
         rules,
         datetime.now(UTC),
     ) == []
@@ -780,14 +784,14 @@ def test_only_prewrite_failure_allows_greeting_retry() -> None:
 
 
 def test_prewrite_greeting_retry_reuses_existing_action() -> None:
-    action = SimpleNamespace(
+    action = db.ActionQueue(
         status="FAILED_RETRYABLE",
         failure_code="APPROVED_TARGET_PAGE_NOT_FOUND",
     )
     session = MagicMock()
     session.scalar.return_value = action
 
-    assert _prewrite_retry_action(session, uuid4()) is action  # type: ignore[arg-type]
+    assert _prewrite_retry_action(cast(Session, session), uuid4()) is action
 
 
 def test_missing_retry_target_advances_backoff(
@@ -802,18 +806,18 @@ def test_missing_retry_target_advances_backoff(
         "apps.api.app.services.job_discovery_service.get_settings",
         lambda: settings,
     )
-    record = SimpleNamespace(
+    record = db.JobDiscoveryRecord(
         retry_count=0,
         status="RETRYABLE",
         reason_codes=["LLM_TIMEOUT"],
         next_retry_at=None,
     )
-    session = SimpleNamespace(commit=lambda: None)
+    session = MagicMock(spec=Session)
     now = datetime.now(UTC)
 
-    mark_retry_target_not_visible(  # type: ignore[arg-type]
-        session,  # type: ignore[arg-type]
-        record,  # type: ignore[arg-type]
+    mark_retry_target_not_visible(
+        session,
+        record,
         now=now,
     )
 

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import time
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
@@ -27,6 +28,16 @@ from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome, E
 from packages.browser_worker.config import BrowserSelectorsConfig, PlatformSelectors
 from packages.browser_worker.extractor import extract_current_page
 from packages.browser_worker.models import Platform, ReadResult, SessionStatus
+
+_DELIVERY_STATUS_SUFFIX = re.compile(r"\s*(?:未读|已读|发送中|发送失败)\s*$")
+
+
+def _strip_delivery_status_suffix(value: str | None) -> str | None:
+    """移除平台渲染在消息正文末尾的投递状态，避免污染审计正文。"""
+    if value is None:
+        return None
+    normalized = _DELIVERY_STATUS_SUFFIX.sub("", value).strip()
+    return normalized or None
 
 
 def _conversation_key_matches(actual: str, expected: str | None) -> bool:
@@ -1405,7 +1416,9 @@ class PlaywrightActionExecutor:
                 )
             with RawCdpPageReader(matches[0]) as page:
                 if command.delivery_mode == "PLATFORM_DEFAULT":
-                    observed = page.text(selectors.platform_greeting_message)
+                    observed = _strip_delivery_status_suffix(
+                        page.text(selectors.platform_greeting_message)
+                    )
                     dialog = page.text(selectors.platform_greeting_dialog)
                     if observed and dialog and (
                         command.platform == "LIEPIN" or "已发送" in dialog
@@ -1551,7 +1564,9 @@ class PlaywrightActionExecutor:
                 if command.delivery_mode == "PLATFORM_DEFAULT":
                     expected = command.expected_platform_content
                     for _ in range(30):
-                        observed = page.text(selectors.platform_greeting_message)
+                        observed = _strip_delivery_status_suffix(
+                            page.text(selectors.platform_greeting_message)
+                        )
                         dialog = page.text(selectors.platform_greeting_dialog)
                         if observed and dialog and (
                             command.platform == "LIEPIN" or "已发送" in dialog
@@ -1769,9 +1784,11 @@ class PlaywrightActionExecutor:
                     page.locator(selectors.platform_greeting_dialog).wait_for(
                         state="visible", timeout=3000
                     )
-                    observed = page.locator(
-                        selectors.platform_greeting_message
-                    ).first.text_content()
+                    observed = _strip_delivery_status_suffix(
+                        page.locator(
+                            selectors.platform_greeting_message
+                        ).first.text_content()
+                    )
                     evidence = hashlib.sha256(
                         f"{page.url}:{observed}:{command.model_dump_json()}".encode()
                     ).hexdigest()

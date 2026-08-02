@@ -408,7 +408,7 @@ class Message(Base):
         CheckConstraint(
             "status IN ('RECEIVED','AWAITING_IDENTITY','SUPERSEDED','PROCESSING',"
             "'RETRY_WAIT','WAITING_FOR_LLM','QUARANTINED','COMPLETED',"
-            "'MISMATCH_DECLINED')",
+            "'MISMATCH_DECLINED','PLATFORM_EVENT_IGNORED')",
             name="ck_messages_status",
         ),
     )
@@ -782,6 +782,16 @@ class JobDiscoveryRecord(Base):
     __tablename__ = "job_discovery_records"
     __table_args__ = (
         UniqueConstraint("agent_run_id", "external_job_id"),
+        CheckConstraint(
+            "retry_count >= 0",
+            name="ck_job_discovery_records_retry_count_nonnegative",
+        ),
+        Index(
+            "ix_job_discovery_records_retry_due",
+            "agent_run_id",
+            "status",
+            "next_retry_at",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

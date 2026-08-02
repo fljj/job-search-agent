@@ -850,8 +850,11 @@ def _promote_proactive_conversation(
             db.Conversation.external_conversation_id == item.summary.external_conversation_id,
         )
     )
-    if formal is not None or job is None:
+    if formal is not None:
+        _bind_successful_greeting_actions(session, formal)
         return formal
+    if job is None:
+        return None
     provisional = session.scalar(
         select(db.Conversation)
         .where(
@@ -891,7 +894,29 @@ def _promote_proactive_conversation(
         )
     )
     session.flush()
+    _bind_successful_greeting_actions(session, provisional)
     return provisional
+
+
+def _bind_successful_greeting_actions(
+    session: Session,
+    conversation: db.Conversation,
+) -> None:
+    """把历史上已成功但尚未绑定会话的招呼动作补到正式会话。"""
+    if conversation.job_id is None:
+        return
+    session.execute(
+        update(db.ActionQueue)
+        .where(
+            db.ActionQueue.user_id == conversation.user_id,
+            db.ActionQueue.platform == conversation.platform,
+            db.ActionQueue.job_id == conversation.job_id,
+            db.ActionQueue.action_type == ActionType.GREETING.value,
+            db.ActionQueue.status == "SUCCEEDED",
+            db.ActionQueue.conversation_id.is_(None),
+        )
+        .values(conversation_id=conversation.id)
+    )
 
 
 def _normalized_recruiter(value: str) -> str:

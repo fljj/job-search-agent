@@ -103,11 +103,19 @@ def test_scan_prefilters_irrelevant_title_before_opening_detail(
         lambda *_args, **_kwargs: listing,
     )
     monkeypatch.setattr(adapter, "_scroll_home", lambda _page: None)
+
+    def open_detail(
+        _cdp_url: object,
+        _page: object,
+        item: BrowserJobSummary,
+    ) -> DiscoveredJob:
+        opened.append(item.external_job_id)
+        return DiscoveredJob(summary=item, detail=_detail(item))
+
     monkeypatch.setattr(
         adapter,
         "_open_detail",
-        lambda _cdp, _page, item: opened.append(item.external_job_id)
-        or DiscoveredJob(summary=item, detail=_detail(item)),
+        open_detail,
     )
 
     batch = adapter.scan(

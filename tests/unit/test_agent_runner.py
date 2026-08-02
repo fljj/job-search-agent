@@ -122,7 +122,7 @@ def test_invisible_retry_target_falls_back_to_normal_job_batch(
     session.scalars.return_value.all.return_value = []
     session.get.return_value = MagicMock(title_rules=[])
     marked: list[object] = []
-    processed: list[tuple[JobDiscoveryBatch, bool]] = []
+    processed: list[JobDiscoveryBatch] = []
     lifecycle: list[str] = []
     adapter.close_details.side_effect = lambda *_: lifecycle.append("closed")
     monkeypatch.setattr(
@@ -136,11 +136,18 @@ def test_invisible_retry_target_falls_back_to_normal_job_batch(
         "scripts.run_agent_worker.mark_retry_target_not_visible",
         lambda _session, record: marked.append(record),
     )
+    def process_batch(
+        _session: object,
+        _run: object,
+        batch: JobDiscoveryBatch,
+        **_kwargs: object,
+    ) -> None:
+        processed.append(batch)
+        lifecycle.append("processed")
+
     monkeypatch.setattr(
         "scripts.run_agent_worker.process_job_discovery_batch",
-        lambda _session, _run, batch, **_kwargs: (
-            processed.append(batch), lifecycle.append("processed")
-        ),
+        process_batch,
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.get_settings",
@@ -222,7 +229,7 @@ def test_liepin_detail_retry_does_not_consume_normal_discovery_slot(
     )
     adapter = MagicMock()
     adapter.scan.side_effect = [retry_batch, normal_batch]
-    processed: list[JobDiscoveryBatch] = []
+    processed: list[tuple[JobDiscoveryBatch, bool]] = []
     closed: list[JobDiscoveryBatch] = []
     adapter.close_details.side_effect = lambda _url, batch: closed.append(batch)
     session = MagicMock(spec=Session)
@@ -235,11 +242,19 @@ def test_liepin_detail_retry_does_not_consume_normal_discovery_slot(
     monkeypatch.setattr(
         "scripts.run_agent_worker.next_retryable_job", lambda *_: retry
     )
+    def process_batch(
+        _session: object,
+        _run: object,
+        batch: JobDiscoveryBatch,
+        **kwargs: object,
+    ) -> None:
+        update_cursor = kwargs.get("update_cursor", True)
+        assert isinstance(update_cursor, bool)
+        processed.append((batch, update_cursor))
+
     monkeypatch.setattr(
         "scripts.run_agent_worker.process_job_discovery_batch",
-        lambda _session, _run, batch, **kwargs: processed.append(
-            (batch, kwargs.get("update_cursor", True))
-        ),
+        process_batch,
     )
     monkeypatch.setattr(
         "scripts.run_agent_worker.get_settings",
@@ -356,7 +371,6 @@ def test_liepin_job_discovery_enables_l4_action_processing(
         lambda: Settings(
             _env_file=None,
             liepin_job_batch_size=1,
-            liepin_writes_enabled=True,
         ),
     )
     monkeypatch.setattr(
@@ -707,10 +721,6 @@ def test_disabled_maimai_recommendations_skip_recommendation_scan(
         FakeActionExecutor(),
     )
     scan.assert_not_called()
-
-
-def test_liepin_writes_require_explicit_release_authorization() -> None:
-    assert Settings(_env_file=None).liepin_writes_enabled is False
 
 
 def test_raw_reply_waits_for_button_and_delayed_readback(

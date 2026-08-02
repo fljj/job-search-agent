@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
@@ -27,7 +27,7 @@ from packages.job_matching.decision import (
     hard_filtered_result,
     validate_llm_decision,
 )
-from packages.job_matching.hard_filters import evaluate_hard_filters
+from packages.job_matching.hard_filters import HARD_FILTER_VERSION, evaluate_hard_filters
 from packages.job_matching.models import (
     CandidateProfile,
     CandidateSkill,
@@ -95,6 +95,8 @@ def create_decision(
         select(db.JobDecision).where(db.JobDecision.input_fingerprint == fingerprint)
     )
     if existing:
+        _sync_conversation_decision(session, job.id, strategy.id)
+        session.commit()
         return _response(session, existing)
 
     try:
@@ -132,6 +134,8 @@ def create_decision(
         context.model_dump(mode="json"), llm_result.metadata.prompt_version, invocation.id,
     )
     session.add(decision)
+    session.flush()
+    _sync_conversation_decision(session, job.id, strategy.id)
     session.commit()
     session.refresh(decision)
     return _response(session, decision)
@@ -287,6 +291,8 @@ def _persist_hard_filtered(
         select(db.JobDecision).where(db.JobDecision.input_fingerprint == fingerprint)
     )
     if existing:
+        _sync_conversation_decision(session, job.id, strategy.id)
+        session.commit()
         return _response(session, existing)
     result = hard_filtered_result(context, rejections)
     decision = _entity(
@@ -294,6 +300,8 @@ def _persist_hard_filtered(
         context.model_dump(mode="json"), HARD_FILTER_PROMPT_VERSION, None,
     )
     session.add(decision)
+    session.flush()
+    _sync_conversation_decision(session, job.id, strategy.id)
     session.commit()
     session.refresh(decision)
     return _response(session, decision)
@@ -360,9 +368,42 @@ def _hard_filter_fingerprint(
 ) -> str:
     payload = [
         str(job_id), str(strategy.id), strategy.version, str(profile.id), profile.version,
-        str(parsed.id), DECISION_VERSION, "HARD_FILTER", reassessment_key,
+        str(parsed.id), DECISION_VERSION, HARD_FILTER_VERSION, reassessment_key,
     ]
     return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
+
+
+def _sync_conversation_decision(
+    session: Session,
+    job_id: object,
+    strategy_id: object,
+) -> None:
+    """让同一职位会话始终引用当前策略下的最新决策，避免沿用旧结论。"""
+    latest_decision_id = session.scalar(
+        select(db.JobDecision.id)
+        .where(
+            db.JobDecision.job_id == job_id,
+            db.JobDecision.strategy_id == strategy_id,
+        )
+        .order_by(db.JobDecision.created_at.desc(), db.JobDecision.id.desc())
+        .limit(1)
+    )
+    if latest_decision_id is None:
+        return
+    session.execute(
+        update(db.Conversation)
+        .where(
+            db.Conversation.job_id == job_id,
+            or_(
+                db.Conversation.strategy_id == strategy_id,
+                db.Conversation.strategy_id.is_(None),
+            ),
+        )
+        .values(
+            strategy_id=strategy_id,
+            latest_job_decision_id=latest_decision_id,
+        )
+    )
 
 
 def _response(session: Session, decision: db.JobDecision) -> DecisionResponse:

@@ -151,46 +151,53 @@ def test_extracts_conversation_messages() -> None:
 
 def test_extracts_only_pending_exact_platform_consent_cards() -> None:
     selectors = get_browser_selectors().platforms["BOSS"]
+    consent_cards = cast(str, selectors.consent_cards)
+    consent_title = cast(str, selectors.consent_card_title)
+    consent_buttons = cast(str, selectors.consent_card_buttons)
+    location_cards = cast(str, selectors.location_consent_cards)
+    location_title = cast(str, selectors.location_consent_title)
+    location_detail = cast(str, selectors.location_consent_detail)
+    location_button = cast(str, selectors.location_consent_button)
     page = FakePage(url="https://www.zhipin.com/web/geek/chat")
     page.visible = {selectors.login_marker, selectors.conversation_root}
     page.texts = {selectors.recruiter: "张先生"}
     page.attributes = {(selectors.conversation_id, selectors.conversation_id_attribute): "chat-1"}
     page.element_lists = {
-        selectors.consent_cards: [
+        consent_cards: [
             FakeElement(
                 texts={
-                    selectors.consent_card_title: ("我想要和您交换联系方式，您是否同意"),
-                    selectors.consent_card_buttons: "同意",
+                    consent_title: ("我想要和您交换联系方式，您是否同意"),
+                    consent_buttons: "同意",
                 },
-                attributes={(selectors.consent_card_buttons, "class"): "card-btn"},
+                attributes={(consent_buttons, "class"): "card-btn"},
             ),
             FakeElement(
                 texts={
-                    selectors.consent_card_title: ("我想要一份您的附件简历，您是否同意"),
-                    selectors.consent_card_buttons: "同意",
+                    consent_title: ("我想要一份您的附件简历，您是否同意"),
+                    consent_buttons: "同意",
                 },
-                attributes={(selectors.consent_card_buttons, "class"): "card-btn disabled"},
+                attributes={(consent_buttons, "class"): "card-btn disabled"},
             ),
             FakeElement(
                 texts={
-                    selectors.consent_card_title: "这不是受支持的平台动作",
-                    selectors.consent_card_buttons: "同意",
+                    consent_title: "这不是受支持的平台动作",
+                    consent_buttons: "同意",
                 }
             ),
         ],
-        selectors.location_consent_cards: [
+        location_cards: [
             FakeElement(
                 texts={
-                    selectors.location_consent_title: "您是否接受此工作地点?",
-                    selectors.location_consent_button: "可以接受",
+                    location_title: "您是否接受此工作地点?",
+                    location_button: "可以接受",
                 },
                 attributes={
                     (
-                        selectors.location_consent_detail,
+                        location_detail,
                         "aria-label",
                     ): "世纪开元文化创意产业园（济南历城区）",
                     (
-                        selectors.location_consent_button,
+                        location_button,
                         "class",
                     ): "btn-v2 btn-light-v2",
                 },

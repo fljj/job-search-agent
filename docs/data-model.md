@@ -91,8 +91,8 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
 保存 `GREETING/REPLY/RESUME/MISMATCH_DECLINE` 草稿、内容、事实 ID、输入指纹、版本、决策和
 `RULE_TEMPLATE/KNOWLEDGE_BASE/LLM/HUMAN` 回复来源。`dispatch_enabled` 是持久化派发边界：
 猎聘 L3 只读流程生成的草稿固定为 `false`，不能在当前或未来阶段进入动作队列；历史数据迁移
-默认保持 `true`。L4 代码不会修改该历史标志；只有发布开关已授权时，基于新入站消息新生成
-或显式重新生成且重新通过策略的草稿才可派发。相同有效输入不得重复生成草稿。
+默认保持 `true`。正式运行不会修改该历史标志；只有基于新入站消息新生成，或显式重新生成且
+重新通过 Run、自动化设置、策略和页面复核的草稿才可派发。相同有效输入不得重复生成草稿。
 
 ## 5. 决策、动作和审计
 
@@ -139,12 +139,12 @@ WAITING_FOR_LLM / QUARANTINED / COMPLETED / MISMATCH_DECLINED`。
 - `platform_sessions`：登录、页面和选择器可用状态；
 - `browser_page_registrations`：平台页面角色、CDP target、所有权和唯一性；
 - `browser_read_runs` / `page_evidence`：脱敏页面读取与证据；
-- `job_discovery_records`：职位预筛、处理、重试、正文版本和原因；猎聘发布开关关闭时，满足
-  主动条件的记录使用 `SCORED + PROACTIVE_CONTACT_CANDIDATE`，不创建 Action Queue；
+- `job_discovery_records`：职位预筛、处理、重试、正文版本和原因；按 Run、状态和下次重试时间
+  建立队首重试索引，满足主动条件时仍须经过策略授权后才能创建 Action Queue；
 - `platform_recommendations`：脉脉推荐卡片、简化判断、动作和回读证据；
 - `llm_circuit_breakers`：用户级模型能力状态、探测和失败信息；
 - `llm_runtime_settings`：当前 provider/model、`timeout_seconds`（1～300）和版本，不保存
-  API Key；更新后由 API 与 Worker 在后续 LLM 调用中动态读取。
+  API Key；更新后由 API 与 Worker 在后续 LLM 调用中动态读取，创建和更新时间均为非空审计字段。
 
 Run、Worker、平台会话和能力是四种独立状态，不能用其中一种替代其他状态。
 
@@ -163,7 +163,7 @@ Run、Worker、平台会话和能力是四种独立状态，不能用其中一�
 `automation_settings` 按 `GLOBAL/PLATFORM/STRATEGY` 唯一保存：
 
 - 总开关、暂停、紧急停止；
-- 自动招呼、最低分（80–100）、自动回复、自动简历；
+- 自动招呼、自动回复、自动简历；
 - 脉脉推荐及推荐简历开关；
 - 职位扫描；
 - 公司/招聘人防重复冷却；

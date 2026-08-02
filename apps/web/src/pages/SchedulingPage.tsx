@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Checkbox, Input, Select, Space, Table, Tag, message } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 
 interface ScheduleRequest {
@@ -15,8 +15,8 @@ interface CalendarStatus {
 
 export function SchedulingPage() {
   const [items, setItems] = useState<ScheduleRequest[]>([])
-  const [replies, setReplies] = useState<Record<string, string>>({})
-  const [createEvents, setCreateEvents] = useState<Record<string, boolean>>({})
+  const replies = useRef<Record<string, string>>({})
+  const createEvents = useRef<Record<string, boolean>>({})
   const [selectedSlots, setSelectedSlots] = useState<Record<string, number>>({})
   const [calendar, setCalendar] = useState<CalendarStatus>()
   const showRequestError = (error: unknown) =>
@@ -32,14 +32,14 @@ export function SchedulingPage() {
     if (item.calendar_status !== 'AVAILABLE' && item.candidate_slots.length && !selected) {
       return message.warning('请先选择一个服务端建议的候选时间')
     }
-    const content = replies[item.id] || (selected
+    const content = replies.current[item.id] || (selected
       ? `原时间不便，${new Date(selected.start_at).toLocaleString()} 是否可以？`
       : item.suggested_reply)
     if (!content) return message.warning('请填写确认后的回复内容')
     await api(`/scheduling/requests/${item.id}/approve`, { method: 'POST',
       body: JSON.stringify({ reply_content: content,
         selected_start_at: selected?.start_at, selected_end_at: selected?.end_at,
-        create_calendar_event: selected ? false : Boolean(createEvents[item.id]) }) })
+        create_calendar_event: selected ? false : Boolean(createEvents.current[item.id]) }) })
     await load(); message.success('具体时间已批准，仍需单独执行发送')
   }
   const execute = async (item: ScheduleRequest) => {
@@ -50,11 +50,11 @@ export function SchedulingPage() {
     await api(`/scheduling/requests/${item.id}/reject`, { method: 'POST' })
     await load(); message.success('已拒绝该时间安排')
   }
-  return <Space direction="vertical" style={{ width: '100%' }}>
-    <Alert type="warning" showIcon message="日历空闲也必须人工确认"
+  return <Space orientation="vertical" style={{ width: '100%' }}>
+    <Alert type="warning" showIcon title="日历空闲也必须人工确认"
       description="时间回复与日历写入是两个独立授权。发送前会检查日历快照；出现新冲突会退回待确认。" />
     <Alert type={calendar?.configured ? 'info' : 'error'} showIcon
-      message={`日历：${calendar?.provider ?? '-'} / ${calendar?.configured ? '已配置' : '未配置'}`}
+      title={`日历：${calendar?.provider ?? '-'} / ${calendar?.configured ? '已配置' : '未配置'}`}
       description={calendar?.real_provider
         ? `真实日历 ${calendar.calendar_id}；读取忙闲与创建事件仍是独立操作。`
         : '当前使用本地模拟日历，不代表真实日历空闲。'} />
@@ -64,7 +64,7 @@ export function SchedulingPage() {
       { title: '目标', render: (_: unknown, item: ScheduleRequest) =>
         `${item.platform ?? '-'} / ${item.company_name ?? '-'} / ${item.job_title ?? '-'} / ${item.recruiter_name ?? '-'}` },
       { title: '资格', render: (_: unknown, item: ScheduleRequest) =>
-        <Space direction="vertical" size={0}><Tag>{item.qualification_status ?? 'UNKNOWN'}</Tag>
+        <Space orientation="vertical" size={0}><Tag>{item.qualification_status ?? 'UNKNOWN'}</Tag>
           <span>{item.qualification_evidence?.join('、') || '-'}</span></Space> },
       { title: '类型', dataIndex: 'event_type' },
       { title: '原邀请', dataIndex: 'source_text' },
@@ -80,16 +80,12 @@ export function SchedulingPage() {
         : '-' },
       { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{value}</Tag> },
       { title: '回复与日历', render: (_: unknown, item: ScheduleRequest) =>
-        <Space direction="vertical">
-          <Input.TextArea value={replies[item.id] ?? ''}
+        <Space orientation="vertical">
+          <Input.TextArea defaultValue=""
             placeholder={item.suggested_reply || '填写确认后的回复'}
-            onChange={(event) => setReplies((current) => ({
-              ...current, [item.id]: event.target.value,
-            }))} />
-          <Checkbox checked={Boolean(createEvents[item.id])}
-            onChange={(event) => setCreateEvents((current) => ({
-              ...current, [item.id]: event.target.checked,
-            }))}>
+            onChange={(event) => { replies.current[item.id] = event.target.value }} />
+          <Checkbox defaultChecked={false}
+            onChange={(event) => { createEvents.current[item.id] = event.target.checked }}>
             发送成功后创建日历事件
           </Checkbox>
         </Space> },

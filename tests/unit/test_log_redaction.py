@@ -33,7 +33,11 @@ def test_runtime_log_is_rotating_structured_and_redacted(tmp_path: Path) -> None
         agent_log_max_bytes=1_000_000,
         agent_log_backup_count=2,
     )
-    log_path = configure_runtime_logging(settings)
+    log_path = configure_runtime_logging(
+        settings.agent_log_dir,
+        max_bytes=settings.agent_log_max_bytes,
+        backup_count=settings.agent_log_backup_count,
+    )
     logger = logging.getLogger("runtime-test")
     runtime_event(logger, "TEST_EVENT", run_id="run-1", detail="API_KEY=secret")
     for handler in logging.getLogger().handlers:

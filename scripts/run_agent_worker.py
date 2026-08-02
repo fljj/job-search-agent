@@ -384,7 +384,7 @@ def _run_liepin_job_discovery(
     executor: ActionExecutor,
     rules: object,
     *,
-    execute_external_actions: bool | None = None,
+    execute_external_actions: bool = True,
 ) -> None:
     settings = get_settings()
     _run_job_discovery(
@@ -398,11 +398,7 @@ def _run_liepin_job_discovery(
         search_keys=settings.liepin_job_searches,
         batch_size=settings.liepin_job_batch_size,
         interval_seconds=settings.liepin_job_scan_interval_seconds,
-        execute_external_actions=(
-            settings.liepin_writes_enabled
-            if execute_external_actions is None
-            else execute_external_actions
-        ),
+        execute_external_actions=execute_external_actions,
     )
 
 
@@ -694,7 +690,6 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                     continue
                 elif run.platform == Platform.LIEPIN.value:
                     run.executor_type = executor_type
-                    liepin_writes_enabled = get_settings().liepin_writes_enabled
                     message_adapter = LiepinMessageDiscoveryAdapter(
                         get_browser_selectors()
                     )
@@ -709,7 +704,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                             cdp_url,
                             message_adapter,
                             executor,
-                            execute_external_actions=liepin_writes_enabled,
+                            execute_external_actions=True,
                         )
                         if message_ready:
                             _tick_and_log(
@@ -717,7 +712,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                                 run,
                                 worker_id,
                                 executor,
-                                execute_external_actions=liepin_writes_enabled,
+                                execute_external_actions=True,
                             )
                     finally:
                         try:
@@ -764,7 +759,7 @@ def run_once(worker_id: str, cdp_url: str = "http://127.0.0.1:9222") -> None:
                                 cdp_url,
                                 executor,
                                 rules,
-                                execute_external_actions=liepin_writes_enabled,
+                                execute_external_actions=True,
                             )
                     continue
                 elif run.platform == Platform.MAIMAI.value:
@@ -817,7 +812,11 @@ def main() -> None:
     settings = get_settings()
     with SessionLocal() as config_session:
         selected_settings = runtime_settings(config_session, settings)
-    log_path = configure_runtime_logging(settings)
+    log_path = configure_runtime_logging(
+        settings.agent_log_dir,
+        max_bytes=settings.agent_log_max_bytes,
+        backup_count=settings.agent_log_backup_count,
+    )
     install_redacting_filter()
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     runtime_event(

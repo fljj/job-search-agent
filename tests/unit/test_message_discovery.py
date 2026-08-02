@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from urllib.request import Request
 from uuid import uuid4
 
 import pytest
@@ -136,16 +137,24 @@ def test_boss_message_page_is_reopened_when_missing(
     opened: list[object] = []
     response = MagicMock()
     response.__enter__.return_value = response
+
+    def open_page(request: Request, timeout: int) -> MagicMock:
+        assert timeout == 3
+        opened.append(request)
+        return response
+
     monkeypatch.setattr(adapter, "_matching_list_targets", MagicMock(return_value=[]))
     monkeypatch.setattr(
         "adapters.browser.message_discovery.urlopen",
-        lambda request, timeout: opened.append(request) or response,
+        open_page,
     )
 
     assert adapter.ensure_list_page("http://127.0.0.1:9222")
     assert len(opened) == 1
-    assert opened[0].get_method() == "PUT"
-    assert "/json/new?https://www.zhipin.com/web/geek/chat" in opened[0].full_url
+    request = opened[0]
+    assert isinstance(request, Request)
+    assert request.get_method() == "PUT"
+    assert "/json/new?https://www.zhipin.com/web/geek/chat" in request.full_url
 
 
 def test_location_consent_uses_strategy_onsite_locations() -> None:

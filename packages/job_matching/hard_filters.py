@@ -15,6 +15,8 @@ from packages.job_parser.normalizers import (
     normalize_text,
 )
 
+HARD_FILTER_VERSION = "hard-filter:1.1.0"
+
 
 def evaluate_hard_filters(
     context: JobDecisionContext,
