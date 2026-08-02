@@ -17,6 +17,8 @@ def test_compact_request_contains_relevant_candidate_facts_only(context) -> None
     assert "Java" in names
     assert len(names) <= 15
     assert "evidence_catalog" not in request.model_dump()
+    assert "salary" not in request.job
+    assert "salary" not in request.strategy
 
 
 def test_contact_decision_is_eligible_when_confident_and_open(context) -> None:

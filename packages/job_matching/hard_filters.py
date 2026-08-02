@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 
 from packages.job_matching.models import (
     HardRejectionReason,
@@ -115,32 +116,23 @@ def evaluate_hard_filters(
             )
         )
 
-    salary_rule = next(
-        (
-            rule
-            for rule in strategy.salary_rules
-            if rule.work_mode == job.work_mode
-        ),
-        None,
-    )
+    salary_threshold = _salary_contact_threshold(context)
     salary = parsed.salary
     if (
-        salary_rule
+        salary_threshold is not None
         and salary
         and not salary.negotiable
         and salary.is_pre_tax is not False
         and salary.maximum_monthly_k is not None
-        and salary.maximum_monthly_k < salary_rule.minimum_monthly_k
+        and salary.maximum_monthly_k < salary_threshold
     ):
         reasons.append(
             _reason(
-                "SALARY_BELOW_MINIMUM",
-                "薪资上限低于策略最低接受值",
+                "SALARY_BELOW_CONTACT_THRESHOLD",
+                "薪资上限低于当前工作模式的主动沟通门槛",
                 {
                     "maximum_monthly_k": str(salary.maximum_monthly_k),
-                    "minimum_monthly_k": str(
-                        salary_rule.minimum_monthly_k
-                    ),
+                    "contact_threshold_k": str(salary_threshold),
                 },
             )
         )
@@ -242,6 +234,36 @@ def _contains_keyword(text: str, keyword: str) -> bool:
             is not None
         )
     return normalized_keyword in "".join(text.casefold().split())
+
+
+def _salary_contact_threshold(
+    context: JobDecisionContext,
+) -> Decimal | None:
+    strategy = context.strategy
+    job_mode = context.job.work_mode
+    exact = next(
+        (
+            rule.expected_monthly_k
+            for rule in strategy.salary_rules
+            if rule.work_mode == job_mode
+        ),
+        None,
+    )
+    if exact is not None:
+        return exact
+    if job_mode != WorkMode.UNKNOWN:
+        return None
+    enabled_modes = {
+        rule.work_mode
+        for rule in strategy.work_mode_rules
+        if rule.enabled
+    }
+    candidates = [
+        rule.expected_monthly_k
+        for rule in strategy.salary_rules
+        if rule.work_mode in enabled_modes
+    ]
+    return min(candidates) if candidates else None
 
 
 def _reason(

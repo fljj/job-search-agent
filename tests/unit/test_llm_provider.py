@@ -201,7 +201,7 @@ def test_authorization_key_is_not_in_payload() -> None:
 
 def test_job_decision_prompt_returns_only_contact_decision() -> None:
     version, prompt = PROMPTS["decide_job_contact"]
-    assert version == "job-contact-decision-v1"
+    assert version == "job-contact-decision-v2"
     assert all(value in prompt for value in ("CONTACT", "SKIP", "REVIEW"))
     assert "硬性排除" in prompt
 

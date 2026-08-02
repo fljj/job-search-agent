@@ -21,7 +21,7 @@ def context(**changes: object) -> QualificationContext:
         "blacklisted_companies": ["黑名单公司"],
         "enabled_work_modes": ["REMOTE", "ONSITE"],
         "allowed_locations": ["济南"],
-        "minimum_salary_k": 20,
+        "salary_threshold_k": 20,
         "prohibited_direction_keywords": ["保险销售", "保险增员", "刷单"],
         "related_direction_keywords": [
             "Java", "后端", "开发", "Vibe Coding", "直播运营"
@@ -40,6 +40,19 @@ def test_partial_related_job_is_rough_match() -> None:
         context(location=None, salary_text=None, description=None)
     )
     assert status is QualificationStatus.ROUGH_MATCH
+
+
+def test_unknown_work_mode_still_applies_salary_threshold() -> None:
+    status, evidence = evaluate_qualification(
+        context(
+            work_mode="UNKNOWN",
+            salary_text="9-10K",
+            salary_threshold_k=15,
+        )
+    )
+
+    assert status is QualificationStatus.MISMATCH
+    assert evidence == ["SALARY_CONFLICT"]
 
 
 def test_unknown_job_stays_unknown() -> None:

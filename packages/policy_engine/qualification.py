@@ -31,7 +31,7 @@ class QualificationContext(BaseModel):
     blacklisted_companies: list[str] = Field(default_factory=list)
     enabled_work_modes: list[str] = Field(default_factory=list)
     allowed_locations: list[str] = Field(default_factory=list)
-    minimum_salary_k: float | None = None
+    salary_threshold_k: float | None = None
     prohibited_direction_keywords: list[str] = Field(default_factory=list)
     related_direction_keywords: list[str] = Field(default_factory=list)
 
@@ -78,12 +78,12 @@ def evaluate_qualification(
         not in {normalize_location(item) for item in context.allowed_locations}
     ):
         return QualificationStatus.MISMATCH, ["LOCATION_CONFLICT"]
-    if context.salary_text and context.minimum_salary_k is not None:
+    if context.salary_text and context.salary_threshold_k is not None:
         salary = parse_salary(context.salary_text)
         if (
             salary
             and salary.maximum_monthly_k is not None
-            and float(salary.maximum_monthly_k) < context.minimum_salary_k
+            and float(salary.maximum_monthly_k) < context.salary_threshold_k
         ):
             return QualificationStatus.MISMATCH, ["SALARY_CONFLICT"]
     structured_direction_known = bool(

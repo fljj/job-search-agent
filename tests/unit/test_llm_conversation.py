@@ -142,7 +142,7 @@ def test_low_confidence_uses_safe_template_without_confirmation() -> None:
 
 def test_mismatch_decline_hides_internal_blacklist() -> None:
     result = build_mismatch_decline(
-        ["COMPANY_BLACKLISTED", "SALARY_BELOW_MINIMUM"]
+        ["COMPANY_BLACKLISTED", "SALARY_BELOW_CONTACT_THRESHOLD"]
     )
     assert result.decision is Decision.ALLOW_AUTO
     assert "59" not in result.content

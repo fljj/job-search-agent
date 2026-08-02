@@ -13,7 +13,7 @@ from packages.llm.models import (
     JobContactDecisionRequest,
 )
 
-DECISION_VERSION = "llm-contact-decision:1.0.0"
+DECISION_VERSION = "llm-contact-decision:1.1.0"
 MIN_CONTACT_CONFIDENCE = Decimal("0.75")
 
 
@@ -49,7 +49,6 @@ def build_llm_request(
             "industry": job.industry,
             "location": job.location,
             "work_mode": job.work_mode,
-            "salary": job.salary_text,
             "recruiter_role": job.recruiter_role,
         },
         requirements={
@@ -82,14 +81,6 @@ def build_llm_request(
                 }
                 for rule in strategy.work_mode_rules
                 if rule.enabled
-            ],
-            "salary": [
-                {
-                    "mode": rule.work_mode,
-                    "minimum_k": rule.minimum_monthly_k,
-                    "expected_k": rule.expected_monthly_k,
-                }
-                for rule in strategy.salary_rules
             ],
             "industries": [
                 {"name": rule.industry, "type": rule.rule_type}

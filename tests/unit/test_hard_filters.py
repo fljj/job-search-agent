@@ -104,10 +104,65 @@ def test_missing_core_skill(context: JobDecisionContext) -> None:
     assert "REQUIRED_CORE_SKILL_MISSING" in codes(context.model_copy(update={"candidate": candidate}))
 
 
-def test_salary_below_minimum(context: JobDecisionContext) -> None:
+def test_salary_below_contact_threshold(context: JobDecisionContext) -> None:
     parsed = context.parsed_job.model_copy(update={"salary": SalaryRange(
         minimum_monthly_k=Decimal(20), maximum_monthly_k=Decimal(30), is_pre_tax=True)})
-    assert "SALARY_BELOW_MINIMUM" in codes(context.model_copy(update={"parsed_job": parsed}))
+    assert "SALARY_BELOW_CONTACT_THRESHOLD" in codes(
+        context.model_copy(update={"parsed_job": parsed})
+    )
+
+
+@pytest.mark.parametrize(
+    ("work_mode", "maximum", "rejected"),
+    [
+        (WorkMode.ONSITE, Decimal("14"), True),
+        (WorkMode.ONSITE, Decimal("15"), False),
+        (WorkMode.REMOTE, Decimal("24"), True),
+        (WorkMode.REMOTE, Decimal("25"), False),
+        (WorkMode.UNKNOWN, Decimal("10"), True),
+    ],
+)
+def test_salary_contact_threshold_boundaries(
+    context: JobDecisionContext,
+    work_mode: WorkMode,
+    maximum: Decimal,
+    rejected: bool,
+) -> None:
+    salary_rules = [
+        rule.model_copy(
+            update={
+                "expected_monthly_k": (
+                    Decimal("25")
+                    if rule.work_mode == WorkMode.REMOTE
+                    else Decimal("15")
+                )
+            }
+        )
+        for rule in context.strategy.salary_rules
+    ]
+    changed = context.model_copy(
+        update={
+            "job": context.job.model_copy(
+                update={"work_mode": work_mode, "location": "济南"}
+            ),
+            "parsed_job": context.parsed_job.model_copy(
+                update={
+                    "salary": SalaryRange(
+                        minimum_monthly_k=maximum,
+                        maximum_monthly_k=maximum,
+                        is_pre_tax=True,
+                    )
+                }
+            ),
+            "strategy": context.strategy.model_copy(
+                update={"salary_rules": salary_rules}
+            ),
+        }
+    )
+
+    assert (
+        "SALARY_BELOW_CONTACT_THRESHOLD" in codes(changed)
+    ) is rejected
 
 
 @pytest.mark.parametrize(
@@ -126,7 +181,9 @@ def test_parsed_rejections(context: JobDecisionContext, changes: dict[str, objec
 
 def test_unknown_salary_does_not_hard_reject(context: JobDecisionContext) -> None:
     parsed = context.parsed_job.model_copy(update={"salary": None})
-    assert "SALARY_BELOW_MINIMUM" not in codes(context.model_copy(update={"parsed_job": parsed}))
+    assert "SALARY_BELOW_CONTACT_THRESHOLD" not in codes(
+        context.model_copy(update={"parsed_job": parsed})
+    )
 
 
 def test_part_time_is_rejected_when_strategy_does_not_accept_it(

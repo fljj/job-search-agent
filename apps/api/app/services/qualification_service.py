@@ -123,17 +123,37 @@ def _context(
             for item in mode_rules
             for location in item.locations
         ],
-        minimum_salary_k=next(
-            (
-                float(item.minimum_monthly_k)
-                for item in strategy.salary_rules
-                if work_mode and item.work_mode == work_mode
-            ),
-            None,
-        ),
+        salary_threshold_k=_salary_threshold(strategy, work_mode),
         prohibited_direction_keywords=policy.prohibited_direction_keywords,
         related_direction_keywords=policy.related_direction_keywords,
     )
+
+
+def _salary_threshold(
+    strategy: db.JobStrategy,
+    work_mode: str | None,
+) -> float | None:
+    exact = next(
+        (
+            float(item.expected_monthly_k)
+            for item in strategy.salary_rules
+            if work_mode and item.work_mode == work_mode
+        ),
+        None,
+    )
+    if exact is not None:
+        return exact
+    if work_mode not in {None, "UNKNOWN", ""}:
+        return None
+    enabled_modes = {
+        item.work_mode for item in strategy.work_mode_rules if item.enabled
+    }
+    candidates = [
+        float(item.expected_monthly_k)
+        for item in strategy.salary_rules
+        if item.work_mode in enabled_modes
+    ]
+    return min(candidates) if candidates else None
 
 
 def _store(
