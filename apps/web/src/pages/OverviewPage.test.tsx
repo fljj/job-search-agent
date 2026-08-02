@@ -3,7 +3,7 @@ import { message } from 'antd'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { OverviewPage } from './OverviewPage'
-import { canReconnectRun, canResumeRun, processedJobAndMessageCount } from './run-summary'
+import { canReconnectRun, canResumeRun } from './run-summary'
 
 vi.mock('../api/client', () => ({ api: vi.fn() }))
 
@@ -20,6 +20,15 @@ const pausedRun = {
 function mockOverviewApi() {
   vi.mocked(api).mockImplementation(async (path) => {
     if (path === '/automation/runs') return { items: [pausedRun] }
+    if (path === '/automation/overview') return {
+      job_count: 20,
+      analyzed_job_count: 12,
+      processed_message_count: 8,
+      active_conversation_count: 6,
+      successful_action_count: 5,
+      waiting_message_count: 4,
+      failed_action_count: 0,
+    }
     if (path === '/automation/actions') return { items: [] }
     if (path === '/conversations') return { items: [] }
     if (path === '/automation/operations/status') {
@@ -69,12 +78,16 @@ describe('OverviewPage 重新连接', () => {
     })).toBe(true)
   })
 
-  it('已处理职位和消息不计入脉脉推荐', () => {
-    expect(processedJobAndMessageCount([
-      pausedRun,
-      { ...pausedRun, id: 'maimai-run', platform: 'MAIMAI', processed_count: 99 },
-      { ...pausedRun, id: 'liepin-run', platform: 'LIEPIN', processed_count: 4 },
-    ])).toBe(14)
+  it('分别展示已分析职位、已处理消息和真正待处理消息', async () => {
+    render(<OverviewPage />)
+
+    expect(await screen.findByText('已分析职位')).toBeTruthy()
+    expect(screen.getByText('已处理消息')).toBeTruthy()
+    expect(screen.getByText('待处理消息')).toBeTruthy()
+    expect(await screen.findByText('12')).toBeTruthy()
+    expect(screen.getByText('8')).toBeTruthy()
+    expect(screen.getByText('4')).toBeTruthy()
+    expect(screen.queryByText('已处理职位/消息')).toBeNull()
   })
 
   it('分别展示人工确认和面试确认数量', async () => {
@@ -98,6 +111,8 @@ describe('OverviewPage 重新连接', () => {
       }] }
       if (path === '/automation/overview') return {
         job_count: 0,
+        analyzed_job_count: 0,
+        processed_message_count: 0,
         active_conversation_count: 0,
         successful_action_count: 0,
         waiting_message_count: 0,

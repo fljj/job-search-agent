@@ -36,6 +36,7 @@ from apps.api.app.services.message_discovery_service import (
     _promote_proactive_conversation,
     persist_discovery_batch,
 )
+from apps.api.app.services.operations_service import overview_metrics
 from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID
 from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
@@ -795,6 +796,85 @@ def test_platform_outbound_message_blocks_historical_draft_dispatch(
     assert stored_outbound.direction == "OUTBOUND"
     assert stored_inbound.status == "COMPLETED"
     assert _pending_drafts(session, run, 10) == []
+
+
+def test_overview_message_metrics_exclude_terminal_and_maimai_conversations(
+    session: Session,
+) -> None:
+    session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    session.flush()
+    active_conversation = db.Conversation(
+        user_id=DEFAULT_USER_ID,
+        platform="BOSS",
+        external_conversation_id="active-conversation",
+        recruiter_name="招聘人",
+        state="ACTIVE",
+    )
+    terminal_conversation = db.Conversation(
+        user_id=DEFAULT_USER_ID,
+        platform="BOSS",
+        external_conversation_id="declined-conversation",
+        recruiter_name="招聘人",
+        state="DECLINED",
+    )
+    maimai_conversation = db.Conversation(
+        user_id=DEFAULT_USER_ID,
+        platform="MAIMAI",
+        external_conversation_id="maimai-recommendation",
+        recruiter_name="求职小助手",
+        state="ACTIVE",
+    )
+    session.add_all(
+        [active_conversation, terminal_conversation, maimai_conversation]
+    )
+    session.flush()
+    received_at = datetime.now(UTC)
+    session.add_all(
+        [
+            db.Message(
+                conversation_id=active_conversation.id,
+                external_message_id="active-pending",
+                direction="INBOUND",
+                content="方便聊聊吗？",
+                status="RECEIVED",
+                identity_reliable=True,
+                received_at=received_at,
+            ),
+            db.Message(
+                conversation_id=active_conversation.id,
+                external_message_id="active-completed",
+                direction="INBOUND",
+                content="谢谢",
+                status="COMPLETED",
+                identity_reliable=True,
+                received_at=received_at,
+            ),
+            db.Message(
+                conversation_id=terminal_conversation.id,
+                external_message_id="terminal-pending",
+                direction="INBOUND",
+                content="历史消息",
+                status="RECEIVED",
+                identity_reliable=True,
+                received_at=received_at,
+            ),
+            db.Message(
+                conversation_id=maimai_conversation.id,
+                external_message_id="maimai-pending",
+                direction="INBOUND",
+                content="我想要一份您的简历，您是否同意",
+                status="RECEIVED",
+                identity_reliable=True,
+                received_at=received_at,
+            ),
+        ]
+    )
+    session.commit()
+
+    metrics = overview_metrics(session)
+
+    assert metrics["processed_message_count"] == 1
+    assert metrics["waiting_message_count"] == 1
 
 
 def test_liepin_l3_draft_cannot_be_dispatched_after_l4_upgrade(

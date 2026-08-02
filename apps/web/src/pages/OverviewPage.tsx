@@ -7,7 +7,6 @@ import {
   agentStatusText,
   canReconnectRun,
   canResumeRun,
-  processedJobAndMessageCount,
 } from './run-summary'
 import { activeWorkers, workerStatusText } from './worker-status'
 import { businessLabel } from './business-labels'
@@ -17,7 +16,8 @@ interface Run {
   action_count: number; failure_count: number; pause_reason_codes: string[]
 }
 interface OverviewMetrics {
-  generated_at: string; job_count: number; active_conversation_count: number
+  generated_at: string; job_count: number; analyzed_job_count: number
+  processed_message_count: number; active_conversation_count: number
   successful_action_count: number; waiting_message_count: number; failed_action_count: number
 }
 interface Operations {
@@ -96,7 +96,6 @@ export function OverviewPage() {
     }
   }, [load])
   const currentRuns = activeRuns(runs)
-  const processedCount = processedJobAndMessageCount(currentRuns)
   const currentWorkers = activeWorkers(operations?.workers)
   const workerRunning = currentWorkers.length > 0
   const llmCircuit = operations?.llm_circuit
@@ -119,8 +118,12 @@ export function OverviewPage() {
     <Row gutter={[16, 16]}>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="Agent 状态"
         value={loadError ? '服务不可用' : agentStatusText(runs, workerRunning)} /></Card></Col>
-      <Col xs={24} sm={12} xl={6}><Card><Statistic title="已处理职位/消息"
-        value={processedCount} suffix={` / 待处理 ${metrics?.waiting_message_count ?? 0}`} /></Card></Col>
+      <Col xs={24} sm={12} xl={6}><Card><Statistic title="已分析职位"
+        value={metrics?.analyzed_job_count ?? 0} /></Card></Col>
+      <Col xs={24} sm={12} xl={6}><Card><Statistic title="已处理消息"
+        value={metrics?.processed_message_count ?? 0} /></Card></Col>
+      <Col xs={24} sm={12} xl={6}><Card><Statistic title="待处理消息"
+        value={metrics?.waiting_message_count ?? 0} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="自动动作"
         value={metrics?.successful_action_count ?? 0} /></Card></Col>
       <Col xs={24} sm={12} xl={6}><Card><Statistic title="待人工处理"

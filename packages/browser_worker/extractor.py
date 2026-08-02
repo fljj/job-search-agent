@@ -595,9 +595,12 @@ def _normalize_work_mode(value: str | None) -> str:
 
 
 def _normalize_company_name(value: str | None) -> str | None:
-    if value and value.startswith("公司名称"):
-        return value.removeprefix("公司名称").strip()
-    return value
+    if not value:
+        return value
+    normalized = " ".join(value.split()).lstrip("·•").strip()
+    if normalized.startswith("公司名称"):
+        return normalized.removeprefix("公司名称").strip()
+    return normalized
 
 
 def _job_id_from_url(value: str) -> str | None:

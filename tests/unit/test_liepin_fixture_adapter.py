@@ -1,6 +1,8 @@
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from playwright.sync_api import Page, sync_playwright
@@ -11,7 +13,11 @@ from adapters.browser.playwright_actions import (
 )
 from adapters.browser.playwright_reader import PlaywrightPageReader, _current_cdp_target
 from apps.api.app.core.browser_config import get_browser_selectors
-from packages.browser_worker.actions import ApprovedCommand, ExecutionOutcome
+from packages.browser_worker.actions import (
+    ApprovedCommand,
+    ExecutionOutcome,
+    ExecutionResult,
+)
 from packages.browser_worker.extractor import _job_id_from_url, extract_current_page
 from packages.browser_worker.models import (
     MessageDirection,
@@ -86,7 +92,7 @@ def test_reads_job_detail_with_platform_selector_version() -> None:
 
     assert result.status is SessionStatus.SESSION_READY
     assert result.page_type is PageType.JOB
-    assert result.selector_version == "2026-08-02-v10"
+    assert result.selector_version == "2026-08-02-v11"
     assert result.job is not None
     assert result.job.external_job_id == "job-liepin-1"
     assert result.job.company_name == "示例科技"
@@ -113,7 +119,7 @@ def test_reads_current_liepin_company_and_open_markers() -> None:
     assert result.job.source_status == "OPEN"
 
 
-def test_headhunter_detail_uses_explicit_masked_company_fallback() -> None:
+def test_headhunter_detail_prefers_visible_real_company() -> None:
     with fixture_page("job-detail-headhunter-current.html") as page:
         selectors = get_browser_selectors().platforms["LIEPIN"]
         result = extract_current_page(
@@ -127,7 +133,7 @@ def test_headhunter_detail_uses_explicit_masked_company_fallback() -> None:
 
     assert result.status is SessionStatus.SESSION_READY
     assert result.job is not None
-    assert result.job.company_name == "某国内知名公司"
+    assert result.job.company_name == "万宝盛华信息科技（上海）有限公司"
     assert result.job.recruiter_role == "HEADHUNTER"
 
 
@@ -170,6 +176,125 @@ def test_abnormal_pages_fail_closed_with_explicit_status() -> None:
     assert changed.reason_codes == ["SUPPORTED_PAGE_ROOT_NOT_FOUND"]
     assert mismatch.status is SessionStatus.SESSION_TARGET_MISMATCH
     assert mismatch.reason_codes == ["JOB_TARGET_MISMATCH"]
+
+
+def _open_mocked_job_target(
+    monkeypatch: pytest.MonkeyPatch,
+    results: list[ReadResult],
+    company: str = "示例科技",
+) -> tuple[str | None, ExecutionResult | None, MagicMock]:
+    source_url = results[0].page_url
+    created_response = MagicMock()
+    created_response.__enter__.return_value.read.return_value = json.dumps(
+        {"id": "opened-liepin-job"}
+    ).encode()
+    list_response = MagicMock()
+    list_response.__enter__.return_value.read.return_value = json.dumps(
+        [{
+            "id": "opened-liepin-job",
+            "webSocketDebuggerUrl": (
+                "ws://127.0.0.1/devtools/page/opened-liepin-job"
+            ),
+        }]
+    ).encode()
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.urlopen",
+        MagicMock(
+            side_effect=[
+                created_response,
+                *([list_response] * len(results)),
+                MagicMock(),
+            ]
+        ),
+    )
+    page = MagicMock()
+    page.url = source_url
+    page.title = "Java 后端工程师招聘"
+    reader = MagicMock()
+    reader.__enter__.return_value = page
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.RawCdpPageReader",
+        lambda _: reader,
+    )
+    extractor = MagicMock(side_effect=results)
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.extract_current_page",
+        extractor,
+    )
+    monkeypatch.setattr("adapters.browser.playwright_actions.time.sleep", MagicMock())
+    opened, failure = PlaywrightActionExecutor(
+        get_browser_selectors()
+    )._open_approved_job_target(
+        "http://127.0.0.1:9222",
+        _approved_command(
+            "GREETING",
+            conversation_key=None,
+            source_url=source_url,
+            company=company,
+        ),
+        Platform.LIEPIN,
+        get_browser_selectors().platforms["LIEPIN"],
+    )
+    return opened, failure, extractor
+
+
+def _loading_job_result() -> ReadResult:
+    return ReadResult(
+        platform=Platform.LIEPIN,
+        status=SessionStatus.SESSION_AUTH_REQUIRED,
+        page_url="https://www.liepin.com/a/job-liepin-1.shtml",
+        page_title="",
+        content_hash="a" * 64,
+        selector_version="fixture",
+        reason_codes=["LOGIN_REQUIRED"],
+    )
+
+
+def test_new_job_target_waits_for_late_login_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    masked_company = "某上海大型专业技术服务公司"
+    ready = ReadResult(
+        platform=Platform.LIEPIN,
+        status=SessionStatus.SESSION_READY,
+        page_type=PageType.JOB,
+        page_url="https://www.liepin.com/a/job-liepin-1.shtml",
+        page_title="Java 后端工程师招聘",
+        content_hash="b" * 64,
+        selector_version="fixture",
+        job={
+            "external_job_id": "job-liepin-1",
+            "title": "Java 后端工程师",
+            "company_name": masked_company,
+            "recruiter_name": "李女士",
+            "description": "Java 后端开发",
+        },
+    )
+    opened, failure, extractor = _open_mocked_job_target(
+        monkeypatch,
+        [_loading_job_result(), ready],
+        company=masked_company,
+    )
+
+    assert failure is None
+    assert opened == "ws://127.0.0.1/devtools/page/opened-liepin-job"
+    assert extractor.call_count == 2
+    assert extractor.call_args.kwargs["fallback_company"] == masked_company
+
+
+def test_new_job_target_timeout_is_retryable_before_click(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened, failure, _ = _open_mocked_job_target(
+        monkeypatch,
+        [_loading_job_result()] * 100,
+    )
+
+    assert opened is None
+    assert failure is not None
+    assert failure.outcome is ExecutionOutcome.FAILED_RETRYABLE
+    assert failure.error_code == "JOB_PAGE_NOT_READY"
+    assert not failure.write_started
 
 
 def test_write_confirmation_fixtures_have_unique_read_only_targets() -> None:

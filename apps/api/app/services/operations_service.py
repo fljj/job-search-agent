@@ -399,10 +399,29 @@ def overview_metrics(session: Session) -> dict[str, object]:
     active_conversation_states = [
         "NEW", "ACTIVE", "WAITING_RECRUITER", "WAITING_USER", "SCHEDULING"
     ]
+    pending_message_statuses = ["RECEIVED", "RETRY_WAIT", "WAITING_FOR_LLM"]
+    processed_message_statuses = ["COMPLETED", "MISMATCH_DECLINED"]
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "job_count": session.scalar(
             select(func.count()).select_from(db.Job).where(db.Job.user_id == DEFAULT_USER_ID)
+        ) or 0,
+        "analyzed_job_count": session.scalar(
+            select(func.count(func.distinct(db.JobDecision.job_id)))
+            .select_from(db.JobDecision)
+            .join(db.Job, db.Job.id == db.JobDecision.job_id)
+            .where(db.Job.user_id == DEFAULT_USER_ID)
+        ) or 0,
+        "processed_message_count": session.scalar(
+            select(func.count())
+            .select_from(db.Message)
+            .join(db.Conversation, db.Conversation.id == db.Message.conversation_id)
+            .where(
+                db.Conversation.user_id == DEFAULT_USER_ID,
+                db.Conversation.platform != "MAIMAI",
+                db.Message.direction == "INBOUND",
+                db.Message.status.in_(processed_message_statuses),
+            )
         ) or 0,
         "active_conversation_count": session.scalar(
             select(func.count()).select_from(db.Conversation).where(
@@ -422,7 +441,14 @@ def overview_metrics(session: Session) -> dict[str, object]:
             .join(db.Conversation, db.Conversation.id == db.Message.conversation_id)
             .where(
                 db.Conversation.user_id == DEFAULT_USER_ID,
-                db.Message.status.in_(["RECEIVED", "RETRY_WAIT", "WAITING_FOR_LLM"]),
+                db.Conversation.platform != "MAIMAI",
+                db.Conversation.state.in_(active_conversation_states),
+                db.Message.direction == "INBOUND",
+                db.Message.identity_reliable.is_(True),
+                db.Message.status.in_(pending_message_statuses),
+                ~select(db.GeneratedDraft.id)
+                .where(db.GeneratedDraft.message_id == db.Message.id)
+                .exists(),
             )
         ) or 0,
         "failed_action_count": session.scalar(

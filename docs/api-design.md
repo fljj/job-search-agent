@@ -117,7 +117,7 @@
 | `POST /automation/runs/{id}/resume` | 恢复 Run |
 | `POST /automation/runs/{id}/tick` | 测试/运维触发一次处理 |
 | `GET /automation/actions` | 分页查看自动动作和准确总数 |
-| `GET /automation/overview` | 独立数据库聚合总览 |
+| `GET /automation/overview` | 独立数据库聚合总览；分别返回唯一已分析职位、已处理入站消息和活动会话中的待处理消息数量 |
 | `GET /automation/operations/status` | Run、Worker、平台和能力状态 |
 | `GET /automation/operations/reconciliation` | 查看对账任务 |
 | `POST /automation/operations/reconciliation/run` | 执行一批只读对账 |

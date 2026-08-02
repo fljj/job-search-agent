@@ -6,6 +6,8 @@ const labels: Record<string, string> = {
   RESULT_NOT_OBSERVED: '发送结果待核对',
   JOB_SOURCE_URL_MISSING: '未保存原职位链接',
   JOB_SOURCE_URL_UNAVAILABLE: '原职位链接暂不可用',
+  JOB_PAGE_NOT_READY: '职位页面尚未加载完成', LOGIN_REQUIRED: '平台登录状态失效',
+  VERIFICATION_REQUIRED: '平台需要人工验证',
   SESSION_READY: '页面就绪', SESSION_UNAVAILABLE: '页面不可用',
   OPEN: '暂停（模型不可用）', PROBING: '正在检测', CLOSED: '正常可用',
   CONFIGURED: '已配置', UNCONFIGURED: '未配置',

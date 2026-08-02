@@ -63,6 +63,39 @@ def _job_title_matches(actual: str | None, expected: str) -> bool:
     return normalized == " ".join(expected.split())
 
 
+def _explicit_auth_failure(
+    page_url: str,
+    page_title: str,
+    reason_codes: list[str],
+) -> str | None:
+    """只在页面给出明确认证证据时确认登录或验证失败。"""
+    if "VERIFICATION_REQUIRED" in reason_codes:
+        return "VERIFICATION_REQUIRED"
+    parsed = urlparse(page_url)
+    hostname = (parsed.hostname or "").lower()
+    path = parsed.path.lower()
+    if (
+        hostname.startswith(("passport.", "login."))
+        or "/login" in path
+        or "/web/user" in path
+        or "登录" in page_title
+    ):
+        return "LOGIN_REQUIRED"
+    return None
+
+
+def _masked_company_fallback(
+    command: ApprovedCommand,
+    platform: Platform,
+) -> str | None:
+    """猎聘 `/a/` 猎头职位可能只在列表中提供脱敏公司名。"""
+    if platform is not Platform.LIEPIN or not command.source_url:
+        return None
+    path = urlparse(command.source_url).path
+    company = "".join(command.company.split())
+    return command.company if path.startswith("/a/") and company.startswith("某") else None
+
+
 def _reply_target_matches(
     result: ReadResult,
     command: ApprovedCommand,
@@ -159,6 +192,10 @@ class PlaywrightActionExecutor:
                         platform,
                         selectors,
                         selectors.version,
+                        fallback_company=_masked_company_fallback(
+                            command,
+                            platform,
+                        ),
                     )
                     if _reply_target_matches(check, command):
                         matches += 1
@@ -330,13 +367,29 @@ class PlaywrightActionExecutor:
                         selectors.version,
                         expected_company=command.company,
                         expected_job_title=command.job_title,
+                        fallback_company=_masked_company_fallback(
+                            command,
+                            platform,
+                        ),
                     )
+                    page_url = page.url
+                    page_title = page.title
                 if check.status is SessionStatus.SESSION_AUTH_REQUIRED:
-                    self._close_created_target(cdp_url, target_id)
-                    return None, ExecutionResult(
-                        outcome=ExecutionOutcome.FAILED_FINAL,
-                        error_code="LOGIN_REQUIRED",
+                    auth_failure = _explicit_auth_failure(
+                        page_url,
+                        page_title,
+                        check.reason_codes,
                     )
+                    if auth_failure:
+                        self._close_created_target(cdp_url, target_id)
+                        return None, ExecutionResult(
+                            outcome=ExecutionOutcome.FAILED_FINAL,
+                            error_code=auth_failure,
+                        )
+                    # 新标签页的业务 DOM 会晚于 CDP target 出现。登录标记暂时
+                    # 不存在并不能证明会话失效，等待后再次完整核验目标身份。
+                    time.sleep(0.1)
+                    continue
                 if check.status is not SessionStatus.SESSION_READY:
                     time.sleep(0.1)
                     continue
@@ -363,7 +416,7 @@ class PlaywrightActionExecutor:
             self._close_created_target(cdp_url, target_id)
             return None, ExecutionResult(
                 outcome=ExecutionOutcome.FAILED_RETRYABLE,
-                error_code="JOB_SOURCE_URL_UNAVAILABLE",
+                error_code="JOB_PAGE_NOT_READY",
             )
         except (OSError, TimeoutError, ValueError):
             return None, ExecutionResult(

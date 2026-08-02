@@ -1,6 +1,6 @@
 {
   "platform": "LIEPIN",
-  "version": "2026-08-02-v10",
+  "version": "2026-08-02-v11",
   "allowed_hosts": ["c.liepin.com", "www.liepin.com"],
   "session": {
     "login_marker": "#im-c-entry",
@@ -21,7 +21,7 @@
     "job_root": ".job-apply-container",
     "job_id": "[data-job-id]",
     "job_title": ".job-apply-content .job-title",
-    "company": ".company-info-container .company-card .name, .recruiter-container .company-name",
+    "company": ".company-info-container .company-card .name, .recruiter-container .company-name, .recruiter-container .title-box > span:nth-child(2), .recruiter-container .title-box > a",
     "industry": ".company-intro-container .company-industry",
     "location": ".job-apply-content .job-properties > span:first-child, .job-properties .job-location",
     "work_mode": ".job-properties .work-mode",
