@@ -2,16 +2,10 @@ import re
 
 from packages.job_parser.models import WorkMode
 
-_ONSITE_MARKERS = (
+_REMOTE_NEGATION_MARKERS = (
     "不支持远程",
     "不接受远程",
-    "必须现场",
-    "现场办公",
-    "线下办公",
-    "驻场办公",
-    "需要坐班",
 )
-_HYBRID_MARKERS = ("混合办公", "hybrid")
 _REMOTE_MARKERS = ("远程", "remote", "work from home", "wfh", "居家办公")
 _REMOTE_LOCATIONS = {"远程", "remote"}
 
@@ -24,17 +18,20 @@ def infer_effective_work_mode(
     location: str | None,
     infer_onsite_from_location: bool = True,
 ) -> WorkMode:
-    """平台未标注工作模式时，仅在有明确证据时识别远程或混合，其余按现场办公处理。"""
+    """仅判断是否存在明确远程证据，其余情况统一按现场办公处理。"""
     current = WorkMode(work_mode)
-    if current is not WorkMode.UNKNOWN:
-        return current
+    if current is WorkMode.REMOTE:
+        return WorkMode.REMOTE
+    if current in {WorkMode.ONSITE, WorkMode.HYBRID}:
+        return WorkMode.ONSITE
 
     text = f"{title}\n{description}".casefold()
     compact_text = "".join(text.split())
-    if any("".join(marker.casefold().split()) in compact_text for marker in _ONSITE_MARKERS):
+    if any(
+        "".join(marker.casefold().split()) in compact_text
+        for marker in _REMOTE_NEGATION_MARKERS
+    ):
         return WorkMode.ONSITE
-    if any(_contains_marker(text, marker) for marker in _HYBRID_MARKERS):
-        return WorkMode.HYBRID
     if any(_contains_marker(text, marker) for marker in _REMOTE_MARKERS):
         return WorkMode.REMOTE
 

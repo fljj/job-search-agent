@@ -95,7 +95,10 @@ export function JobPage() {
         onChange={(value) => setStrategyId(value ?? '')} style={{ minWidth: 220 }}
         options={strategies.map((item) => ({ value: item.id, label: item.name }))} />
       <Select allowClear placeholder="工作模式" value={workMode} onChange={setWorkMode}
-        options={['REMOTE', 'ONSITE', 'HYBRID', 'UNKNOWN'].map((value) => ({ value, label: value }))} />
+        options={[
+          { value: 'REMOTE', label: '远程' },
+          { value: 'ONSITE', label: '现场办公' },
+        ]} />
       <Select allowClear placeholder="沟通决策" value={decisionFilter} onChange={setDecisionFilter}
         options={Object.entries(decisionLabels).map(([value, label]) => ({ value, label }))} />
       <Input allowClear placeholder="搜索职位或公司" value={keyword}
@@ -115,7 +118,8 @@ export function JobPage() {
           render: (source: string) => <Tag>{platformLabels[source] ?? source}</Tag> },
         { title: '职位', dataIndex: 'title', width: 260, ellipsis: true },
         { title: '公司', dataIndex: 'company_name', width: 220, ellipsis: true },
-        { title: '模式', dataIndex: 'work_mode', width: 100, render: (mode: string) => <Tag>{mode}</Tag> },
+        { title: '模式', dataIndex: 'work_mode', width: 100,
+          render: (mode: string) => <Tag>{mode === 'REMOTE' ? '远程' : '现场办公'}</Tag> },
         { title: '地点', dataIndex: 'location', width: 120, ellipsis: true },
         { title: '薪资', dataIndex: 'salary_text', width: 120, render: (value?: string) => value ?? '-' },
         { title: '沟通决策', width: 150, render: (_: unknown, job: Job) => job.latest_decision

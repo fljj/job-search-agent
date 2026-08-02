@@ -587,12 +587,11 @@ def _unread_count(raw_value: str | None) -> int | None:
 
 def _normalize_work_mode(value: str | None) -> str:
     lowered = (value or "").lower()
+    compact = "".join(lowered.split())
+    if any(marker in compact for marker in ("不支持远程", "不接受远程")):
+        return "ONSITE"
     if any(word in lowered for word in ("远程", "居家办公", "remote")):
         return "REMOTE"
-    if any(word in lowered for word in ("混合", "hybrid")):
-        return "HYBRID"
-    if any(word in lowered for word in ("现场", "onsite", "坐班")):
-        return "ONSITE"
     return "UNKNOWN"
 
 
