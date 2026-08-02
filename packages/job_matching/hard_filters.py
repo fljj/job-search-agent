@@ -9,8 +9,8 @@ from packages.job_matching.models import (
 )
 from packages.job_parser.models import SeniorityLevel, WorkMode
 from packages.job_parser.normalizers import (
+    location_matches_allowed,
     normalize_company,
-    normalize_location,
     normalize_skill,
     normalize_text,
 )
@@ -75,11 +75,7 @@ def evaluate_hard_filters(
             and not parsed.onsite_required_explicitly
         )
     ):
-        location = normalize_location(job.location)
-        allowed = {
-            normalize_location(item) for item in mode_rule.allowed_locations
-        }
-        if location not in allowed:
+        if not location_matches_allowed(job.location, mode_rule.allowed_locations):
             code = (
                 "ONSITE_LOCATION_NOT_ALLOWED"
                 if job.work_mode == WorkMode.ONSITE
@@ -179,7 +175,7 @@ def evaluate_hard_filters(
     ):
         reasons.append(_reason("INTERNSHIP_POSITION", "实习岗位不符合策略"))
     if (
-        parsed.full_time_bachelor_required
+        _requires_full_time_bachelor(job.description, parsed.full_time_bachelor_required)
         and strategy.reject_full_time_bachelor_required
         and context.candidate.bachelor_full_time is False
     ):
@@ -196,6 +192,19 @@ def evaluate_hard_filters(
     ):
         reasons.append(_reason("JUNIOR_POSITION", "策略不接受初级岗位"))
     return reasons
+
+
+def _requires_full_time_bachelor(description: str, parsed_required: bool) -> bool:
+    """全日制本科硬条件直接核对原始 JD，避免模型漏掉明确学历表述。"""
+    if parsed_required:
+        return True
+    text = normalize_text(description).replace(" ", "")
+    for match in re.finditer(r"(?:全日制|统招).{0,8}本科", text):
+        context = text[max(0, match.start() - 8):min(len(text), match.end() + 8)]
+        if any(marker in context for marker in ("不要求", "无需", "不限", "非必须", "优先")):
+            continue
+        return True
+    return False
 
 
 def _has_direction_evidence(

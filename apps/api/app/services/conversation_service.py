@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmConfigurationError, LlmProviderError
@@ -195,6 +195,29 @@ def import_message(
             if _reconcile_inbound_messages_before_outbound(session, existing):
                 session.commit()
         return _message_response(existing)
+    if payload.direction == "OUTBOUND":
+        provisional = session.scalar(
+            select(db.Message)
+            .where(
+                db.Message.conversation_id == conversation.id,
+                db.Message.direction == "OUTBOUND",
+                db.Message.content == payload.content,
+                or_(
+                    db.Message.external_message_id.like("action-outbound:%"),
+                    db.Message.external_message_id.like("greeting-action:%"),
+                ),
+            )
+            .order_by(db.Message.received_at.desc())
+            .limit(1)
+        )
+        if provisional is not None:
+            provisional.external_message_id = payload.external_message_id
+            provisional.received_at = payload.received_at
+            provisional.identity_reliable = payload.identity_reliable
+            _reconcile_inbound_messages_before_outbound(session, provisional)
+            session.commit()
+            session.refresh(provisional)
+            return _message_response(provisional)
     message_values = payload.model_dump(exclude={"direction"})
     if payload.direction == "OUTBOUND":
         message = db.Message(
@@ -454,7 +477,6 @@ def create_reply_draft(
         if prior_decline:
             return _draft_response(session, prior_decline)
         result = build_mismatch_decline(qualification_evidence)
-        message.status = "MISMATCH_DECLINED"
         return _persist_draft(
             session,
             result,

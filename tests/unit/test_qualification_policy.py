@@ -81,6 +81,19 @@ def test_known_conflicts_are_mismatch(changes: dict[str, object]) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "location",
+    ["济南-高新区", "济南市历下区", "山东济南高新区", "山东省济南市高新区"],
+)
+def test_onsite_city_allows_subordinate_districts(location: str) -> None:
+    assert (
+        evaluate_qualification(
+            context(work_mode="ONSITE", location=location)
+        )[0]
+        is QualificationStatus.FULL_MATCH
+    )
+
+
 def test_company_blacklist_uses_normalized_exact_match() -> None:
     assert (
         evaluate_qualification(

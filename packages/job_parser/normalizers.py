@@ -22,6 +22,14 @@ SKILL_ALIASES: dict[str, str] = {
     "高并发": "高并发系统",
 }
 
+PROVINCE_PREFIXES = (
+    "内蒙古", "黑龙江", "广西", "西藏", "宁夏", "新疆",
+    "北京", "天津", "上海", "重庆", "河北", "山西", "辽宁", "吉林",
+    "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北",
+    "湖南", "广东", "海南", "四川", "贵州", "云南", "陕西", "甘肃",
+    "青海", "香港", "澳门", "台湾",
+)
+
 
 def normalize_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).strip().lower()
@@ -33,6 +41,33 @@ def normalize_location(value: str | None) -> str | None:
         return None
     normalized = normalize_text(value)
     return normalized.removesuffix("市")
+
+
+def location_matches_allowed(
+    location: str | None,
+    allowed_locations: list[str],
+) -> bool:
+    """判断结构化职位地点是否属于策略允许的城市或行政区域。"""
+    candidate = _location_hierarchy_key(location)
+    if not candidate:
+        return False
+    return any(
+        candidate == allowed or candidate.startswith(allowed)
+        for item in allowed_locations
+        if (allowed := _location_hierarchy_key(item))
+    )
+
+
+def _location_hierarchy_key(value: str | None) -> str | None:
+    normalized = normalize_location(value)
+    if not normalized:
+        return None
+    normalized = re.sub(r"[\s\-—_/·,，]+", "", normalized)
+    normalized = normalized.replace("省", "").replace("市", "")
+    for prefix in PROVINCE_PREFIXES:
+        if normalized.startswith(prefix) and len(normalized) > len(prefix):
+            return normalized.removeprefix(prefix)
+    return normalized
 
 
 def normalize_company(value: str) -> str:

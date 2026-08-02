@@ -19,6 +19,7 @@ from apps.api.app.core.database import Base
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.automation import AutomationDispatchRequest
 from apps.api.app.schemas.conversation import MessagePayload
+from apps.api.app.services.action_service import _ensure_greeting_conversation
 from apps.api.app.services.agent_service import _pending_drafts
 from apps.api.app.services.automation_service import dispatch
 from apps.api.app.services.conversation_service import (
@@ -31,9 +32,13 @@ from apps.api.app.services.llm_config_service import (
     runtime_settings,
     select_llm_configuration,
 )
-from apps.api.app.services.message_discovery_service import persist_discovery_batch
+from apps.api.app.services.message_discovery_service import (
+    _promote_proactive_conversation,
+    persist_discovery_batch,
+)
 from apps.api.app.services.scheduling_service import analyze_invitation
 from apps.api.app.services.user_service import DEFAULT_USER_ID
+from packages.browser_worker.actions import ExecutionOutcome, ExecutionResult
 from packages.browser_worker.models import (
     BrowserConversation,
     BrowserMessage,
@@ -44,6 +49,86 @@ from packages.browser_worker.models import (
     ReadResult,
     SessionStatus,
 )
+
+
+def test_successful_greeting_creates_one_trackable_conversation(session: Session) -> None:
+    session.add(db.User(id=DEFAULT_USER_ID, display_name="测试用户"))
+    job = db.Job(
+        user_id=DEFAULT_USER_ID,
+        source="BOSS",
+        external_job_id="greeting-job-1",
+        content_hash="g" * 64,
+        title="智能合约开发工程师",
+        company_name="测试公司",
+        work_mode="ONSITE",
+        description="Java 与智能合约开发",
+        source_status="ACTIVE",
+        raw_data={},
+    )
+    session.add(job)
+    session.flush()
+    action = db.ActionQueue(
+        user_id=DEFAULT_USER_ID,
+        job_id=job.id,
+        action_type="GREETING",
+        status="SUCCEEDED",
+        content="您好，想进一步了解这个岗位。",
+        platform="BOSS",
+        target_company=job.company_name,
+        target_job_title=job.title,
+        target_recruiter="尚女士 在线",
+        idempotency_key="greeting-test-1",
+        send_fingerprint="f" * 64,
+        approved_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+    session.add(action)
+    session.flush()
+    result = ExecutionResult(
+        outcome=ExecutionOutcome.SUCCEEDED,
+        observed_content="您好，想进一步了解这个岗位。",
+    )
+
+    _ensure_greeting_conversation(session, action, result)
+    _ensure_greeting_conversation(session, action, result)
+    session.flush()
+
+    conversations = session.scalars(
+        select(db.Conversation).where(db.Conversation.job_id == job.id)
+    ).all()
+    assert len(conversations) == 1
+    assert conversations[0].recruiter_name == "尚女士"
+    assert action.conversation_id == conversations[0].id
+    messages = session.scalars(
+        select(db.Message).where(db.Message.conversation_id == conversations[0].id)
+    ).all()
+    assert len(messages) == 1
+    assert messages[0].direction == "OUTBOUND"
+    assert messages[0].status == "COMPLETED"
+
+    promoted = _promote_proactive_conversation(
+        session,
+        MessageDiscoveryBatch(
+            platform=Platform.BOSS,
+            partition="ALL",
+            scroll_position=0,
+            scanned_at=datetime.now(UTC),
+        ),
+        DiscoveredConversation(
+            summary={
+                "external_conversation_id": "boss-formal-chat-1",
+                "recruiter_name": "尚女士",
+                "job_title": job.title,
+                "company_name": job.company_name,
+                "last_message_id": "boss-message-1",
+                "unread_count": 0,
+            },
+        ),
+        job,
+    )
+    assert promoted is not None
+    assert promoted.id == conversations[0].id
+    assert promoted.external_conversation_id == "boss-formal-chat-1"
 
 
 @pytest.fixture

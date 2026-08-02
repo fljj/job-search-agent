@@ -95,9 +95,11 @@ def build_llm_reply(
 
 def build_mismatch_decline(reason_codes: list[str]) -> DraftResult:
     public_reasons: list[str] = []
-    if any("LOCATION" in code or "WORK_MODE" in code for code in reason_codes):
+    if "JOB_DIRECTION_CONFLICT" in reason_codes:
+        public_reasons.append("岗位方向和当前求职计划不完全匹配")
+    elif any("LOCATION" in code or "WORK_MODE" in code for code in reason_codes):
         public_reasons.append("工作地点或工作模式与当前计划不太一致")
-    if any("SALARY" in code for code in reason_codes):
+    if not public_reasons and any("SALARY" in code for code in reason_codes):
         public_reasons.append("薪资范围与当前考虑范围存在差异")
     if not public_reasons:
         public_reasons.append("岗位方向和当前求职计划不完全匹配")

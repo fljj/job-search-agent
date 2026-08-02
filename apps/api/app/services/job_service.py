@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from adapters.llm.errors import LlmProviderError
@@ -131,6 +131,7 @@ def list_jobs(
     effective_job_status: str | None = None,
     work_mode: str | None = None,
     hard_rejected: bool | None = None,
+    keyword: str | None = None,
 ) -> tuple[list[JobResponse], int]:
     decision_rank = (
         select(
@@ -159,6 +160,11 @@ def list_jobs(
         ).join(latest_decision, latest_decision.id == decision_rank.c.decision_id)
     if job_id is not None:
         query = query.where(db.Job.id == job_id)
+    if keyword and keyword.strip():
+        pattern = f"%{keyword.strip()}%"
+        query = query.where(
+            or_(db.Job.title.ilike(pattern), db.Job.company_name.ilike(pattern))
+        )
     if work_mode:
         query = query.where(db.Job.work_mode == work_mode)
     if decision:

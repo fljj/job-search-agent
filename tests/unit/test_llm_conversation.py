@@ -150,6 +150,15 @@ def test_mismatch_decline_hides_internal_blacklist() -> None:
     assert "薪资范围" in result.content
 
 
+def test_mismatch_decline_prefers_job_direction_over_salary() -> None:
+    result = build_mismatch_decline(
+        ["JOB_DIRECTION_CONFLICT", "SALARY_BELOW_CONTACT_THRESHOLD"]
+    )
+
+    assert "岗位方向" in result.content
+    assert "薪资范围" not in result.content
+
+
 def test_forged_conversation_message_id_is_rejected() -> None:
     actual_id = uuid4()
     evaluation = ConversationEvaluation(

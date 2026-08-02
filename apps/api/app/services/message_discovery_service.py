@@ -185,21 +185,23 @@ def persist_discovery_batch(
             continue
         job = _resolve_job(session, batch, item)
         decision = _current_decision(session, run, job) if job else None
-        conversation_data = create_conversation(
-            session,
-            ConversationPayload(
-                job_id=job.id if job else None,
-                external_conversation_id=item.summary.external_conversation_id,
-                recruiter_name=item.summary.recruiter_name,
-                platform=batch.platform.value,
-                recruiter_role=_recruiter_role(item, job),
-                identity_reliable=(
-                    item.summary.identity_reliable
-                    and bool(item.detail.conversation and item.detail.conversation.identity_reliable)
+        conversation = _promote_proactive_conversation(session, batch, item, job)
+        if conversation is None:
+            conversation_data = create_conversation(
+                session,
+                ConversationPayload(
+                    job_id=job.id if job else None,
+                    external_conversation_id=item.summary.external_conversation_id,
+                    recruiter_name=item.summary.recruiter_name,
+                    platform=batch.platform.value,
+                    recruiter_role=_recruiter_role(item, job),
+                    identity_reliable=(
+                        item.summary.identity_reliable
+                        and bool(item.detail.conversation and item.detail.conversation.identity_reliable)
+                    ),
                 ),
-            ),
-        )
-        conversation = session.get(db.Conversation, conversation_data["id"])
+            )
+            conversation = session.get(db.Conversation, conversation_data["id"])
         if conversation is None:
             raise RuntimeError("消息发现创建对话失败")
         if not _acquire_conversation_lease(session, conversation.id, worker_id, current):
@@ -832,6 +834,68 @@ def _acquire_conversation_lease(
     )
     session.flush()
     return claimed is not None
+
+
+def _promote_proactive_conversation(
+    session: Session,
+    batch: MessageDiscoveryBatch,
+    item: DiscoveredConversation,
+    job: db.Job | None,
+) -> db.Conversation | None:
+    """将招呼成功后建立的临时会话升级为平台返回的正式会话。"""
+    formal = session.scalar(
+        select(db.Conversation).where(
+            db.Conversation.user_id == DEFAULT_USER_ID,
+            db.Conversation.platform == batch.platform.value,
+            db.Conversation.external_conversation_id == item.summary.external_conversation_id,
+        )
+    )
+    if formal is not None or job is None:
+        return formal
+    provisional = session.scalar(
+        select(db.Conversation)
+        .where(
+            db.Conversation.user_id == DEFAULT_USER_ID,
+            db.Conversation.platform == batch.platform.value,
+            db.Conversation.job_id == job.id,
+            db.Conversation.external_conversation_id.like("proactive-greeting:%"),
+        )
+        .order_by(db.Conversation.created_at.desc())
+        .limit(1)
+    )
+    if provisional is None:
+        return None
+    observed_recruiter = _normalized_recruiter(item.summary.recruiter_name)
+    provisional_recruiter = _normalized_recruiter(provisional.recruiter_name)
+    if observed_recruiter and provisional_recruiter and observed_recruiter != provisional_recruiter:
+        return None
+    previous_external_id = provisional.external_conversation_id
+    provisional.external_conversation_id = item.summary.external_conversation_id
+    provisional.recruiter_name = item.summary.recruiter_name
+    provisional.recruiter_role = _recruiter_role(item, job)
+    session.add(
+        db.AuditEvent(
+            user_id=DEFAULT_USER_ID,
+            actor_type="SYSTEM",
+            event_type="PROACTIVE_CONVERSATION_PROMOTED",
+            entity_type="conversation",
+            entity_id=provisional.id,
+            before_state="PROVISIONAL",
+            after_state="FORMAL",
+            reason_codes=["FORMAL_CONVERSATION_DISCOVERED"],
+            metadata_json={
+                "previous_external_conversation_id": previous_external_id,
+                "external_conversation_id": item.summary.external_conversation_id,
+            },
+            correlation_id=str(provisional.id),
+        )
+    )
+    session.flush()
+    return provisional
+
+
+def _normalized_recruiter(value: str) -> str:
+    return "".join(value.replace("在线", "").split()).casefold()
 
 
 def _discovery_event(

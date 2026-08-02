@@ -4,8 +4,8 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from packages.job_parser.normalizers import (
+    location_matches_allowed,
     normalize_company,
-    normalize_location,
     parse_salary,
 )
 
@@ -74,8 +74,7 @@ def evaluate_qualification(
         context.work_mode in {"ONSITE", "HYBRID"}
         and context.location
         and context.allowed_locations
-        and normalize_location(context.location)
-        not in {normalize_location(item) for item in context.allowed_locations}
+        and not location_matches_allowed(context.location, context.allowed_locations)
     ):
         return QualificationStatus.MISMATCH, ["LOCATION_CONFLICT"]
     if context.salary_text and context.salary_threshold_k is not None:

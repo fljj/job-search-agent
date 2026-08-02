@@ -498,6 +498,14 @@ def _finish(
     attempt.finished_at = datetime.now(UTC)
     if result.observed_content:
         action.observed_content = result.observed_content
+    if target is ActionStatus.SUCCEEDED and action.action_type == ActionType.GREETING.value:
+        _ensure_greeting_conversation(session, action, result)
+    if (
+        target is ActionStatus.SUCCEEDED
+        and action.action_type in {ActionType.REPLY.value, ActionType.MISMATCH_DECLINE.value}
+        and action.conversation_id
+    ):
+        _record_successful_outbound_message(session, action, result)
     if (
         target is ActionStatus.SUCCEEDED
         and action.action_type == ActionType.RESUME.value
@@ -542,6 +550,115 @@ def _finish(
     )
     session.commit()
     session.refresh(action)
+
+
+def _ensure_greeting_conversation(
+    session: Session,
+    action: db.ActionQueue,
+    result: ExecutionResult,
+) -> None:
+    """招呼写入已确认成功后，立即建立可追踪的临时会话和出站消息。"""
+    if action.job_id is None:
+        return
+    external_conversation_id = f"proactive-greeting:{action.platform}:{action.job_id}"
+    conversation = session.scalar(
+        select(db.Conversation).where(
+            db.Conversation.user_id == action.user_id,
+            db.Conversation.platform == action.platform,
+            db.Conversation.external_conversation_id == external_conversation_id,
+        )
+    )
+    if conversation is None:
+        latest_decision = session.scalar(
+            select(db.JobDecision)
+            .where(
+                db.JobDecision.job_id == action.job_id,
+                db.JobDecision.strategy_id == action.strategy_id,
+            )
+            .order_by(db.JobDecision.created_at.desc(), db.JobDecision.id.desc())
+            .limit(1)
+        ) if action.strategy_id else None
+        conversation = db.Conversation(
+            user_id=action.user_id,
+            job_id=action.job_id,
+            strategy_id=action.strategy_id,
+            latest_job_decision_id=latest_decision.id if latest_decision else None,
+            platform=action.platform,
+            external_conversation_id=external_conversation_id,
+            recruiter_name=_normalize_recruiter_name(action.target_recruiter),
+            observed_company_name=action.target_company,
+            observed_job_title=action.target_job_title,
+            identity_reliable=True,
+            state="ACTIVE",
+        )
+        session.add(conversation)
+        session.flush()
+        _audit(
+            session,
+            "PROACTIVE_CONVERSATION_CREATED",
+            "conversation",
+            conversation.id,
+            None,
+            "ACTIVE",
+            ["GREETING_CONFIRMED_SUCCEEDED"],
+        )
+    action.conversation_id = conversation.id
+    _record_successful_outbound_message(session, action, result)
+
+
+def _record_successful_outbound_message(
+    session: Session,
+    action: db.ActionQueue,
+    result: ExecutionResult,
+) -> None:
+    if action.conversation_id is None:
+        return
+    conversation = session.get(db.Conversation, action.conversation_id)
+    if conversation is None:
+        return
+    prefix = (
+        "greeting-action"
+        if action.action_type == ActionType.GREETING.value
+        else "action-outbound"
+    )
+    external_message_id = f"{prefix}:{action.id}"
+    if session.scalar(
+        select(db.Message.id).where(
+            db.Message.conversation_id == action.conversation_id,
+            db.Message.external_message_id == external_message_id,
+        )
+    ) is None:
+        content = result.observed_content or action.content or "已成功发起沟通"
+        session.add(
+            db.Message(
+                conversation_id=conversation.id,
+                external_message_id=external_message_id,
+                direction="OUTBOUND",
+                content=content,
+                status="COMPLETED",
+                identity_reliable=True,
+                episode_number=conversation.episode_number,
+                received_at=action.finished_at or datetime.now(UTC),
+            )
+        )
+    if action.draft_id:
+        draft = session.get(db.GeneratedDraft, action.draft_id)
+        inbound = session.get(db.Message, draft.message_id) if draft and draft.message_id else None
+        if inbound is not None and inbound.direction == "INBOUND":
+            inbound.status = (
+                "MISMATCH_DECLINED"
+                if action.action_type == ActionType.MISMATCH_DECLINE.value
+                else "COMPLETED"
+            )
+            inbound.retry_at = None
+            inbound.error_code = None
+            inbound.processing_started_at = None
+            inbound.quarantined_at = None
+
+
+def _normalize_recruiter_name(value: str) -> str:
+    normalized = " ".join(value.replace("在线", "").split()).strip()
+    return normalized or value
 
 
 def _mark_persistence_unknown(

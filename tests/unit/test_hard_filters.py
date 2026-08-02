@@ -92,6 +92,25 @@ def test_job_field_rejections(context: JobDecisionContext, change: dict[str, obj
     assert expected in codes(changed)
 
 
+@pytest.mark.parametrize(
+    "location",
+    ["济南-高新区", "济南市历下区", "山东济南高新区", "山东省济南市高新区"],
+)
+def test_onsite_city_allows_subordinate_districts(
+    context: JobDecisionContext,
+    location: str,
+) -> None:
+    changed = context.model_copy(
+        update={
+            "job": context.job.model_copy(
+                update={"work_mode": WorkMode.ONSITE, "location": location}
+            )
+        }
+    )
+
+    assert "ONSITE_LOCATION_NOT_ALLOWED" not in codes(changed)
+
+
 def test_disabled_work_mode(context: JobDecisionContext) -> None:
     rules = [rule.model_copy(update={"enabled": False}) if rule.work_mode == WorkMode.REMOTE else rule
              for rule in context.strategy.work_mode_rules]
@@ -262,6 +281,57 @@ def test_explicit_full_time_bachelor_requirement_rejects_non_full_time_candidate
             }
         )
     )
+
+
+def test_raw_jd_full_time_bachelor_requirement_overrides_parser_miss(
+    context: JobDecisionContext,
+) -> None:
+    changed = context.model_copy(
+        update={
+            "candidate": context.candidate.model_copy(
+                update={"bachelor_full_time": False}
+            ),
+            "strategy": context.strategy.model_copy(
+                update={"reject_full_time_bachelor_required": True}
+            ),
+            "job": context.job.model_copy(
+                update={
+                    "description": "职位要求：全日制一类本科以上学历，计算机相关专业。"
+                }
+            ),
+            "parsed_job": context.parsed_job.model_copy(
+                update={"full_time_bachelor_required": False}
+            ),
+        }
+    )
+
+    assert "FULL_TIME_BACHELOR_REQUIRED" in codes(changed)
+
+
+@pytest.mark.parametrize(
+    "description",
+    ["本科不限是否全日制", "不要求全日制本科", "全日制本科优先"],
+)
+def test_non_mandatory_full_time_bachelor_wording_is_not_hard_rejected(
+    context: JobDecisionContext,
+    description: str,
+) -> None:
+    changed = context.model_copy(
+        update={
+            "candidate": context.candidate.model_copy(
+                update={"bachelor_full_time": False}
+            ),
+            "strategy": context.strategy.model_copy(
+                update={"reject_full_time_bachelor_required": True}
+            ),
+            "job": context.job.model_copy(update={"description": description}),
+            "parsed_job": context.parsed_job.model_copy(
+                update={"full_time_bachelor_required": False}
+            ),
+        }
+    )
+
+    assert "FULL_TIME_BACHELOR_REQUIRED" not in codes(changed)
 
 
 @pytest.mark.parametrize(

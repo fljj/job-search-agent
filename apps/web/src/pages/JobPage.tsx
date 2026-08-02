@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Drawer, List, Select, Space, Table, Tag } from 'antd'
+import { Alert, Button, Card, Descriptions, Drawer, Input, List, Select, Space, Table, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { businessLabel } from './business-labels'
@@ -38,13 +38,14 @@ function linkedJobId() {
 
 async function fetchJobs(
   focusedJobId: string, strategyId: string, page: number, pageSize: number,
-  workMode?: string, decision?: string,
+  workMode?: string, decision?: string, keyword?: string,
 ) {
   const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
   if (focusedJobId) query.set('job_id', focusedJobId)
   if (workMode) query.set('work_mode', workMode)
   if (strategyId) query.set('strategy_id', strategyId)
   if (decision) query.set('decision', decision)
+  if (keyword?.trim()) query.set('keyword', keyword.trim())
   const data = await api<JobListResult>(`/jobs?${query}`)
   if (!focusedJobId || data.items.length > 0 || !strategyId) return data
   return api<JobListResult>(`/jobs?job_id=${encodeURIComponent(focusedJobId)}`)
@@ -60,6 +61,7 @@ export function JobPage() {
   const [strategyId, setStrategyId] = useState('')
   const [workMode, setWorkMode] = useState<string>()
   const [decisionFilter, setDecisionFilter] = useState<string>()
+  const [keyword, setKeyword] = useState('')
   const [decision, setDecision] = useState<DecisionResult>()
   const focusedJobId = linkedJobId()
 
@@ -67,7 +69,7 @@ export function JobPage() {
     setLoading(true)
     try {
       const data = await fetchJobs(
-        focusedJobId, strategyId, targetPage, targetPageSize, workMode, decisionFilter,
+        focusedJobId, strategyId, targetPage, targetPageSize, workMode, decisionFilter, keyword,
       )
       setJobs(data.items); setTotal(data.total)
     } finally { setLoading(false) }
@@ -96,6 +98,10 @@ export function JobPage() {
         options={['REMOTE', 'ONSITE', 'HYBRID', 'UNKNOWN'].map((value) => ({ value, label: value }))} />
       <Select allowClear placeholder="沟通决策" value={decisionFilter} onChange={setDecisionFilter}
         options={Object.entries(decisionLabels).map(([value, label]) => ({ value, label }))} />
+      <Input allowClear placeholder="搜索职位或公司" value={keyword}
+        onChange={(event) => setKeyword(event.target.value)} onPressEnter={() => {
+          setPage(1); void load(1, pageSize)
+        }} style={{ width: 220 }} />
       <Button onClick={() => { setPage(1); void load(1, pageSize) }}>筛选</Button>
     </Space><Table rowKey="id" dataSource={jobs} loading={loading} scroll={{ x: 1600 }}
       tableLayout="fixed" pagination={{ current: page, pageSize, total, showSizeChanger: true,
