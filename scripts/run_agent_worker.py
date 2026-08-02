@@ -246,6 +246,7 @@ def _discover_messages(
             run_id=run.id,
             platform=run.platform,
             error_type=type(exc).__name__,
+            error_message=str(exc)[:300],
             failure_count=failure_count,
         )
         if failure_count >= MESSAGE_DISCOVERY_PAUSE_AFTER_FAILURES:

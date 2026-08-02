@@ -657,6 +657,52 @@ def test_message_discovery_pauses_only_after_consecutive_failures(
     assert another_run.id not in paused
 
 
+def test_message_discovery_failure_logs_specific_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    session.scalars.return_value.all.return_value = []
+    session.execute.return_value.all.return_value = []
+    run = db.AgentRun(id=uuid4(), platform="LIEPIN", cursor={})
+    adapter = MagicMock(spec=MessageDiscoveryAdapter)
+    adapter.scan.side_effect = ValueError("猎聘消息抽屉打开后未就绪")
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.record_platform_session_failure",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.get_settings",
+        lambda: MagicMock(agent_tick_batch_size=10),
+    )
+    monkeypatch.setattr(
+        "scripts.run_agent_worker.runtime_event",
+        lambda _logger, event, **values: events.append((event, values)),
+    )
+
+    assert not _discover_messages(
+        session,
+        run,
+        "worker-1",
+        "http://127.0.0.1:9222",
+        adapter,
+    )
+
+    assert events == [
+        (
+            "MESSAGE_DISCOVERY_FAILED",
+            {
+                "worker_id": "worker-1",
+                "run_id": run.id,
+                "platform": "LIEPIN",
+                "error_type": "ValueError",
+                "error_message": "猎聘消息抽屉打开后未就绪",
+                "failure_count": 1,
+            },
+        )
+    ]
+
+
 def test_boss_missing_message_page_is_reopened_without_pausing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

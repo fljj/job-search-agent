@@ -60,3 +60,33 @@ def test_reconciled_result_can_clear_platform_pause_and_resume(
     assert run.pause_reason_codes == []
     assert platform_setting.paused is False
     session.commit.assert_called_once()
+
+
+def test_message_discovery_reconnect_resets_only_failure_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock(spec=Session)
+    run = db.AgentRun(
+        id=uuid4(),
+        user_id=DEFAULT_USER_ID,
+        strategy_id=uuid4(),
+        platform="LIEPIN",
+        status="PAUSED",
+        pause_reason_codes=["MESSAGE_DISCOVERY_UNAVAILABLE"],
+        cursor={
+            "message_discovery": {"scroll_position": 10},
+            "message_discovery_health": {"consecutive_failure_count": 3},
+        },
+        version=1,
+    )
+    session.get.return_value = run
+    monkeypatch.setattr(
+        "apps.api.app.services.agent_service._effective_rules",
+        lambda *_: AutomationRules(enabled=True),
+    )
+
+    result = resume_run(session, run.id)
+
+    assert result["status"] == "RUNNING"
+    assert run.cursor == {"message_discovery": {"scroll_position": 10}}
+    session.commit.assert_called_once()

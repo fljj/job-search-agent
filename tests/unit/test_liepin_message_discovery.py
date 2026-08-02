@@ -214,6 +214,47 @@ def test_open_drawer_requires_safe_job_list_home(
     page._evaluate.assert_not_called()
 
 
+def test_open_drawer_allows_slow_liepin_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = LiepinMessageDiscoveryAdapter(get_browser_selectors())
+    page = MagicMock()
+    page.__enter__.return_value = page
+    page.__exit__.return_value = False
+    drawer_checks = iter([False, *([False] * 35), True])
+    page.exists.side_effect = lambda selector: (
+        next(drawer_checks)
+        if selector == adapter.selectors.conversation_list_root
+        else False
+    )
+    page._evaluate.return_value = True
+    monkeypatch.setattr(
+        "adapters.browser.liepin_message_discovery.RawCdpPageReader",
+        lambda _target: page,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.liepin_message_discovery.extract_current_page",
+        lambda *_args, **_kwargs: ReadResult(
+            platform=Platform.LIEPIN,
+            status=SessionStatus.SESSION_READY,
+            page_type=PageType.JOB_LIST,
+            page_url="https://c.liepin.com/",
+            page_title="猎聘首页",
+            content_hash="e" * 64,
+            selector_version="fixture",
+        ),
+    )
+    monkeypatch.setattr(
+        "adapters.browser.liepin_message_discovery.time.sleep",
+        lambda _seconds: None,
+    )
+    verify = MagicMock()
+    monkeypatch.setattr(adapter, "_verify_drawer_ready", verify)
+
+    assert adapter._ensure_drawer_open("ws://home") is True
+    verify.assert_called_once_with(page)
+
+
 def test_liepin_message_metadata_is_normalized_before_reading() -> None:
     adapter = LiepinMessageDiscoveryAdapter(get_browser_selectors())
     page = MagicMock()

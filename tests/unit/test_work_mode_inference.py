@@ -11,7 +11,9 @@ from packages.job_parser.models import WorkMode
         ("Java 开发", "支持 Remote 工作", "上海", WorkMode.REMOTE),
         ("Java 开发", "采用混合办公模式", "上海", WorkMode.HYBRID),
         ("Java 开发", "不支持远程，需现场办公", "上海", WorkMode.ONSITE),
-        ("Java 开发", "工作模式可协商", None, WorkMode.UNKNOWN),
+        ("Java 开发", "工作模式可协商", None, WorkMode.ONSITE),
+        ("Java 开发", "负责后端研发", "不限", WorkMode.ONSITE),
+        ("Java 开发", "负责后端研发", "远程", WorkMode.REMOTE),
     ],
 )
 def test_infer_effective_work_mode(

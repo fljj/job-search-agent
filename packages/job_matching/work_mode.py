@@ -13,7 +13,7 @@ _ONSITE_MARKERS = (
 )
 _HYBRID_MARKERS = ("混合办公", "hybrid")
 _REMOTE_MARKERS = ("远程", "remote", "work from home", "wfh", "居家办公")
-_NON_ONSITE_LOCATIONS = {"远程", "全国", "不限", "全球", "global"}
+_REMOTE_LOCATIONS = {"远程", "remote"}
 
 
 def infer_effective_work_mode(
@@ -24,7 +24,7 @@ def infer_effective_work_mode(
     location: str | None,
     infer_onsite_from_location: bool = True,
 ) -> WorkMode:
-    """平台未标注工作模式时，使用 JD 证据和明确城市完成策略判断。"""
+    """平台未标注工作模式时，仅在有明确证据时识别远程或混合，其余按现场办公处理。"""
     current = WorkMode(work_mode)
     if current is not WorkMode.UNKNOWN:
         return current
@@ -39,11 +39,9 @@ def infer_effective_work_mode(
         return WorkMode.REMOTE
 
     normalized_location = "".join((location or "").casefold().split())
-    if (
-        infer_onsite_from_location
-        and normalized_location
-        and normalized_location not in _NON_ONSITE_LOCATIONS
-    ):
+    if normalized_location in _REMOTE_LOCATIONS:
+        return WorkMode.REMOTE
+    if infer_onsite_from_location:
         return WorkMode.ONSITE
     return WorkMode.UNKNOWN
 

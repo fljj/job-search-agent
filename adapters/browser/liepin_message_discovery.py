@@ -12,6 +12,9 @@ from packages.browser_worker.config import BrowserSelectorsConfig
 from packages.browser_worker.extractor import extract_conversation_list, extract_current_page
 from packages.browser_worker.models import PageType, Platform, SessionStatus
 
+DRAWER_READY_MAX_ATTEMPTS = 80
+DRAWER_READY_POLL_INTERVAL_SECONDS = 0.1
+
 
 class LiepinHomeRestoreError(ValueError):
     """消息读取后无法安全恢复猎聘首页。"""
@@ -200,11 +203,11 @@ class LiepinMessageDiscoveryAdapter(MessageDiscoveryAdapter):
                 )
                 if not opened_by_agent:
                     raise ValueError("猎聘消息入口不唯一或不可见")
-                for _ in range(30):
+                for _ in range(DRAWER_READY_MAX_ATTEMPTS):
                     if page.exists(self.selectors.conversation_list_root):
                         self._verify_drawer_ready(page)
                         return True
-                    time.sleep(0.1)
+                    time.sleep(DRAWER_READY_POLL_INTERVAL_SECONDS)
                 raise ValueError("猎聘消息抽屉打开后未就绪")
         except ValueError:
             if opened_by_agent:

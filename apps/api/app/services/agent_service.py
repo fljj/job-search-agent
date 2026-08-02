@@ -155,6 +155,10 @@ def resume_run(session: Session, run_id: UUID) -> dict[str, object]:
     rules = _effective_rules(session, run.platform, run.strategy_id)
     if not rules.enabled or rules.paused:
         raise ValueError("自动化配置仍处于关闭或暂停状态")
+    if "MESSAGE_DISCOVERY_UNAVAILABLE" in run.pause_reason_codes:
+        cursor = dict(run.cursor or {})
+        cursor.pop("message_discovery_health", None)
+        run.cursor = cursor
     run.status = "RUNNING"
     run.pause_reason_codes = []
     run.consecutive_failure_count = 0

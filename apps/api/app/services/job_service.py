@@ -18,6 +18,7 @@ from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.llm_config_service import build_runtime_llm_provider
 from apps.api.app.services.llm_service import record_llm_invocation
 from apps.api.app.services.user_service import DEFAULT_USER_ID, ensure_default_user
+from packages.job_matching.work_mode import infer_effective_work_mode
 from packages.job_parser.models import JobInput, ParsedJob
 from packages.job_parser.rule_parser import RuleJobParser
 from packages.job_parser.source_url import normalize_job_source_url
@@ -28,8 +29,17 @@ from packages.policy_engine.state_machine import ActionType
 
 def import_job(session: Session, payload: JobImportPayload) -> JobImportResponse:
     ensure_default_user(session)
+    effective_work_mode = infer_effective_work_mode(
+        payload.work_mode,
+        title=payload.title,
+        description=payload.description,
+        location=payload.location,
+    )
     payload = payload.model_copy(
-        update={"source_url": normalize_job_source_url(payload.source, payload.source_url)}
+        update={
+            "source_url": normalize_job_source_url(payload.source, payload.source_url),
+            "work_mode": effective_work_mode,
+        }
     )
     content_hash = _content_hash(payload)
     existing_by_external = None
