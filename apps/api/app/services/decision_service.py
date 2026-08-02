@@ -35,6 +35,7 @@ from packages.job_matching.models import (
     JobDecisionContext,
     JobDecisionResult,
 )
+from packages.job_matching.work_mode import infer_effective_work_mode
 from packages.job_parser.models import WorkMode
 from packages.llm.models import LlmCallMetadata
 from packages.llm.ports import LlmProvider
@@ -239,12 +240,28 @@ def _decision_context(
 ) -> JobDecisionContext:
     parsed_job = to_parsed_domain(parsed)
     domain_job = to_job_domain(job)
-    if (
+    accepted_location_independent_part_time = (
         parsed_job.part_time_detected
+        and strategy.accept_part_time
         and domain_job.work_mode.value == "ONSITE"
         and not parsed_job.onsite_required_explicitly
-    ):
-        domain_job = domain_job.model_copy(update={"work_mode": WorkMode.UNKNOWN})
+    )
+    if accepted_location_independent_part_time:
+        effective_mode = WorkMode.UNKNOWN
+    else:
+        effective_mode = infer_effective_work_mode(
+            domain_job.work_mode,
+            title=domain_job.title,
+            description=domain_job.description,
+            location=domain_job.location,
+            infer_onsite_from_location=not (
+                parsed_job.part_time_detected
+                and strategy.accept_part_time
+                and not parsed_job.onsite_required_explicitly
+            ),
+        )
+    if effective_mode is not domain_job.work_mode:
+        domain_job = domain_job.model_copy(update={"work_mode": effective_mode})
     return JobDecisionContext(
         job=domain_job,
         parsed_job=parsed_job,

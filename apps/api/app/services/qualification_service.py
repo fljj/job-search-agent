@@ -7,6 +7,7 @@ from apps.api.app.core.conversation_config import get_conversation_policy
 from apps.api.app.models import entities as db
 from apps.api.app.services.errors import ResourceNotFoundError
 from apps.api.app.services.user_service import DEFAULT_USER_ID
+from packages.job_matching.work_mode import infer_effective_work_mode
 from packages.policy_engine.qualification import (
     QualificationContext,
     QualificationStatus,
@@ -75,7 +76,16 @@ def _context(
     message: db.Message | None,
 ) -> QualificationContext:
     policy = get_conversation_policy()
-    work_mode = job.work_mode if job else None
+    work_mode = (
+        infer_effective_work_mode(
+            job.work_mode,
+            title=job.title,
+            description=job.description,
+            location=job.location,
+        ).value
+        if job
+        else None
+    )
     mode_rules = [
         item
         for item in strategy.work_mode_rules

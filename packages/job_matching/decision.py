@@ -13,7 +13,7 @@ from packages.llm.models import (
     JobContactDecisionRequest,
 )
 
-DECISION_VERSION = "llm-contact-decision:1.1.0"
+DECISION_VERSION = "llm-contact-decision:1.2.0"
 MIN_CONTACT_CONFIDENCE = Decimal("0.75")
 
 
