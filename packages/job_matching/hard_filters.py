@@ -1,3 +1,5 @@
+import re
+
 from packages.job_matching.models import (
     HardRejectionReason,
     IndustryRuleType,
@@ -15,12 +17,25 @@ from packages.job_parser.normalizers import (
 
 def evaluate_hard_filters(
     context: JobDecisionContext,
+    *,
+    direction_keywords: list[str] | None = None,
 ) -> list[HardRejectionReason]:
     reasons: list[HardRejectionReason] = []
     job = context.job
     parsed = context.parsed_job
     strategy = context.strategy
     title = normalize_text(job.title)
+
+    if direction_keywords and not _has_direction_evidence(
+        context, direction_keywords
+    ):
+        reasons.append(
+            _reason(
+                "JOB_DIRECTION_CONFLICT",
+                "职位完整信息未发现求职方向相关证据",
+                {"title": job.title},
+            )
+        )
 
     if any(
         normalize_text(rule.pattern) in title
@@ -189,6 +204,44 @@ def evaluate_hard_filters(
     ):
         reasons.append(_reason("JUNIOR_POSITION", "策略不接受初级岗位"))
     return reasons
+
+
+def _has_direction_evidence(
+    context: JobDecisionContext,
+    direction_keywords: list[str],
+) -> bool:
+    """只在完整 JD 毫无正向证据时排除，避免标题不典型的研发岗被误伤。"""
+    job = context.job
+    parsed = context.parsed_job
+    text = "\n".join(
+        [job.title, job.description, *parsed.responsibilities]
+    )
+    if any(_contains_keyword(text, keyword) for keyword in direction_keywords):
+        return True
+
+    candidate_skills = {
+        normalize_skill(skill.name).casefold() for skill in context.candidate.skills
+    }
+    job_skills = {
+        normalize_skill(skill).casefold()
+        for skill in [*parsed.required_skills, *parsed.preferred_skills]
+    }
+    return bool(candidate_skills & job_skills)
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    normalized_keyword = "".join(keyword.casefold().split())
+    if not normalized_keyword:
+        return False
+    if normalized_keyword.isascii():
+        return (
+            re.search(
+                rf"(?<![a-z0-9]){re.escape(keyword.casefold().strip())}(?![a-z0-9])",
+                text.casefold(),
+            )
+            is not None
+        )
+    return normalized_keyword in "".join(text.casefold().split())
 
 
 def _reason(

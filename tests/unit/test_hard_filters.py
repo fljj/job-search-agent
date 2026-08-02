@@ -16,6 +16,68 @@ def test_matching_job_has_no_rejection(context: JobDecisionContext) -> None:
 
 
 @pytest.mark.parametrize(
+    ("title", "description"),
+    [
+        (
+            "数控机床维修工程师",
+            "熟悉机床维修、贴塑刮研和机床电路，能排除设备故障。",
+        ),
+        (
+            "中医减肥（本院直招）",
+            "日常坐诊，完成问诊、脉诊、针灸和诊疗工作。",
+        ),
+    ],
+)
+def test_unrelated_full_job_is_rejected_before_llm(
+    context: JobDecisionContext,
+    title: str,
+    description: str,
+) -> None:
+    changed = context.model_copy(
+        update={
+            "job": context.job.model_copy(
+                update={"title": title, "description": description}
+            ),
+            "parsed_job": context.parsed_job.model_copy(
+                update={
+                    "required_skills": [],
+                    "preferred_skills": [],
+                    "responsibilities": [description],
+                }
+            ),
+        }
+    )
+
+    result = evaluate_hard_filters(
+        changed,
+        direction_keywords=["Java", "后端", "服务端", "开发", "研发", "AI", "直播运营"],
+    )
+
+    assert {item.rule_code for item in result} == {"JOB_DIRECTION_CONFLICT"}
+
+
+def test_nonstandard_title_with_relevant_jd_is_not_direction_rejected(
+    context: JobDecisionContext,
+) -> None:
+    job = context.job.model_copy(
+        update={
+            "title": "银行系统工程师",
+            "description": "负责银行核心系统服务端研发和微服务架构。",
+        }
+    )
+    changed = context.model_copy(update={"job": job})
+
+    result = evaluate_hard_filters(
+        changed,
+        direction_keywords=["Java", "后端", "服务端", "开发", "研发"],
+    )
+
+    assert "JOB_DIRECTION_CONFLICT" not in {
+        item.rule_code for item in result
+    }
+
+
+@pytest.mark.parametrize(
     ("change", "expected"),
     [
         ({"title": "Android开发工程师"}, "TITLE_EXCLUDED"),

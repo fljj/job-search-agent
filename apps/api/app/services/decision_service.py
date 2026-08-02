@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from adapters.llm.errors import LlmProviderError
+from apps.api.app.core.job_parser_config import get_job_parser_config
 from apps.api.app.models import entities as db
 from apps.api.app.schemas.decision import DecisionRequest, DecisionResponse
 from apps.api.app.services.errors import ResourceNotFoundError
@@ -63,7 +64,10 @@ def create_decision(
     candidate = _candidate(profile)
     parsed_record = _parsed_record(session, job, request)
     context = _decision_context(job, parsed_record, candidate, strategy)
-    rejections = evaluate_hard_filters(context)
+    direction_keywords = _direction_keywords(context)
+    rejections = evaluate_hard_filters(
+        context, direction_keywords=direction_keywords
+    )
     if rejections:
         return _persist_hard_filtered(
             session, job, strategy, profile, parsed_record, context, rejections,
@@ -74,7 +78,9 @@ def create_decision(
     if request.parsed_job_detail_id is None:
         parsed_record = _llm_parsed_record(session, job, llm_provider)
         context = _decision_context(job, parsed_record, candidate, strategy)
-        rejections = evaluate_hard_filters(context)
+        rejections = evaluate_hard_filters(
+            context, direction_keywords=direction_keywords
+        )
         if rejections:
             return _persist_hard_filtered(
                 session, job, strategy, profile, parsed_record, context, rejections,
@@ -128,6 +134,16 @@ def create_decision(
     session.commit()
     session.refresh(decision)
     return _response(session, decision)
+
+
+def _direction_keywords(context: JobDecisionContext) -> list[str]:
+    configured = get_job_parser_config().relevant_title_keywords
+    strategy_patterns = [
+        rule.pattern
+        for rule in context.strategy.title_rules
+        if rule.rule_type.value == "INCLUDE"
+    ]
+    return list(dict.fromkeys([*configured, *strategy_patterns]))
 
 
 def get_decision(session: Session, decision_id: object) -> DecisionResponse:

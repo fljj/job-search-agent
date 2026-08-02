@@ -133,7 +133,7 @@ export function MessagePage() {
           ? <Tag>待决策</Tag> : <Tag color={item.latest_decision === 'CONTACT' ? 'green'
             : item.latest_decision === 'FILTERED_OUT' ? 'red' : 'default'}>
             {businessLabel(item.latest_decision)}</Tag> },
-      { title: '入站资格', width: 260, render: (_: unknown, item: ConversationSummary) =>
+      { title: '沟通匹配状态', width: 260, render: (_: unknown, item: ConversationSummary) =>
         <Space direction="vertical" size={0} style={{ width: '100%' }}>
           <Tag color={item.qualification_status === 'FULL_MATCH' ? 'green'
             : item.qualification_status === 'ROUGH_MATCH' ? 'blue'

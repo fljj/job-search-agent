@@ -98,7 +98,7 @@ def process_job_discovery_batch(
         record.company_name = source.company_name
         record.job_title = source.title
         record.recruiter_name = source.recruiter_name
-        record.prefilter_state = "RELEVANT"
+        record.prefilter_state = "OBSERVED"
         record.prefilter_reason = "DETAIL_OBSERVED"
         safety = _job_safety_reasons(source)
         if safety:
@@ -163,6 +163,12 @@ def process_job_discovery_batch(
                 )
                 record.job_decision_id = decision.id
                 if decision.hard_rejected:
+                    if any(
+                        item.rule_code == "JOB_DIRECTION_CONFLICT"
+                        for item in decision.rejection_reasons
+                    ):
+                        record.prefilter_state = "IRRELEVANT"
+                        record.prefilter_reason = "JOB_DIRECTION_CONFLICT"
                     _finish(
                         record,
                         "SKIPPED",

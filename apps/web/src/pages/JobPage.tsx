@@ -86,7 +86,7 @@ export function JobPage() {
 
   return <Space direction="vertical" style={{ width: '100%' }}>
     <Alert type="info" showIcon message="职位由 Agent 自动发现并作沟通决策"
-      description="程序先执行硬性排除；通过后由当前 LLM 判断是否建议沟通，不再进行七维打分。" />
+      description="程序先执行硬性排除；通过后由当前 LLM 判断是否建议沟通。" />
     {focusedJobId && <Alert type="success" showIcon message="正在查看消息关联的职位" />}
     <Card title="职位流水线"><Space wrap style={{ marginBottom: 16 }}>
       <Select allowClear placeholder="求职策略" value={strategyId || undefined}
