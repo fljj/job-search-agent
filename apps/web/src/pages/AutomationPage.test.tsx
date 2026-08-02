@@ -138,4 +138,33 @@ describe('AutomationPage', () => {
     ))
   })
 
+  it('平台任务表只展示紧凑扫描进度，不渲染完整游标', async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path === '/automation/runs') return { items: [{
+        id: 'boss-run', platform: 'BOSS', strategy_id: 'strategy-1', status: 'RUNNING',
+        processed_count: 3, action_count: 1, failure_count: 0,
+        consecutive_failure_count: 0, pause_reason_codes: [],
+        cursor: {
+          job_discovery: { search_key: 'Java', scroll_position: 12, seen_job_ids: ['不应展示的职位ID'] },
+          message_discovery: { scroll_position: 8, seen_message_keys: ['不应展示的消息ID'] },
+        },
+      }] }
+      if (path === '/system/llm-status') return {
+        provider: 'ZHIPU', model: 'glm-5.2', timeout_seconds: 120, configured: true,
+        options: [{ provider: 'ZHIPU', model: 'glm-5.2', configured: true }],
+      }
+      if (path === '/automation/actions') return { items: [] }
+      if (path === '/automation/operations/status') return operations
+      if (path === '/strategies?enabled=true') return { items: [{ id: 'strategy-1', name: '主策略', enabled: true }] }
+      if (path === '/automation/settings') return { items: [] }
+      return {}
+    })
+
+    render(<AutomationPage />)
+
+    await screen.findByText('职位 Java · 位置 12；消息位置 8')
+    expect(screen.queryByText(/不应展示的职位ID/)).toBeNull()
+    expect(screen.queryByText(/不应展示的消息ID/)).toBeNull()
+  })
+
 })

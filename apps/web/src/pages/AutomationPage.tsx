@@ -1,6 +1,6 @@
 import {
   Alert, Button, Card, Descriptions, Form, Input, InputNumber, Select, Space, Switch,
-  Table, Tag, message,
+  Table, Tag, Typography, message,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
@@ -43,6 +43,22 @@ interface OperationsStatus {
   discrepancies: Array<{ code: string; action_id: string }>
 }
 interface StrategyOption { id: string; name: string; enabled: boolean }
+
+function cursorSummary(cursor: Record<string, unknown>): string {
+  const job = cursor.job_discovery
+  const messageCursor = cursor.message_discovery
+  const jobState = job && typeof job === 'object' ? job as Record<string, unknown> : undefined
+  const messageState = messageCursor && typeof messageCursor === 'object'
+    ? messageCursor as Record<string, unknown> : undefined
+  const parts: string[] = []
+  if (jobState) {
+    parts.push(`职位 ${String(jobState.search_key ?? '-')} · 位置 ${String(jobState.scroll_position ?? 0)}`)
+  }
+  if (messageState) {
+    parts.push(`消息位置 ${String(messageState.scroll_position ?? 0)}`)
+  }
+  return parts.join('；') || '尚未开始'
+}
 
 export function AutomationPage() {
   const [form] = Form.useForm<SettingForm>()
@@ -239,16 +255,24 @@ export function AutomationPage() {
         </Button>
         <Button onClick={() => void load().catch(showRequestError)}>刷新</Button>
       </Space>
-      <Table rowKey="id" dataSource={runs} columns={[
-        { title: '平台', dataIndex: 'platform' },
-        { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{businessLabel(value)}</Tag> },
-        { title: '心跳', dataIndex: 'heartbeat_at', render: (value?: string) => value ? new Date(value).toLocaleString() : '-' },
-        { title: '已处理', dataIndex: 'processed_count' }, { title: '已执行', dataIndex: 'action_count' },
-        { title: '失败', render: (_: unknown, run: AgentRun) => `${run.failure_count}（连续 ${run.consecutive_failure_count}）` },
-        { title: '暂停原因', dataIndex: 'pause_reason_codes', render: (items: string[]) => items.map(businessLabel).join('、') || '-' },
-        { title: '游标', dataIndex: 'cursor', render: (value: Record<string, unknown>) =>
-          <code>{JSON.stringify(value)}</code> },
-        { title: '操作', render: (_: unknown, run: AgentRun) => <Space>
+      <Table rowKey="id" dataSource={runs} size="small" tableLayout="fixed"
+        scroll={{ x: 1180 }} columns={[
+        { title: '平台', dataIndex: 'platform', width: 90 },
+        { title: '状态', dataIndex: 'status', width: 100, render: (value: string) => <Tag color={statusColor(value)}>{businessLabel(value)}</Tag> },
+        { title: '心跳', dataIndex: 'heartbeat_at', width: 180, render: (value?: string) => value ? new Date(value).toLocaleString() : '-' },
+        { title: '已处理', dataIndex: 'processed_count', width: 80 },
+        { title: '已执行', dataIndex: 'action_count', width: 80 },
+        { title: '失败', width: 120, render: (_: unknown, run: AgentRun) => `${run.failure_count}（连续 ${run.consecutive_failure_count}）` },
+        { title: '暂停原因', dataIndex: 'pause_reason_codes', width: 160,
+          render: (items: string[]) => <Typography.Text ellipsis title={items.map(businessLabel).join('、')}>
+            {items.map(businessLabel).join('、') || '-'}
+          </Typography.Text> },
+        { title: '扫描进度', dataIndex: 'cursor', width: 230,
+          render: (value: Record<string, unknown>) => <Typography.Text ellipsis title={cursorSummary(value)}>
+            {cursorSummary(value)}
+          </Typography.Text> },
+        { title: '操作', width: 180, fixed: 'right' as const,
+          render: (_: unknown, run: AgentRun) => <Space size={4} wrap>
           <Button danger disabled={run.status !== 'RUNNING'}
             onClick={() => void changeRun(run, 'pause').catch(showRequestError)}>暂停</Button>
           <Button disabled={run.status !== 'PAUSED'}

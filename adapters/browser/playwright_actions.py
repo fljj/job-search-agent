@@ -1297,7 +1297,14 @@ class PlaywrightActionExecutor:
         command: ApprovedCommand,
     ) -> ExecutionResult:
         baseline = command.observation_baseline.get("sent_resume_count")
-        if not isinstance(baseline, int) or baseline < 0 or not command.attachment_name:
+        message_baseline = command.observation_baseline.get("sent_message_count")
+        if (
+            not isinstance(baseline, int)
+            or baseline < 0
+            or not isinstance(message_baseline, int)
+            or message_baseline < 0
+            or not command.attachment_name
+        ):
             return ExecutionResult(
                 outcome=ExecutionOutcome.OUTCOME_UNKNOWN,
                 error_code="RECONCILIATION_BASELINE_MISSING",
@@ -1330,23 +1337,22 @@ class PlaywrightActionExecutor:
                 )
             with RawCdpPageReader(matches[0]) as page:
                 result = page._evaluate(
-                    "(() => { const items=[...document.querySelectorAll("
+                    "(() => { const resumeItems=[...document.querySelectorAll("
                     f"{json.dumps(selectors.sent_resume_items)}"
-                    f")]; const expected={json.dumps(command.attachment_name)};"
-                    f"return {{count:items.length,matched:items.slice({baseline}).some("
-                    "item => (item.textContent||'').trim()===expected)};})()"
+                    f")]; const messages=[...document.querySelectorAll({json.dumps(selectors.sent_message_items)})];"
+                    f"const expected={json.dumps(command.attachment_name)};"
+                    "const isResume = item => { const text=(item.textContent||'').trim();"
+                    "const classes=[item,...item.querySelectorAll('*')].map(node => String(node.className)).join(' ');"
+                    "return text===expected || text.includes(expected) || /resume/i.test(classes) || /简历/.test(text); };"
+                    f"return {{resumeCount:resumeItems.length,messageCount:messages.length,matched:"
+                    f"resumeItems.slice({baseline}).some(isResume) || "
+                    f"messages.slice({message_baseline}).some(isResume)}};}})()"
                 )
             if isinstance(result, dict) and result.get("matched"):
                 return ExecutionResult(
                     outcome=ExecutionOutcome.SUCCEEDED,
                     observed_content=command.attachment_name,
                     write_started=True,
-                    observation_baseline=command.observation_baseline,
-                )
-            if isinstance(result, dict) and result.get("count") == baseline:
-                return ExecutionResult(
-                    outcome=ExecutionOutcome.FAILED_RETRYABLE,
-                    error_code="RESULT_CONFIRMED_NOT_SENT",
                     observation_baseline=command.observation_baseline,
                 )
             return ExecutionResult(
