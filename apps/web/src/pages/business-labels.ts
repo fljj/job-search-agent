@@ -37,7 +37,7 @@ const labels: Record<string, string> = {
   SIMILAR_JD_ALREADY_CONTACTED: '高度相似的职位已联系过',
   COMPANY_COOLDOWN_ACTIVE: '同公司联系间隔尚未结束',
   RECRUITER_COOLDOWN_ACTIVE: '同招聘人联系间隔尚未结束',
-  HEADHUNTER_PROACTIVE_CONTACT_BLOCKED: '猎头发布，按策略不主动打招呼',
+  HEADHUNTER_PROACTIVE_CONTACT_BLOCKED: '历史记录：曾因猎头身份阻止主动沟通',
   LLM_DOES_NOT_RECOMMEND_CONTACT: 'AI 判断暂不建议主动沟通',
   PROACTIVE_CONTACT_CANDIDATE: '满足主动沟通条件',
   PROACTIVE_CONTACT_NOT_ELIGIBLE: '未满足主动沟通条件',

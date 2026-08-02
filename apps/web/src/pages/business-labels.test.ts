@@ -10,7 +10,7 @@ describe('businessLabel', () => {
       'AI 判断暂不建议主动沟通',
     )
     expect(businessLabel('HEADHUNTER_PROACTIVE_CONTACT_BLOCKED')).toBe(
-      '猎头发布，按策略不主动打招呼',
+      '历史记录：曾因猎头身份阻止主动沟通',
     )
   })
 

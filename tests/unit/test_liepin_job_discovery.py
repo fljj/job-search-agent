@@ -267,10 +267,7 @@ def test_regular_liepin_job_still_requires_company_match() -> None:
             "HEADHUNTER",
             "李女士",
             False,
-            [
-                "PROACTIVE_CONTACT_NOT_ELIGIBLE",
-                "HEADHUNTER_PROACTIVE_CONTACT_BLOCKED",
-            ],
+            ["PROACTIVE_CONTACT_CANDIDATE"],
             1,
             0,
             0,
@@ -278,7 +275,7 @@ def test_regular_liepin_job_still_requires_company_match() -> None:
         ),
         (
             "HEADHUNTER", "李女士", True,
-            ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"], 1, 0, 0, "DECIDED",
+            ["GREETING_SENT"], 1, 1, 0, "CONTACTED",
         ),
         (
             "UNKNOWN", None, True,
@@ -286,8 +283,10 @@ def test_regular_liepin_job_still_requires_company_match() -> None:
         ),
     ],
 )
-def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
+@pytest.mark.parametrize("platform", [Platform.BOSS, Platform.LIEPIN])
+def test_job_batch_obeys_decision_for_all_recruiter_roles_and_read_only_mode(
     monkeypatch: pytest.MonkeyPatch,
+    platform: Platform,
     recruiter_role: str,
     recruiter_name: str | None,
     execute_external_actions: bool,
@@ -299,7 +298,7 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
 ) -> None:
     item = _summary("liepin-job-1", "Java 后端工程师")
     batch = JobDiscoveryBatch(
-        platform=Platform.LIEPIN,
+        platform=platform,
         search_key="HOME",
         scroll_position=1,
         scanned_at=datetime.now(UTC),
@@ -320,7 +319,7 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
         id=uuid4(),
         user_id=uuid4(),
         strategy_id=uuid4(),
-        platform="LIEPIN",
+        platform=platform.value,
         cursor={},
     )
     record = SimpleNamespace(

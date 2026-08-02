@@ -183,32 +183,14 @@ def process_job_discovery_batch(
                     counts["skipped"] += 1
                     continue
                 counts["decided"] += 1
-                if (
-                    execute_external_actions
-                    and source.recruiter_role == "HEADHUNTER"
-                ):
-                    _finish(
-                        record,
-                        "DECIDED",
-                        ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"],
-                    )
-                    continue
                 if not execute_external_actions:
-                    contact_candidate = (
-                        decision.automation_eligible
-                        and source.recruiter_role != "HEADHUNTER"
-                    )
+                    contact_candidate = decision.automation_eligible
                     reasons = (
                         ["PROACTIVE_CONTACT_CANDIDATE"]
                         if contact_candidate
                         else list(decision.action_blockers)
                         or ["PROACTIVE_CONTACT_NOT_ELIGIBLE"]
                     )
-                    if (
-                        source.recruiter_role == "HEADHUNTER"
-                        and "HEADHUNTER_PROACTIVE_CONTACT_BLOCKED" not in reasons
-                    ):
-                        reasons.append("HEADHUNTER_PROACTIVE_CONTACT_BLOCKED")
                     _finish(record, "DECIDED", reasons)
                     continue
                 if not decision.automation_eligible:
