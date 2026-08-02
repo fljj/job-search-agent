@@ -431,6 +431,48 @@ def test_real_boss_default_resume_uses_direct_confirmation(monkeypatch) -> None:
     assert page._command.call_count == 4
 
 
+def test_resume_reconciliation_builds_valid_observation_script(monkeypatch) -> None:
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = json.dumps([{
+        "type": "page",
+        "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/chat",
+    }]).encode()
+    monkeypatch.setattr("adapters.browser.playwright_actions.urlopen", lambda *_args, **_kwargs: response)
+    monkeypatch.setattr(
+        PlaywrightActionExecutor,
+        "_prepare_conversation_target",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.extract_current_page",
+        MagicMock(),
+    )
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions._reply_target_matches",
+        lambda *_args, **_kwargs: True,
+    )
+    page = MagicMock()
+    page._evaluate.return_value = {"count": 0, "matched": False}
+    reader = MagicMock()
+    reader.__enter__.return_value = page
+    monkeypatch.setattr(
+        "adapters.browser.playwright_actions.RawCdpPageReader",
+        lambda _: reader,
+    )
+
+    command = approved_command("RESUME", attachment_name="后端开发简历")
+    command.observation_baseline = {"sent_resume_count": 0}
+    result = PlaywrightActionExecutor(
+        get_browser_selectors()
+    )._observe_resume_over_raw_cdp("http://127.0.0.1:9222", command)
+
+    assert result.outcome is ExecutionOutcome.FAILED_RETRYABLE
+    assert result.error_code == "RESULT_CONFIRMED_NOT_SENT"
+    script = page._evaluate.call_args.args[0]
+    assert "===expected)};})()" in script
+    assert "===expected)}};})()" not in script
+
+
 def test_real_boss_does_not_fall_back_to_legacy_attachment_list(monkeypatch) -> None:
     page = MagicMock()
     page._evaluate.side_effect = [0, 0, None, {"x": 10, "y": 20}, None]

@@ -1334,7 +1334,7 @@ class PlaywrightActionExecutor:
                     f"{json.dumps(selectors.sent_resume_items)}"
                     f")]; const expected={json.dumps(command.attachment_name)};"
                     f"return {{count:items.length,matched:items.slice({baseline}).some("
-                    "item => (item.textContent||'').trim()===expected)}};})()"
+                    "item => (item.textContent||'').trim()===expected)};})()"
                 )
             if isinstance(result, dict) and result.get("matched"):
                 return ExecutionResult(
