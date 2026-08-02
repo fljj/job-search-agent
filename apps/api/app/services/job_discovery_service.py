@@ -83,16 +83,10 @@ def process_job_discovery_batch(
                 None,
             )
             if retryable_reason:
-                retry_backoff_until = _schedule_retry(
-                    record, retryable_reason, current
-                )
+                _schedule_retry(record, retryable_reason, current)
             else:
                 _finish(record, "SKIPPED", reasons)
             counts["skipped"] += 1
-            if retry_backoff_until is not None:
-                _release_deferred_seen_ids(batch, index)
-                counts["skipped"] += len(batch.items[index + 1:])
-                break
             continue
         source = item.detail.job
         record.company_name = source.company_name

@@ -29,6 +29,7 @@ from apps.api.app.services.job_discovery_service import (
     _schedule_retry,
     job_scan_block_reasons,
     mark_retry_target_not_visible,
+    process_job_discovery_batch,
 )
 from packages.browser_worker.models import (
     BrowserJob,
@@ -657,6 +658,90 @@ def test_single_job_retry_does_not_block_other_job_scans() -> None:
         rules,
         datetime.now(UTC),
     ) == []
+
+
+def test_detail_retry_does_not_defer_remaining_batch_or_next_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+    next_scan_at = now + timedelta(minutes=3)
+    retry_record = SimpleNamespace(
+        status="DISCOVERED",
+        reason_codes=[],
+        retry_count=0,
+        next_retry_at=None,
+        prefilter_state="UNKNOWN",
+        prefilter_reason=None,
+    )
+    skipped_record = SimpleNamespace(
+        status="DISCOVERED",
+        reason_codes=[],
+        retry_count=0,
+        next_retry_at=None,
+        prefilter_state="UNKNOWN",
+        prefilter_reason=None,
+    )
+    records = iter([retry_record, skipped_record])
+    monkeypatch.setattr(
+        "apps.api.app.services.job_discovery_service._record_for_item",
+        lambda *_args: next(records),
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.job_discovery_service._effective_rules",
+        lambda *_args: AutomationRules(enabled=True, job_scan_enabled=True),
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.job_discovery_service.job_scan_block_reasons",
+        lambda *_args: [],
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.job_discovery_service._state_event",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "apps.api.app.services.job_discovery_service._event",
+        lambda *_args: None,
+    )
+    session = MagicMock()
+    session.get.return_value = SimpleNamespace()
+    run = SimpleNamespace(
+        id=uuid4(),
+        platform="BOSS",
+        strategy_id=uuid4(),
+        cursor={},
+    )
+    batch = JobDiscoveryBatch(
+        platform=Platform.BOSS,
+        search_key="Java",
+        scroll_position=2,
+        scanned_at=now,
+        next_scan_at=next_scan_at,
+        items=[
+            DiscoveredJob(
+                summary=summary(1),
+                reason_codes=["JOB_DETAIL_NOT_READY"],
+            ),
+            DiscoveredJob(
+                summary=summary(2),
+                reason_codes=["JOB_CLOSED"],
+            ),
+        ],
+        seen_job_ids=["job-1", "job-2"],
+    )
+
+    process_job_discovery_batch(
+        session,
+        run,  # type: ignore[arg-type]
+        batch,
+        provider=MagicMock(),
+        executor=MagicMock(),
+        cdp_url="http://127.0.0.1:9222",
+        now=now,
+    )
+
+    assert retry_record.status == "RETRYABLE"
+    assert skipped_record.status == "SKIPPED"
+    assert run.cursor["job_discovery"]["next_scan_at"] == next_scan_at.isoformat()
 
 
 def test_batch_backoff_releases_current_and_unprocessed_job_ids() -> None:
