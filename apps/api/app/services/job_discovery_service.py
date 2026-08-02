@@ -101,8 +101,11 @@ def process_job_discovery_batch(
         record.prefilter_state = "OBSERVED"
         record.prefilter_reason = "DETAIL_OBSERVED"
         safety = _job_safety_reasons(source)
-        if safety:
-            _finish(record, "SKIPPED", safety)
+        pre_import_safety = [
+            reason for reason in safety if reason != "RECRUITER_UNKNOWN"
+        ]
+        if pre_import_safety:
+            _finish(record, "SKIPPED", pre_import_safety)
             counts["skipped"] += 1
             continue
         _state_event(session, run, item, "IMPORTING")
@@ -128,6 +131,11 @@ def process_job_discovery_batch(
             raise RuntimeError("职位导入后无法读取")
         record.job_id = job.id
         record.content_hash = job.content_hash
+        # 招聘人缺失会影响写入目标核验，但不应让有效职位从职位中心消失。
+        if "RECRUITER_UNKNOWN" in safety:
+            _finish(record, "SKIPPED", ["RECRUITER_UNKNOWN"])
+            counts["skipped"] += 1
+            continue
         duplicate = _duplicate_reason(session, job)
         if duplicate:
             _finish(record, "SKIPPED", [duplicate])

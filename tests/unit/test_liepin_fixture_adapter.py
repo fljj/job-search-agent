@@ -83,7 +83,7 @@ def test_reads_job_detail_with_platform_selector_version() -> None:
 
     assert result.status is SessionStatus.SESSION_READY
     assert result.page_type is PageType.JOB
-    assert result.selector_version == "2026-08-02-v8"
+    assert result.selector_version == "2026-08-02-v9"
     assert result.job is not None
     assert result.job.external_job_id == "job-liepin-1"
     assert result.job.company_name == "示例科技"
@@ -103,6 +103,8 @@ def test_reads_current_liepin_company_and_open_markers() -> None:
     assert result.status is SessionStatus.SESSION_READY
     assert result.job is not None
     assert result.job.company_name == "华天软件"
+    assert result.job.recruiter_name == "姚女士"
+    assert result.job.recruiter_role == "DIRECT_EMPLOYER"
     assert result.job.source_status == "OPEN"
 
 

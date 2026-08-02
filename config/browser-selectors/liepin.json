@@ -1,6 +1,6 @@
 {
   "platform": "LIEPIN",
-  "version": "2026-08-02-v8",
+  "version": "2026-08-02-v9",
   "allowed_hosts": ["c.liepin.com", "www.liepin.com"],
   "session": {
     "login_marker": "#im-c-entry",
@@ -27,8 +27,8 @@
     "work_mode": ".job-properties .work-mode",
     "salary": ".job-apply-content .job-salary",
     "description": ".job-intro-container",
-    "recruiter_on_job": ".recruiter-container .recruiter-name",
-    "recruiter_role_on_job": ".recruiter-container .recruiter-role",
+    "recruiter_on_job": ".recruiter-container .name",
+    "recruiter_role_on_job": ".recruiter-container .title-box > span:first-child",
     "job_open_marker": ".apply-box .btn-main, .job-apply-operate .btn-chat, .recruiter-container .btn-chat",
     "job_closed_marker": ".job-status-closed, .job-detail-status-expired",
     "platform_greeting_dialog": ".im-ui-chat-modal-container",

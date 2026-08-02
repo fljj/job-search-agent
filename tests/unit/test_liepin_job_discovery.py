@@ -40,7 +40,12 @@ def _summary(external_id: str, title: str) -> BrowserJobSummary:
     )
 
 
-def _detail(item: BrowserJobSummary, *, recruiter_role: str = "DIRECT_EMPLOYER") -> ReadResult:
+def _detail(
+    item: BrowserJobSummary,
+    *,
+    recruiter_name: str | None = "李女士",
+    recruiter_role: str = "DIRECT_EMPLOYER",
+) -> ReadResult:
     return ReadResult(
         platform=Platform.LIEPIN,
         status=SessionStatus.SESSION_READY,
@@ -56,7 +61,7 @@ def _detail(item: BrowserJobSummary, *, recruiter_role: str = "DIRECT_EMPLOYER")
             location="济南",
             work_mode="ONSITE",
             salary_text="20K-30K",
-            recruiter_name="李女士",
+            recruiter_name=recruiter_name,
             recruiter_role=recruiter_role,
             description="负责 Java 服务端研发",
             source_status="OPEN",
@@ -185,36 +190,56 @@ def test_regular_liepin_job_still_requires_company_match() -> None:
 @pytest.mark.parametrize(
     (
         "recruiter_role",
+        "recruiter_name",
         "execute_external_actions",
         "expected_reasons",
+        "expected_decided",
         "expected_contacted",
+        "expected_skipped",
+        "expected_status",
     ),
     [
-        ("DIRECT_EMPLOYER", False, ["PROACTIVE_CONTACT_CANDIDATE"], 0),
-        ("DIRECT_EMPLOYER", True, ["GREETING_SENT"], 1),
+        (
+            "DIRECT_EMPLOYER", "李女士", False,
+            ["PROACTIVE_CONTACT_CANDIDATE"], 1, 0, 0, "DECIDED",
+        ),
+        (
+            "DIRECT_EMPLOYER", "李女士", True,
+            ["GREETING_SENT"], 1, 1, 0, "CONTACTED",
+        ),
         (
             "HEADHUNTER",
+            "李女士",
             False,
             [
                 "PROACTIVE_CONTACT_NOT_ELIGIBLE",
                 "HEADHUNTER_PROACTIVE_CONTACT_BLOCKED",
             ],
+            1,
             0,
+            0,
+            "DECIDED",
         ),
         (
-            "HEADHUNTER",
-            True,
-            ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"],
-            0,
+            "HEADHUNTER", "李女士", True,
+            ["HEADHUNTER_PROACTIVE_CONTACT_BLOCKED"], 1, 0, 0, "DECIDED",
+        ),
+        (
+            "UNKNOWN", None, True,
+            ["RECRUITER_UNKNOWN"], 0, 0, 1, "SKIPPED",
         ),
     ],
 )
 def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
     monkeypatch: pytest.MonkeyPatch,
     recruiter_role: str,
+    recruiter_name: str | None,
     execute_external_actions: bool,
     expected_reasons: list[str],
+    expected_decided: int,
     expected_contacted: int,
+    expected_skipped: int,
+    expected_status: str,
 ) -> None:
     item = _summary("liepin-job-1", "Java 后端工程师")
     batch = JobDiscoveryBatch(
@@ -227,7 +252,11 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
         items=[
             DiscoveredJob(
                 summary=item,
-                detail=_detail(item, recruiter_role=recruiter_role),
+                detail=_detail(
+                    item,
+                    recruiter_name=recruiter_name,
+                    recruiter_role=recruiter_role,
+                ),
             )
         ],
     )
@@ -296,9 +325,12 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
         "apps.api.app.services.job_discovery_service._record_for_item",
         lambda *_args: record,
     )
+    import_job = MagicMock(
+        return_value=SimpleNamespace(job=SimpleNamespace(id=job_id))
+    )
     monkeypatch.setattr(
         "apps.api.app.services.job_discovery_service.import_job",
-        lambda *_args, **_kwargs: SimpleNamespace(job=SimpleNamespace(id=job_id)),
+        import_job,
     )
     monkeypatch.setattr(
         "apps.api.app.services.job_discovery_service._duplicate_reason",
@@ -340,12 +372,13 @@ def test_liepin_batch_never_contacts_headhunter_or_writes_in_read_only_mode(
 
     assert counts == {
         "discovered": 1,
-        "decided": 1,
+        "decided": expected_decided,
         "contacted": expected_contacted,
-        "skipped": 0,
+        "skipped": expected_skipped,
     }
-    assert record.status == ("CONTACTED" if expected_contacted else "DECIDED")
+    assert record.status == expected_status
     assert record.reason_codes == expected_reasons
+    import_job.assert_called_once()
     if expected_contacted:
         greet.assert_called_once()
         dispatch.assert_called_once()
