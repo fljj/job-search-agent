@@ -1,5 +1,5 @@
 import {
-  Alert, Button, Card, Descriptions, Form, Input, InputNumber, Select, Space, Switch,
+  Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Select, Space, Switch,
   Table, Tag, Typography, message,
 } from 'antd'
 import { useEffect, useState } from 'react'
@@ -44,6 +44,21 @@ interface OperationsStatus {
 }
 interface StrategyOption { id: string; name: string; enabled: boolean }
 
+const platformOptions = [
+  { value: 'BOSS', label: 'BOSS 直聘' },
+  { value: 'MAIMAI', label: '脉脉' },
+  { value: 'LIEPIN', label: '猎聘' },
+  { value: 'MOCK', label: '本地模拟' },
+]
+
+const defaultSetting: SettingForm = {
+  scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
+  auto_greet_enabled: false, auto_reply_enabled: false, auto_resume_enabled: false,
+  maimai_recommendation_enabled: false, maimai_recommendation_resume_enabled: false,
+  emergency_stop: false, job_scan_enabled: false, company_cooldown_hours: 24,
+  recruiter_cooldown_hours: 24, work_start_hour: 8, work_end_hour: 22,
+}
+
 function cursorSummary(cursor: Record<string, unknown>): string {
   const job = cursor.job_discovery
   const messageCursor = cursor.message_discovery
@@ -74,6 +89,8 @@ export function AutomationPage() {
   const [operations, setOperations] = useState<OperationsStatus>()
   const [strategies, setStrategies] = useState<StrategyOption[]>([])
   const [settings, setSettings] = useState<SettingForm[]>([])
+  const [settingScopeType, setSettingScopeType] = useState<SettingForm['scope_type']>('GLOBAL')
+  const [settingScopeKey, setSettingScopeKey] = useState('GLOBAL')
   const currentWorkers = activeWorkers(operations?.workers)
   const showRequestError = (error: unknown) =>
     message.error(error instanceof Error ? error.message : '操作失败，请稍后重试')
@@ -128,13 +145,30 @@ export function AutomationPage() {
     ])
     message.success('自动化配置已保存')
   }
-  const selectScope = (scopeType: SettingForm['scope_type']) => {
-    const scopeKey = scopeType === 'GLOBAL' ? 'GLOBAL'
-      : scopeType === 'PLATFORM' ? platform : strategyId
+  const showScopeSetting = (scopeType: SettingForm['scope_type'], scopeKey: string) => {
     const existing = settings.find(
       (item) => item.scope_type === scopeType && item.scope_key === scopeKey,
     )
-    form.setFieldsValue(existing ?? { scope_type: scopeType, scope_key: scopeKey })
+    const globalSetting = settings.find(
+      (item) => item.scope_type === 'GLOBAL' && item.scope_key === 'GLOBAL',
+    )
+    form.setFieldsValue({
+      ...defaultSetting,
+      ...(scopeType === 'GLOBAL' ? globalSetting : existing ?? globalSetting),
+      scope_type: scopeType,
+      scope_key: scopeKey,
+    })
+  }
+  const selectScope = (scopeType: SettingForm['scope_type']) => {
+    const scopeKey = scopeType === 'GLOBAL' ? 'GLOBAL'
+      : scopeType === 'PLATFORM' ? 'BOSS' : strategies[0]?.id ?? ''
+    setSettingScopeType(scopeType)
+    setSettingScopeKey(scopeKey)
+    showScopeSetting(scopeType, scopeKey)
+  }
+  const selectScopeKey = (scopeKey: string) => {
+    setSettingScopeKey(scopeKey)
+    showScopeSetting(settingScopeType, scopeKey)
   }
   const saveLlm = async () => {
     const provider = selectedProvider?.trim()
@@ -172,8 +206,8 @@ export function AutomationPage() {
     await api('/automation/operations/reconciliation/run', { method: 'POST' })
     await load(); message.success('已执行一轮安全对账')
   }
-  return <Space direction="vertical" style={{ width: '100%' }} size="large">
-    <Alert type="info" showIcon message="无人值守运行仍受服务端安全门禁控制"
+  return <Space orientation="vertical" style={{ width: '100%' }} size="large">
+    <Alert type="info" showIcon title="无人值守运行仍受服务端安全门禁控制"
       description="Agent 启用后直接按正式配置自动发现职位和消息、判断是否沟通并按条件发送简历；平台验证异常、未知结果和电话面试时间仍按安全规则处理。" />
 
     <Card title="LLM 配置状态">
@@ -201,7 +235,8 @@ export function AutomationPage() {
           placeholder="输入模型名称"
           onChange={(event) => setModelInput(event.target.value)} />
         <InputNumber aria-label="LLM 超时时间" min={1} max={300} value={timeoutInput}
-          addonAfter="秒" onChange={(value) => value !== null && setTimeoutInput(value)} />
+          onChange={(value) => value !== null && setTimeoutInput(value)} />
+        <Typography.Text>秒</Typography.Text>
         <Button type="primary" loading={savingLlm}
           disabled={!selectedProvider || !modelInput.trim()
             || (selectedProvider === llm?.provider && modelInput.trim() === llm?.model
@@ -238,14 +273,10 @@ export function AutomationPage() {
 
     <Card title="平台任务管理（高级）">
       <Alert type="info" showIcon style={{ marginBottom: 16 }}
-        message="这里管理各平台的期望运行状态"
+        title="这里管理各平台的期望运行状态"
         description="启动平台任务后，还需 Worker 和浏览器会话正常才会实际执行。平台页面断开请到总览执行重新连接。" />
       <Space wrap style={{ marginBottom: 16 }}>
-        <Select value={platform} onChange={setPlatform} options={[
-          { value: 'BOSS', label: 'BOSS' }, { value: 'MAIMAI', label: '脉脉' },
-          { value: 'LIEPIN', label: '猎聘' },
-          { value: 'MOCK', label: '本地模拟' },
-        ]} />
+        <Select value={platform} onChange={setPlatform} options={platformOptions} />
         <Select style={{ width: 360 }} value={strategyId || undefined} onChange={setStrategyId}
           placeholder="选择已启用策略" options={strategies.map((item) => ({
             value: item.id, label: item.name,
@@ -296,39 +327,74 @@ export function AutomationPage() {
       ]} />
     </Card>
 
-    <Card title="自动化范围配置"><Form form={form} layout="vertical"
+    <Card title="自动化范围配置">
+      <Alert type="info" showIcon style={{ marginBottom: 16 }}
+        title="平台和策略配置与全局配置共同生效"
+        description="全局配置是基础权限；平台和策略配置只能进一步暂停或收紧能力，不能绕过全局关闭的开关。关闭临时暂停后，如平台任务仍显示已暂停，请在上方点击恢复。" />
+      <Space wrap align="start">
+        <div>
+          <Typography.Text strong>配置对象</Typography.Text>
+          <div><Select aria-label="配置范围" style={{ width: 180, marginTop: 8 }}
+            value={settingScopeType} onChange={selectScope} options={[
+              { value: 'GLOBAL', label: '全部平台（全局）' },
+              { value: 'PLATFORM', label: '指定平台' },
+              { value: 'STRATEGY', label: '指定求职策略' },
+            ]} /></div>
+        </div>
+        {settingScopeType === 'PLATFORM' && <div>
+          <Typography.Text strong>选择平台</Typography.Text>
+          <div><Select aria-label="配置平台" style={{ width: 180, marginTop: 8 }}
+            value={settingScopeKey} onChange={selectScopeKey} options={platformOptions} /></div>
+        </div>}
+        {settingScopeType === 'STRATEGY' && <div>
+          <Typography.Text strong>选择策略</Typography.Text>
+          <div><Select aria-label="配置策略" style={{ width: 280, marginTop: 8 }}
+            value={settingScopeKey || undefined} onChange={selectScopeKey}
+            placeholder="选择已启用策略" options={strategies.map((item) => ({
+              value: item.id, label: item.name,
+            }))} /></div>
+        </div>}
+      </Space>
+      <Divider />
+      <Form form={form} layout="vertical"
       onFinish={(value) => void save(value).catch(showRequestError)}
-      initialValues={{ scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: false, paused: false,
-        auto_greet_enabled: false, auto_reply_enabled: false,
-        auto_resume_enabled: false, maimai_recommendation_enabled: false,
-        maimai_recommendation_resume_enabled: false,
-        emergency_stop: false, job_scan_enabled: false, company_cooldown_hours: 24,
-        recruiter_cooldown_hours: 24, work_start_hour: 8, work_end_hour: 22 }}>
-      <Form.Item name="scope_type" label="范围"><Select onChange={selectScope} options={[
-        { value: 'GLOBAL', label: '全局' }, { value: 'PLATFORM', label: '平台' },
-        { value: 'STRATEGY', label: '策略' },
-      ]} /></Form.Item>
-      <Form.Item name="scope_key" label="范围标识" rules={[{ required: true }]}><Input /></Form.Item>
-      <Space wrap>
-        <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="paused" label="暂停" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="auto_greet_enabled" label="自动招呼" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="auto_reply_enabled" label="自动回复" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="auto_resume_enabled" label="自动简历" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="maimai_recommendation_enabled" label="脉脉推荐处理" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="maimai_recommendation_resume_enabled" label="脉脉推荐同意简历" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="job_scan_enabled" label="主动扫描职位" valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="emergency_stop" label="紧急停止" valuePropName="checked">
-          <Switch aria-label="紧急停止" />
-        </Form.Item>
-      </Space>
-      <Space wrap>
-        <Form.Item name="company_cooldown_hours" label="公司冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
-        <Form.Item name="recruiter_cooldown_hours" label="招聘人冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
-        <Form.Item name="work_start_hour" label="工作开始小时"><InputNumber min={0} max={23} /></Form.Item>
-        <Form.Item name="work_end_hour" label="工作结束小时"><InputNumber min={1} max={24} /></Form.Item>
-      </Space>
-      <Button type="primary" htmlType="submit">保存配置</Button>
-    </Form></Card>
+      initialValues={defaultSetting}>
+      <Form.Item name="scope_type" hidden><Input /></Form.Item>
+      <Form.Item name="scope_key" hidden rules={[{ required: true }]}><Input /></Form.Item>
+      <Card size="small" title="运行控制">
+        <Space wrap size="large">
+          <Form.Item name="enabled" label="允许运行" valuePropName="checked"
+            extra="关闭后，该范围内所有自动化停止"><Switch aria-label="允许运行" /></Form.Item>
+          <Form.Item name="paused" label="临时暂停" valuePropName="checked"
+            extra="保留配置，暂时停止自动化"><Switch aria-label="临时暂停" /></Form.Item>
+          <Form.Item name="emergency_stop" label="紧急停止" valuePropName="checked"
+            extra="安全异常时立即阻止所有动作">
+            <Switch aria-label="紧急停止" />
+          </Form.Item>
+        </Space>
+      </Card>
+      <Card size="small" title="自动处理能力" style={{ marginTop: 16 }}>
+        <Space wrap size="large">
+          <Form.Item name="job_scan_enabled" label="发现新职位" valuePropName="checked"><Switch /></Form.Item>
+          <Form.Item name="auto_greet_enabled" label="主动招呼" valuePropName="checked"><Switch /></Form.Item>
+          <Form.Item name="auto_reply_enabled" label="自动回复" valuePropName="checked"><Switch /></Form.Item>
+          <Form.Item name="auto_resume_enabled" label="自动发送简历" valuePropName="checked"><Switch /></Form.Item>
+          {(settingScopeType !== 'PLATFORM' || settingScopeKey === 'MAIMAI') && <>
+            <Form.Item name="maimai_recommendation_enabled" label="处理脉脉推荐（仅脉脉）" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name="maimai_recommendation_resume_enabled" label="同意脉脉推荐简历（仅脉脉）" valuePropName="checked"><Switch /></Form.Item>
+          </>}
+        </Space>
+      </Card>
+      <Card size="small" title="运行时段与冷却" style={{ marginTop: 16 }}>
+        <Space wrap size="large">
+          <Form.Item name="company_cooldown_hours" label="同公司冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
+          <Form.Item name="recruiter_cooldown_hours" label="同招聘人冷却（小时）"><InputNumber min={0} max={720} /></Form.Item>
+          <Form.Item name="work_start_hour" label="每天开始时间（时）"><InputNumber min={0} max={23} /></Form.Item>
+          <Form.Item name="work_end_hour" label="每天结束时间（时）"><InputNumber min={1} max={24} /></Form.Item>
+        </Space>
+      </Card>
+      <Button type="primary" htmlType="submit" style={{ marginTop: 16 }}>保存配置</Button>
+      </Form>
+    </Card>
   </Space>
 }

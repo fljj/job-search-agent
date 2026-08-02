@@ -80,6 +80,16 @@ def test_reads_job_list_with_cursor_then_job_detail() -> None:
         assert result.job.recruiter_name == "张招聘"
 
 
+def test_reads_remote_work_mode_from_boss_keyword_tags() -> None:
+    with fixture_page("job-detail-remote-keyword.html") as page:
+        result = read_fixture(page)
+
+        assert result.status is SessionStatus.SESSION_READY
+        assert result.page_type is PageType.JOB
+        assert result.job
+        assert result.job.work_mode == "REMOTE"
+
+
 def test_reads_conversation_list_and_message_direction() -> None:
     with fixture_page("conversation-list.html") as page:
         result = read_fixture(page)

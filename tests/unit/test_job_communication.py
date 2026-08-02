@@ -59,15 +59,39 @@ def test_job_communication_links_existing_conversation() -> None:
 
 
 def test_skipped_discovery_is_not_presented_as_ready_to_contact() -> None:
+    decision_id = uuid4()
     result = _build_communication_summary(
-        cast(db.JobDecision, SimpleNamespace(automation_eligible=True)),
+        cast(db.JobDecision, SimpleNamespace(
+            id=decision_id, automation_eligible=True, rejection_reasons=[]
+        )),
         None,
         None,
         cast(
             db.JobDiscoveryRecord,
-            SimpleNamespace(status="SKIPPED", reason_codes=["WORK_MODE_UNKNOWN"]),
+            SimpleNamespace(
+                status="SKIPPED", reason_codes=["WORK_MODE_UNKNOWN"],
+                job_decision_id=decision_id,
+            ),
         ),
     )
 
     assert result["status"] == "NOT_CONTACTED"
     assert result["reason_codes"] == ["WORK_MODE_UNKNOWN"]
+
+
+def test_job_communication_ignores_stale_discovery_reason_after_reassessment() -> None:
+    result = _build_communication_summary(
+        cast(db.JobDecision, SimpleNamespace(
+            id=uuid4(), automation_eligible=False,
+            rejection_reasons=[{"rule_code": "SALARY_BELOW_CONTACT_THRESHOLD"}],
+        )),
+        None,
+        None,
+        cast(db.JobDiscoveryRecord, SimpleNamespace(
+            status="SKIPPED", reason_codes=["ONSITE_LOCATION_NOT_ALLOWED"],
+            job_decision_id=uuid4(),
+        )),
+    )
+
+    assert result["status"] == "NOT_CONTACTED"
+    assert result["reason_codes"] == ["SALARY_BELOW_CONTACT_THRESHOLD"]

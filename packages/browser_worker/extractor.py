@@ -193,7 +193,12 @@ def _extract_job(
         else ("OPEN" if page.exists(selectors.job_open_marker) else "UNKNOWN")
     )
     location = page.text(selectors.location)
-    work_mode = _normalize_work_mode(page.text(selectors.work_mode))
+    work_mode_evidence = "\n".join(
+        value
+        for element in page.elements(selectors.work_mode)
+        if (value := element.text(""))
+    ) or page.text(selectors.work_mode)
+    work_mode = _normalize_work_mode(work_mode_evidence)
     if work_mode == "UNKNOWN":
         # BOSS 等平台常把“居家办公”只写在 JD 末尾，标题和属性栏不一定标注。
         work_mode = _normalize_work_mode(f"{title}\n{description}")

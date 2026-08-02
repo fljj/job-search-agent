@@ -36,14 +36,24 @@ function mockAutomationApi() {
     if (path === '/automation/actions') return { items: [] }
     if (path === '/automation/operations/status') return operations
     if (path === '/strategies?enabled=true') return { items: [{ id: 'strategy-1', name: '主策略', enabled: true }] }
-    if (path === '/automation/settings') return { items: [{
-      scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: true, paused: true,
-      auto_greet_enabled: true, auto_reply_enabled: true,
-      auto_resume_enabled: true, maimai_recommendation_enabled: true,
-      maimai_recommendation_resume_enabled: true, emergency_stop: true,
-      job_scan_enabled: true, company_cooldown_hours: 24, recruiter_cooldown_hours: 24,
-      work_start_hour: 8, work_end_hour: 22,
-    }] }
+    if (path === '/automation/settings') return { items: [
+      {
+        scope_type: 'GLOBAL', scope_key: 'GLOBAL', enabled: true, paused: false,
+        auto_greet_enabled: true, auto_reply_enabled: true,
+        auto_resume_enabled: true, maimai_recommendation_enabled: true,
+        maimai_recommendation_resume_enabled: true, emergency_stop: true,
+        job_scan_enabled: true, company_cooldown_hours: 24, recruiter_cooldown_hours: 24,
+        work_start_hour: 8, work_end_hour: 22,
+      },
+      {
+        scope_type: 'PLATFORM', scope_key: 'LIEPIN', enabled: true, paused: true,
+        auto_greet_enabled: true, auto_reply_enabled: true,
+        auto_resume_enabled: true, maimai_recommendation_enabled: true,
+        maimai_recommendation_resume_enabled: true, emergency_stop: false,
+        job_scan_enabled: true, company_cooldown_hours: 24, recruiter_cooldown_hours: 24,
+        work_start_hour: 8, work_end_hour: 22,
+      },
+    ] }
     return {}
   })
 }
@@ -76,6 +86,30 @@ describe('AutomationPage', () => {
       expect.objectContaining({
         method: 'PUT',
         body: expect.stringContaining('"emergency_stop":false'),
+      }),
+    ))
+  })
+
+  it('平台配置通过平台名称选择，不需要填写内部范围标识', async () => {
+    const user = userEvent.setup()
+    render(<AutomationPage />)
+    await screen.findByText('boss-worker:RUNNING')
+
+    expect(screen.queryByText('范围标识')).toBeNull()
+    await user.click(screen.getByLabelText('配置范围'))
+    await user.click(await screen.findByTitle('指定平台'))
+    await user.click(screen.getByLabelText('配置平台'))
+    await user.click(await screen.findByTitle('猎聘'))
+    expect(screen.getByLabelText('临时暂停').getAttribute('aria-checked')).toBe('true')
+
+    await user.click(screen.getByLabelText('临时暂停'))
+    await user.click(screen.getByRole('button', { name: '保存配置' }))
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith(
+      '/automation/settings',
+      expect.objectContaining({
+        method: 'PUT',
+        body: expect.stringContaining('"scope_type":"PLATFORM","scope_key":"LIEPIN"'),
       }),
     ))
   })

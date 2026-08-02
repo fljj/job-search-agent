@@ -517,6 +517,16 @@ def _build_communication_summary(
     action: db.ActionQueue | None,
     record: db.JobDiscoveryRecord | None,
 ) -> dict[str, object]:
+    record_decision_id = getattr(record, "job_decision_id", None)
+    latest_decision_id = getattr(latest_decision, "id", None)
+    record_is_stale = bool(
+        record is not None
+        and latest_decision is not None
+        and record_decision_id is not None
+        and latest_decision_id is not None
+        and record_decision_id != latest_decision_id
+    )
+    effective_record = None if record_is_stale else record
     if conversation is not None:
         status = "CONVERSATION_ACTIVE"
     elif action is not None and action.status == "SUCCEEDED":
@@ -533,19 +543,24 @@ def _build_communication_summary(
         status = "GREETING_IN_PROGRESS"
     elif action is not None:
         status = "GREETING_FAILED"
-    elif record is not None and record.status == "SKIPPED":
+    elif effective_record is not None and effective_record.status == "SKIPPED":
         status = "NOT_CONTACTED"
     elif latest_decision is not None and latest_decision.automation_eligible:
         status = "READY_TO_CONTACT"
     else:
         status = "NOT_CONTACTED"
+    reason_codes = effective_record.reason_codes if effective_record else [
+        str(item["rule_code"])
+        for item in (getattr(latest_decision, "rejection_reasons", None) or [])
+        if isinstance(item, dict) and item.get("rule_code")
+    ]
     return {
         "status": status,
         "conversation_id": conversation.id if conversation else None,
         "action_id": action.id if action else None,
         "action_status": action.status if action else None,
         "failure_code": action.failure_code if action else None,
-        "reason_codes": record.reason_codes if record else [],
+        "reason_codes": reason_codes,
     }
 
 
