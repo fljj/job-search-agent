@@ -37,7 +37,8 @@ def route_reply(content: str, context: ReplyRouteContext) -> RoutedReply:
     for result in rule_results:
         if result is not None:
             return RoutedReply(ReplySource.RULE_TEMPLATE, result)
-    knowledge_result = build_profile_answer(content, context.candidate_knowledge)
-    if knowledge_result is not None:
-        return RoutedReply(ReplySource.KNOWLEDGE_BASE, knowledge_result)
+    # 知识库只提供可信事实，不直接拼接对招聘方的自然语言回复。
+    # 命中知识问题后仍交给 LLM 结合当前消息和对话历史组织表达。
+    if build_profile_answer(content, context.candidate_knowledge) is not None:
+        return RoutedReply(ReplySource.LLM, None)
     return RoutedReply(ReplySource.LLM, None)

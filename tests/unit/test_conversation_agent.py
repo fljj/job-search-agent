@@ -9,6 +9,7 @@ from apps.api.app.models import entities as db
 from apps.api.app.services.conversation_service import (
     _full_time_education_reply,
     _is_ignored_platform_event,
+    _relevant_reply_facts,
     _safe_job_detail_clarification,
 )
 from packages.conversation_agent.generator import generate_greeting, generate_reply
@@ -108,6 +109,17 @@ def test_missing_fact_never_invents_answer() -> None:
     result = generate_reply("你做过什么区块链项目？", [], ConversationPolicyConfig())
     assert result.decision is Decision.ALLOW_AUTO
     assert result.content == "这部分信息我需要确认一下，稍后回复您。"
+
+
+def test_reply_facts_are_filtered_by_llm_classified_intent() -> None:
+    employment = fact(category="EMPLOYMENT", key="最近一份工作", fact="最近在交易所工作")
+    project = fact(category="PROJECT", key="认证平台", fact="参与 OAuth2 平台建设")
+
+    selected = _relevant_reply_facts(
+        [project, employment], [Intent.WORK_EXPERIENCE]
+    )
+
+    assert selected == [employment]
 
 
 def test_sensitive_question_uses_safe_automatic_path() -> None:

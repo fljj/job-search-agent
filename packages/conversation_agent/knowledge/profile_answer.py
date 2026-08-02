@@ -32,6 +32,10 @@ def build_profile_answer(content: str, knowledge: CandidateKnowledge | None) -> 
         facts = _matching_facts(knowledge.facts, ("PROJECT", "PROJECT_EXPERIENCE", "项目"))
         if facts:
             return _facts_result(facts, Intent.PROJECT_EXPERIENCE, "KNOWLEDGE_PROJECT_REPLY")
+    if any(term in content for term in ("最近一份", "上一份工作", "上家公司")):
+        facts = _matching_facts(knowledge.facts, ("EMPLOYMENT", "WORK_EXPERIENCE", "工作经历"))
+        if facts:
+            return _facts_result(facts, Intent.WORK_EXPERIENCE, "KNOWLEDGE_EMPLOYMENT_REPLY")
     if any(term in content.lower() for term in ("技术栈", "技术经验", "擅长技术", "java经验")):
         if knowledge.skills:
             descriptions = [

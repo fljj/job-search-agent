@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 from urllib.request import Request
 from uuid import uuid4
 
@@ -155,6 +155,111 @@ def test_boss_message_page_is_reopened_when_missing(
     assert isinstance(request, Request)
     assert request.get_method() == "PUT"
     assert "/json/new?https://www.zhipin.com/web/geek/chat" in request.full_url
+
+
+def test_completed_message_scan_restores_list_to_latest_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = BossMessageDiscoveryAdapter(get_browser_selectors())
+    page = MagicMock()
+    reader = MagicMock()
+    reader.__enter__.return_value = page
+    reader.__exit__.return_value = None
+    restore_latest = MagicMock()
+    monkeypatch.setattr(adapter, "_find_list_target", lambda _url: "ws://fixture")
+    monkeypatch.setattr(adapter, "_restore_latest_messages", restore_latest)
+    monkeypatch.setattr(
+        "adapters.browser.message_discovery.RawCdpPageReader",
+        lambda _url: reader,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.message_discovery.extract_conversation_list",
+        lambda *_args: ReadResult(
+            platform=Platform.BOSS,
+            status=SessionStatus.SESSION_READY,
+            page_type=PageType.CONVERSATION_LIST,
+            page_url="https://www.zhipin.com/web/geek/chat",
+            page_title="消息",
+            content_hash="a" * 64,
+            selector_version="fixture",
+        ),
+    )
+
+    batch = adapter.scan(
+        "http://127.0.0.1:9222",
+        partition="ALL",
+        scroll_position=0,
+        limit=10,
+    )
+
+    assert batch.exhausted is True
+    assert restore_latest.call_args_list == [
+        call(page),
+        call(page),
+    ]
+
+
+def test_partial_message_window_does_not_replace_virtual_list_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = BossMessageDiscoveryAdapter(get_browser_selectors())
+    page = MagicMock()
+    reader = MagicMock()
+    reader.__enter__.return_value = page
+    reader.__exit__.return_value = None
+    restore_latest = MagicMock()
+    scroll_list = MagicMock()
+    monkeypatch.setattr(adapter, "_find_list_target", lambda _url: "ws://fixture")
+    monkeypatch.setattr(adapter, "_restore_latest_messages", restore_latest)
+    monkeypatch.setattr(adapter, "_scroll_list", scroll_list)
+    monkeypatch.setattr(adapter, "_open_and_read", MagicMock(side_effect=lambda *_args, **_kwargs: DiscoveredConversation(summary=_args[1])))
+    monkeypatch.setattr(
+        "adapters.browser.message_discovery.RawCdpPageReader",
+        lambda _url: reader,
+    )
+    monkeypatch.setattr(
+        "adapters.browser.message_discovery.extract_conversation_list",
+        lambda *_args: ReadResult(
+            platform=Platform.BOSS,
+            status=SessionStatus.SESSION_READY,
+            page_type=PageType.CONVERSATION_LIST,
+            page_url="https://www.zhipin.com/web/geek/chat",
+            page_title="消息",
+            content_hash="a" * 64,
+            selector_version="fixture",
+            conversations=[summary(index) for index in range(20)],
+        ),
+    )
+
+    batch = adapter.scan(
+        "http://127.0.0.1:9222",
+        partition="ALL",
+        scroll_position=0,
+        limit=10,
+    )
+
+    assert batch.exhausted is False
+    assert batch.scroll_position == 10
+    assert restore_latest.call_args_list == [call(page)]
+    assert scroll_list.call_args_list == []
+
+
+def test_latest_message_restore_repeats_until_virtual_list_reaches_top(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = BossMessageDiscoveryAdapter(get_browser_selectors())
+    page = MagicMock()
+    page._evaluate.side_effect = [1251, 0]
+    scroll_list = MagicMock()
+    monkeypatch.setattr(adapter, "_scroll_list", scroll_list)
+    monkeypatch.setattr("adapters.browser.message_discovery.time.sleep", MagicMock())
+
+    adapter._restore_latest_messages(page)
+
+    assert scroll_list.call_args_list == [
+        call(page, to_end=False),
+        call(page, to_end=False),
+    ]
 
 
 def test_location_consent_uses_strategy_onsite_locations() -> None:

@@ -1297,14 +1297,17 @@ def _build_decision_reply(
     ).data
     classification.intents = normalize_intents(message.content, classification.intents)
     message.intents = [intent.value for intent in classification.intents]
-    usable = [
-        fact
-        for fact in facts
-        if fact.id
-        and fact.allowed_for_auto_reply
-        and fact.sensitivity.value == "NORMAL"
-        and fact.is_current(datetime.now(UTC))
-    ][:20]
+    usable = _relevant_reply_facts(
+        [
+            fact
+            for fact in facts
+            if fact.id
+            and fact.allowed_for_auto_reply
+            and fact.sensitivity.value == "NORMAL"
+            and fact.is_current(datetime.now(UTC))
+        ],
+        classification.intents,
+    )
     generated: GeneratedMessage | None = None
     if usable and not {"SENSITIVE", "INTERVIEW_TIME"}.intersection(message.intents):
         generated = _call_llm(
@@ -1360,6 +1363,31 @@ def _build_decision_reply(
         get_conversation_policy(),
         now=datetime.now(UTC),
     )
+
+
+def _relevant_reply_facts(
+    facts: list[KnowledgeFact], intents: list[Intent]
+) -> list[KnowledgeFact]:
+    """只向回复模型提供与已识别问题相关的可信事实。"""
+    category_terms: set[str] = set()
+    intent_categories = {
+        Intent.WORK_EXPERIENCE: {"PROFILE", "EMPLOYMENT", "WORK_EXPERIENCE", "工作经历"},
+        Intent.PROJECT_EXPERIENCE: {"PROJECT", "PROJECT_EXPERIENCE", "项目"},
+        Intent.TECH_STACK: {"SKILL", "TECH", "技术"},
+        Intent.MANAGEMENT_EXPERIENCE: {"PROFILE", "MANAGEMENT", "管理"},
+        Intent.EDUCATION: {"EDUCATION", "学历"},
+    }
+    for intent in intents:
+        category_terms.update(intent_categories.get(intent, set()))
+    if category_terms:
+        relevant = [
+            fact
+            for fact in facts
+            if any(term in fact.category.upper() for term in category_terms)
+        ]
+        if relevant:
+            return relevant[:8]
+    return facts[:8]
 
 
 def _recent_conversation_context(

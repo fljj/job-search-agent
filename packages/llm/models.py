@@ -102,7 +102,7 @@ class ReplyRequest(BaseModel):
 
 
 class GeneratedMessage(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(min_length=1, max_length=120)
     fact_ids: list[UUID] = Field(default_factory=list)
     confidence: Decimal = Field(ge=0, le=1)
     risk_codes: list[str] = Field(default_factory=list)

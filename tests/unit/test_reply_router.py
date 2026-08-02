@@ -21,13 +21,24 @@ def _knowledge() -> CandidateKnowledge:
         verified_at=datetime.now(UTC),
         version=1,
     )
+    employment = KnowledgeFact(
+        id=uuid4(),
+        category="EMPLOYMENT",
+        key="最近一份工作",
+        fact="是的，我最近一份工作是在某数字资产交易平台，主要负责后端开发",
+        source="candidate_resume",
+        allowed_for_auto_reply=True,
+        sensitivity="NORMAL",
+        verified_at=datetime.now(UTC),
+        version=1,
+    )
     return CandidateKnowledge(
         name="测试候选人",
         total_years=Decimal("10"),
         management_years=Decimal("2"),
         profile_id=uuid4(),
         skills=[(uuid4(), "Java", Decimal("8"))],
-        facts=[project],
+        facts=[project, employment],
     )
 
 
@@ -112,12 +123,18 @@ def test_work_mode_question_uses_rule_reply() -> None:
     assert "远程" in routed.result.content
 
 
-def test_knowledge_reply_precedes_llm() -> None:
+def test_knowledge_question_routes_to_llm() -> None:
     routed = route_reply("请介绍一下你的项目经验", _context())
 
-    assert routed.source is ReplySource.KNOWLEDGE_BASE
-    assert routed.result is not None
-    assert "OAuth2" in routed.result.content
+    assert routed.source is ReplySource.LLM
+    assert routed.result is None
+
+
+def test_recent_employment_question_routes_to_llm() -> None:
+    routed = route_reply("你好，最近一份是个交易所吗？", _context())
+
+    assert routed.source is ReplySource.LLM
+    assert routed.result is None
 
 
 def test_unmatched_message_routes_to_llm() -> None:

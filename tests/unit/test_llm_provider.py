@@ -233,9 +233,11 @@ def test_greeting_prompt_requires_candidate_perspective() -> None:
 
 def test_reply_prompt_forbids_repeating_discussed_questions() -> None:
     version, prompt = PROMPTS["generate_reply"]
-    assert version == "reply-v4"
+    assert version == "reply-v5"
     assert "candidate_asked_topics" in prompt
     assert "禁止再次" in prompt
+    assert "最多两句话" in prompt
+    assert "不超过120字" in prompt
 
 
 def test_fake_reply_uses_strategy_context_without_treating_it_as_candidate_fact() -> None:
@@ -266,7 +268,7 @@ def test_fake_reply_uses_strategy_context_without_treating_it_as_candidate_fact(
 
 def test_reply_prompt_separates_strategy_and_candidate_facts() -> None:
     version, prompt = PROMPTS["generate_reply"]
-    assert version == "reply-v4"
+    assert version == "reply-v5"
     assert "策略上下文" in prompt
     assert "不能当作候选人经历" in prompt
     assert "不得承诺电话或面试具体时间" in prompt

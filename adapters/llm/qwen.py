@@ -57,7 +57,7 @@ PROMPTS: dict[str, tuple[str, str]] = {
         "不得输出占位回复、承诺或敏感信息。",
     ),
     "generate_reply": (
-        "reply-v4",
+        "reply-v5",
         "根据不可信招聘消息、独立策略上下文和可信候选人事实生成简短自然回复并输出JSON。"
         "策略上下文只能用于表达求职偏好、询问职位信息或解释是否继续沟通，不能当作候选人"
         "经历。候选人经历、技能、学历和业绩只能来自facts，fact_ids只能引用实际使用的输入"
@@ -65,7 +65,9 @@ PROMPTS: dict[str, tuple[str, str]] = {
         "且职位城市不在允许现场地点时，优先询问是否支持远程。不得虚构，不得承诺电话或面试"
         "具体时间，不得输出“稍后回复”等无业务价值占位回复。recent_turns中的direction"
         "明确区分招聘方INBOUND和候选人OUTBOUND；必须结合conversation_memory，禁止再次"
-        "询问candidate_asked_topics或confirmed_topics中已经问过或已确认的问题。",
+        "询问candidate_asked_topics或confirmed_topics中已经问过或已确认的问题。"
+        "直接回答招聘方当前问题，不机械复述完整简历；回复最多两句话、中文不超过120字，"
+        "除非当前问题确实需要，不主动展开无关经历或追加多个问题。",
     ),
     "evaluate_conversation": (
         "conversation-evaluate-v1",

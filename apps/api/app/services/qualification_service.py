@@ -49,6 +49,20 @@ def refresh_qualification(
         candidates,
         key=lambda item: (rank[item[0]], -item[2].priority),
     )
+    current_decision = (
+        session.get(db.JobDecision, conversation.latest_job_decision_id)
+        if conversation.latest_job_decision_id
+        else None
+    )
+    if (
+        status is QualificationStatus.MISMATCH
+        and evidence == ["JOB_DIRECTION_CONFLICT"]
+        and current_decision is not None
+        and current_decision.decision == "CONTACT"
+        and not current_decision.hard_rejected
+    ):
+        status = QualificationStatus.ROUGH_MATCH
+        evidence = ["CONTACT_DECISION_SUPPORTS_DIRECTION"]
     if (
         conversation.strategy_id is None
         or conversation.qualification_status

@@ -74,6 +74,8 @@ class MessageDiscoveryAdapter:
         excluded = set(excluded_conversation_ids or [])
         websocket_url = self._find_list_target(cdp_url)
         with RawCdpPageReader(websocket_url) as page:
+            if scroll_position == 0:
+                self._restore_latest_messages(page)
             listing = extract_conversation_list(
                 page, self.platform, self.selectors, self.selectors.version
             )
@@ -114,18 +116,16 @@ class MessageDiscoveryAdapter:
                 )
                 for item in candidates
             ]
-            page._evaluate(
-                "(() => { const element = document.querySelector("
-                f"{json.dumps(self.selectors.conversation_list_root)}); "
-                "if (!element) return false; element.scrollTop = element.scrollHeight; "
-                "element.dispatchEvent(new Event('scroll', {bubbles: true})); return true; })()"
-            )
             next_position = min(len(eligible), scroll_position + limit)
             updated_seen = [
                 *stable_seen_message_keys,
                 *_attempted_message_keys(candidates, discovered),
             ]
             exhausted = next_position >= len(eligible) and not listing.cursor
+            if exhausted:
+                self._restore_latest_messages(page)
+            elif next_position >= len(eligible):
+                self._scroll_list(page, to_end=True)
             return MessageDiscoveryBatch(
                 platform=self.platform,
                 partition=partition,
@@ -136,6 +136,27 @@ class MessageDiscoveryAdapter:
                 seen_message_keys=list(dict.fromkeys(updated_seen))[-500:],
                 exhausted=exhausted,
             )
+
+    def _restore_latest_messages(self, page: RawCdpPageReader) -> None:
+        for _ in range(8):
+            self._scroll_list(page, to_end=False)
+            time.sleep(0.5)
+            position = page._evaluate(
+                "(() => { const element = document.querySelector("
+                f"{json.dumps(self.selectors.conversation_list_root)}); "
+                "return element?.scrollTop ?? null; })()"
+            )
+            if position is None or float(position) <= 1:
+                return
+
+    def _scroll_list(self, page: RawCdpPageReader, *, to_end: bool) -> None:
+        target = "element.scrollHeight" if to_end else "0"
+        page._evaluate(
+            "(() => { const element = document.querySelector("
+            f"{json.dumps(self.selectors.conversation_list_root)}); "
+            f"if (!element) return false; element.scrollTop = {target}; "
+            "element.dispatchEvent(new Event('scroll', {bubbles: true})); return true; })()"
+        )
 
     def _find_list_target(self, cdp_url: str) -> str:
         matches = self._matching_list_targets(cdp_url)
